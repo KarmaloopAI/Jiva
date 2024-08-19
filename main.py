@@ -1,6 +1,7 @@
 # main.py
 
 import os
+import time
 from typing import Dict, Any
 from core.agent import Agent
 from actions.action_registry import get_file_actions
@@ -17,13 +18,14 @@ def load_config() -> Dict[str, Any]:
             'api_base_url': 'http://localhost:11434/api',
             'model': 'gemma',
             'max_retries': 3,
-            'timeout': 30
+            'timeout': 90
         },
         'sensors': {
             'chat_interface': {
                 'prompt': "Jiva> "
             }
         },
+        'memory_consolidation_threshold': 2,
         'actions': {},
         'agent_loop_delay': 0.1,
         'awake_duration': 80,  # 80% of the time awake
@@ -34,6 +36,25 @@ def setup_environment():
     # Create necessary directories
     os.makedirs('data', exist_ok=True)
     os.makedirs('logs', exist_ok=True)
+
+def print_welcome_message():
+    infinity_symbol = """
+      @@@@@@              @@@@@@                    ||              ||         ||                       ||            ||
+    @@      @@          @@      @@                  ||              ||         ||                       ||           || ||
+  @@          @@      @@          @@                ||              ||          \\                     //           ||   ||
+ @@            @@    @@            @@               ||              ||            \\                  //           ||     ||
+@@              @@  @@              @@              ||              ||              ||               ||           ||       ||     
+@@               @@@@               @@              ||              ||               \\              //          ||         ||
+@@              @@  @@              @@              ||              ||                 ||           ||          |||||||||||||||
+ @@            @@    @@            @@               ||              ||                  \\         //          ||             ||
+  @@          @@      @@          @@                //              ||                   ||       ||          ||               ||
+    @@      @@          @@      @@       \\        //               ||                    \\     //          ||                 ||
+      @@@@@@              @@@@@@            =======                 ||                      =====           ||                   ||
+"""
+    print(infinity_symbol)
+    print("Welcome to the Jiva Framework!")
+    print("Embracing the infinite potential of ethical AI")
+    print("--------------------------------------------")
 
 def main():
     print("Initializing Jiva Framework...")
@@ -48,9 +69,11 @@ def main():
     for action_name, action_func in file_actions.items():
         agent.action_manager.register_action(action_name, action_func)
     
+    print_welcome_message()
     print("Jiva is ready. Starting main loop...")
     try:
         agent.run()
+        time.sleep(0.1)
     except KeyboardInterrupt:
         print("\nShutting down Jiva...")
     finally:

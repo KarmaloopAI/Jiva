@@ -3,13 +3,17 @@
 from typing import Any, Dict, List
 from datetime import datetime
 import json
+import logging
 
 from core.llm_interface import LLMInterface
-from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct
-
-from utils.qdrant_handler import QdrantHandler
+from utils.qdrant_handler import QdrantHandler, VECTOR_SIZE
 from models.embeddings import get_embedding
+
+class DateTimeEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        return super().default(obj)
 
 class Memory:
     def __init__(self, config: Dict[str, Any], llm_interface: LLMInterface):
@@ -22,6 +26,8 @@ class Memory:
             config['collection_name']
         )
         self.max_short_term_memory = config.get('max_short_term_memory', 100)
+        self.logger = logging.getLogger("Jiva.Memory")
+        self.json_encoder = DateTimeEncoder()
 
     def add_to_short_term(self, data: Dict[str, Any]):
         """Add a memory item to short-term memory."""
@@ -31,37 +37,56 @@ class Memory:
             'data': data
         }
         self.short_term_memory.append(memory_item)
+        self.logger.debug(f"Added to short-term memory: {self.json_encoder.encode(memory_item)}")
         
         if len(self.short_term_memory) > self.max_short_term_memory:
             self._transfer_to_long_term(self.short_term_memory.pop(0))
 
     def _transfer_to_long_term(self, memory_item: Dict[str, Any]):
         """Transfer a memory item from short-term to long-term memory."""
-        embedding = self.llm_interface.get_embedding(json.dumps(memory_item['data']))
-        self.qdrant_handler.add_point(
-            id=memory_item['timestamp'],
-            vector=embedding,
-            payload=memory_item
-        )
+        try:
+            serialized_item = self.json_encoder.encode(memory_item)
+            embedding = self.llm_interface.get_embedding(serialized_item)
+            
+            if len(embedding) != VECTOR_SIZE:
+                self.logger.error(f"Embedding size mismatch. Expected {VECTOR_SIZE}, got {len(embedding)}")
+                return
+            
+            point_id = self.qdrant_handler.add_point(
+                vector=embedding,
+                payload=json.loads(serialized_item)
+            )
+            if point_id:
+                self.logger.info(f"Transferred memory to long-term storage: {point_id}")
+            else:
+                self.logger.warning("Failed to transfer memory to long-term storage")
+        except Exception as e:
+            self.logger.error(f"Failed to transfer memory to long-term storage: {e}")
 
     def get_short_term_memory(self) -> List[Dict[str, Any]]:
         """Retrieve all items from short-term memory."""
         return self.short_term_memory
 
-    def query_long_term_memory(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
-        """Query long-term memory based on semantic similarity."""
-        query_embedding = self.llm_interface.get_embedding(query)
-        results = self.qdrant_handler.search(
-            query_vector=query_embedding,
-            limit=limit
-        )
-        return [result.payload for result in results]
-
     def consolidate(self):
         """Consolidate short-term memory into long-term memory."""
+        self.logger.info(f"Consolidating {len(self.short_term_memory)} memories")
         for memory_item in self.short_term_memory:
             self._transfer_to_long_term(memory_item)
         self.short_term_memory.clear()
+        self.logger.info("Memory consolidation completed")
+
+    def query_long_term_memory(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
+        """Query long-term memory based on semantic similarity."""
+        try:
+            query_embedding = self.llm_interface.get_embedding(query)
+            results = self.qdrant_handler.search(
+                query_vector=query_embedding,
+                limit=limit
+            )
+            return [result.payload for result in results]
+        except Exception as e:
+            self.logger.error(f"Failed to query long-term memory: {e}")
+            return []
 
     def prepare_fine_tuning_dataset(self) -> List[Dict[str, Any]]:
         """Prepare a dataset for fine-tuning based on recent memories."""
@@ -78,30 +103,13 @@ class Memory:
 
     def update_long_term_memory(self, memory_id: str, updated_data: Dict[str, Any]):
         """Update a specific memory in long-term storage."""
-        embedding = get_embedding(json.dumps(updated_data))
-        self.qdrant_handler.update_point(
-            id=memory_id,
-            vector=embedding,
-            payload={'data': updated_data, 'timestamp': datetime.now().isoformat()}
-        )
-
-if __name__ == "__main__":
-    # This allows us to run some basic tests
-    config = {
-        'qdrant_host': 'localhost',
-        'qdrant_port': 6333,
-        'collection_name': 'jiva_memories',
-        'max_short_term_memory': 10
-    }
-    memory = Memory(config)
-    
-    # Test adding to short-term memory
-    memory.add_to_short_term({'type': 'test', 'content': 'This is a test memory'})
-    
-    # Test querying long-term memory
-    results = memory.query_long_term_memory("test memory")
-    print(f"Query results: {results}")
-    
-    # Test consolidation
-    memory.consolidate()
-    print(f"Short-term memory after consolidation: {memory.get_short_term_memory()}")
+        try:
+            embedding = get_embedding(json.dumps(updated_data))
+            self.qdrant_handler.update_point(
+                id=memory_id,
+                vector=embedding,
+                payload={'data': updated_data, 'timestamp': datetime.now().isoformat()}
+            )
+            self.logger.info(f"Updated long-term memory: {memory_id}")
+        except Exception as e:
+            self.logger.error(f"Failed to update long-term memory: {e}")

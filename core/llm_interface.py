@@ -1,10 +1,13 @@
 # core/llm_interface.py
 
 import json
+import re
 import requests
 import logging
 from typing import Any, Dict, List
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+
+EMBEDDING_SIZE = 3072  # Update this to match the actual size of your embeddings
 
 class LLMInterface:
     def __init__(self, config: Dict[str, Any]):
@@ -50,27 +53,40 @@ class LLMInterface:
             raise
 
     def parse_json(self, json_string: str) -> Any:
-        """Parse a JSON string into a Python object."""
+        """Parse a JSON string into a Python object, attempting to fix common syntax errors."""
         # Remove code block markers if present
         json_string = json_string.strip('`')
         if json_string.startswith('json\n'):
             json_string = json_string[5:]
         
+        # Attempt to fix common JSON syntax errors
+        json_string = self._fix_json_syntax(json_string)
+        
         try:
             return json.loads(json_string)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
             self.logger.warning(f"Failed to parse JSON: {json_string}")
-            # If the string is not valid JSON, attempt to extract JSON from it
-            try:
-                # Find the first '{' and the last '}'
-                start = json_string.index('{')
-                end = json_string.rindex('}') + 1
-                valid_json = json_string[start:end]
-                return json.loads(valid_json)
-            except (ValueError, json.JSONDecodeError):
-                self.logger.error(f"Failed to extract valid JSON from: {json_string}")
-                # If we still can't parse it, return an error message
-                return {"error": "Failed to parse JSON", "raw_response": json_string}
+            self.logger.warning(f"JSON decode error: {str(e)}")
+            
+            # If we still can't parse it, return an error message
+            return {
+                "error": "Failed to parse JSON",
+                "raw_response": json_string,
+                "parse_error": str(e)
+            }
+    
+    def _fix_json_syntax(self, json_string: str) -> str:
+        """Attempt to fix common JSON syntax errors."""
+        # Fix unclosed strings
+        json_string = re.sub(r'("(?:[^"\\]|\\.)*)"(?=[,\]}])', r'\1"', json_string)
+        
+        # Fix missing commas between array elements
+        json_string = re.sub(r'(\w+"|true|false|\d+)\s*\n\s*("|\w+:)', r'\1,\n\2', json_string)
+        
+        # Fix trailing commas in arrays and objects
+        json_string = re.sub(r',\s*([\]}])', r'\1', json_string)
+        
+        return json_string
 
     def process(self, input_data: Any) -> Dict[str, Any]:
         """Process input data and return structured information."""
@@ -121,7 +137,12 @@ class LLMInterface:
         response.raise_for_status()
         
         result = response.json()
-        return result['embedding']
+        embedding = result['embedding']
+        
+        if len(embedding) != EMBEDDING_SIZE:
+            self.logger.warning(f"Unexpected embedding size. Expected {EMBEDDING_SIZE}, got {len(embedding)}")
+        
+        return embedding
 
     def fine_tune(self, dataset: List[Dict[str, Any]]):
         """Prepare and initiate fine-tuning of the model."""

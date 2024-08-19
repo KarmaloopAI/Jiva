@@ -1,19 +1,26 @@
 # core/agent.py
 
-from typing import Any, Dict
-import time
 from datetime import datetime, timedelta
-import logging
+import os
+import time
 import json
+import logging
+from logging.handlers import RotatingFileHandler
+from typing import Any, Dict, List
 
-from .memory import Memory
-from .time_experience import TimeExperience
-from .task_manager import TaskManager
-from .ethical_framework import EthicalFramework
-from .llm_interface import LLMInterface
-from .sensor_manager import SensorManager
-from .action_manager import ActionManager
-from actions.action_registry import get_file_actions
+from core.memory import Memory
+from core.time_experience import TimeExperience
+from core.task_manager import TaskManager
+from core.ethical_framework import EthicalFramework
+from core.llm_interface import LLMInterface
+from core.sensor_manager import SensorManager
+from core.action_manager import ActionManager
+
+class DateTimeEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, (datetime, timedelta)):
+            return obj.isoformat()
+        return super().default(obj)
 
 class Agent:
     def __init__(self, config: Dict[str, Any]):
@@ -25,38 +32,17 @@ class Agent:
         self.memory = Memory(config['memory'], self.llm_interface)
         self.time_experience = TimeExperience()
         self.ethical_framework = EthicalFramework(self.llm_interface)
-        self.task_manager = TaskManager(self.llm_interface, self.ethical_framework)
-        self.sensor_manager = SensorManager(config['sensors'])
         self.action_manager = ActionManager(self.ethical_framework)
+        self.task_manager = TaskManager(self.llm_interface, self.ethical_framework, self.action_manager)
+        self.sensor_manager = SensorManager(config['sensors'])
         
         self.is_awake = True
         self.last_sleep_time = self.time_experience.get_current_time()
         self.current_goal = None
         
-        # Register file operations
-        file_actions = get_file_actions()
-        for action_name, action_func in file_actions.items():
-            self.action_manager.register_action(action_name, action_func)
-            self.logger.debug(f"Registered action: {action_name}")
+        self.json_encoder = DateTimeEncoder()
         
         self.logger.info("Jiva Agent initialized successfully")
-
-    def setup_logging(self):
-        self.logger = logging.getLogger("Jiva.Agent")
-        self.logger.setLevel(logging.DEBUG)
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        
-        # Console Handler
-        ch = logging.StreamHandler()
-        ch.setLevel(logging.INFO)
-        ch.setFormatter(formatter)
-        self.logger.addHandler(ch)
-        
-        # File Handler
-        fh = logging.FileHandler('jiva_agent.log')
-        fh.setLevel(logging.DEBUG)
-        fh.setFormatter(formatter)
-        self.logger.addHandler(fh)
 
     def run(self):
         self.logger.info("Starting Jiva Agent main loop")
@@ -68,7 +54,10 @@ class Agent:
                     continue
                 
                 self.time_experience.update()
-                self.logger.debug(f"Current time: {self.time_experience.get_current_time()}")
+                current_time = self.time_experience.get_current_time()
+                self.logger.debug(f"Current time: {current_time}")
+                
+                self.create_time_memory(current_time)
                 
                 sensory_input = self.sensor_manager.get_input()
                 
@@ -78,32 +67,48 @@ class Agent:
                 
                 self.execute_next_task()
                 
+                if self.should_consolidate_memories():
+                    self.memory.consolidate()
+                
                 time.sleep(self.config['agent_loop_delay'])
             except Exception as e:
                 self.logger.error(f"Error in main loop: {str(e)}", exc_info=True)
                 time.sleep(5)  # Wait a bit before retrying
 
-    def process_input(self, input_data: Any):
+    def create_time_memory(self, current_time: datetime):
+        time_memory = {
+            "type": "time_experience",
+            "timestamp": current_time.isoformat(),
+            "description": f"Experienced time at {current_time.strftime('%Y-%m-%d %H:%M:%S')}"
+        }
+        self.memory.add_to_short_term(time_memory)
+        self.logger.debug(f"Created time memory: {time_memory}")
+
+    def should_consolidate_memories(self) -> bool:
+        return len(self.memory.get_short_term_memory()) >= self.config.get('memory_consolidation_threshold', 100)
+
+    def process_input(self, input_data: List[Dict[str, Any]]):
         try:
             self.logger.info(f"Processing input: {input_data}")
-            processed_data = self.llm_interface.process(input_data)
-            self.logger.debug(f"Processed data: {processed_data}")
-            
-            self.memory.add_to_short_term(processed_data)
-            self.logger.debug("Added processed data to short-term memory")
-            
-            if self.is_goal_setting(processed_data):
-                self.logger.info("Input identified as goal-setting")
-                self.set_new_goal(processed_data)
-            else:
-                self.logger.info("Generating tasks based on input")
-                context = self.get_context()
-                new_tasks = self.task_manager.generate_tasks(self.current_goal, context)
+            for item in input_data:
+                processed_data = self.llm_interface.process(item['content'])
+                self.logger.debug(f"Processed data: {processed_data}")
                 
-                for task_id in new_tasks:
-                    task_info = self.task_manager.get_task_status(task_id)
-                    self.memory.add_to_short_term({"type": "new_task", "task": task_info})
-                    self.logger.info(f"New task added: {task_info}")
+                self.memory.add_to_short_term(processed_data)
+                self.logger.debug("Added processed data to short-term memory")
+                
+                if self.is_goal_setting(processed_data):
+                    self.logger.info("Input identified as goal-setting")
+                    self.set_new_goal(processed_data)
+                else:
+                    self.logger.info("Generating tasks based on input")
+                    context = self.get_context()
+                    new_tasks = self.task_manager.generate_tasks(self.current_goal, context)
+                    
+                    for task_id in new_tasks:
+                        task_info = self.task_manager.get_task_status(task_id)
+                        self.memory.add_to_short_term({"type": "new_task", "task": task_info})
+                        self.logger.info(f"New task added: {task_info}")
         except Exception as e:
             self.logger.error(f"Error processing input: {str(e)}", exc_info=True)
 
@@ -117,7 +122,7 @@ class Agent:
 
     def set_new_goal(self, processed_data: Dict[str, Any]):
         self.logger.info("Setting new goal")
-        prompt = f"Processed input: {processed_data}\n\nExtract the main goal from this input. Respond with a clear, concise goal statement."
+        prompt = f"Processed input: {self.json_encoder.encode(processed_data)}\n\nExtract the main goal from this input. Respond with a clear, concise goal statement."
         self.current_goal = self.llm_interface.generate(prompt).strip()
         self.logger.info(f"New goal set: {self.current_goal}")
         
@@ -130,7 +135,7 @@ class Agent:
         for task_id in new_tasks:
             task_info = self.task_manager.get_task_status(task_id)
             self.memory.add_to_short_term({"type": "new_task", "task": task_info})
-            self.logger.info(f"New task added for goal: {json.dumps(task_info, indent=2)}")
+            self.logger.info(f"New task added for goal: {self.json_encoder.encode(task_info)}")
 
     def get_context(self) -> Dict[str, Any]:
         self.logger.debug("Retrieving context")
@@ -140,7 +145,7 @@ class Agent:
             "current_time": self.time_experience.get_current_time().isoformat(),
             "current_goal": self.current_goal,
         }
-        self.logger.debug(f"Context retrieved: {json.dumps(context, indent=2, default=self._json_serial)}")
+        self.logger.debug(f"Context retrieved: {self.json_encoder.encode(context)}")
         return context
 
     def _json_serial(self, obj):
@@ -153,19 +158,42 @@ class Agent:
         task = self.task_manager.get_next_task()
         if task:
             self.logger.info(f"Executing next task: {task.description}")
-            prompt = f"Task: {task.description}\n\nDetermine the best action to take to complete this task. Consider the available actions:\n{self.action_manager.get_available_actions()}\n\nRespond with the name of the action to take and any necessary parameters."
-            action_plan = self.llm_interface.generate(prompt)
-            self.logger.debug(f"Generated action plan: {action_plan}")
+            result = self.task_manager.execute_task(task)
             
-            action, params = self.parse_action_plan(action_plan)
-            self.logger.info(f"Parsed action: {action}, params: {params}")
-            
-            result = self.action_manager.execute_action(action, params)
-            self.logger.info(f"Action result: {result}")
-            
-            self.process_task_result(task, result)
+            if isinstance(result, str) and result.startswith("Error"):
+                self.logger.warning(f"Task encountered an error: {result}")
+                self.handle_task_error(task, result)
+            else:
+                self.process_task_result(task, result)
         else:
             self.logger.debug("No tasks to execute")
+
+    def handle_task_error(self, task: Any, error_message: str):
+        self.logger.info(f"Handling error for task: {task.id}")
+        prompt = f"""
+        Task: {task.description}
+        Error: {error_message}
+
+        The task encountered an error. Suggest a solution or alternative approach to complete the task.
+        If the task needs to be broken down into smaller steps, provide those steps.
+        
+        Format your response as a JSON object with the following fields:
+        1. 'solution': A brief description of the proposed solution
+        2. 'new_tasks': A list of new tasks, each with 'description', 'priority', 'action', and 'parameters' fields
+        """
+        solution = self.llm_interface.generate(prompt)
+        self.logger.debug(f"Generated solution: {solution}")
+        
+        try:
+            parsed_solution = self.llm_interface.parse_json(solution)
+            new_tasks = parsed_solution.get('new_tasks', [])
+            for new_task in new_tasks:
+                task_id = self.task_manager.add_task(new_task['description'], new_task['priority'], new_task['action'], new_task['parameters'])
+                self.logger.info(f"New task added to handle error: {new_task}")
+        except Exception as e:
+            self.logger.error(f"Error parsing solution: {e}")
+        
+        self.task_manager.complete_task(task.id, {"status": "failed", "error": error_message, "solution": solution})
 
     def parse_action_plan(self, action_plan: str) -> tuple[str, Dict[str, Any]]:
         self.logger.debug(f"Parsing action plan: {action_plan}")
@@ -192,7 +220,7 @@ class Agent:
             for task_id in new_tasks:
                 task_info = self.task_manager.get_task_status(task_id)
                 self.memory.add_to_short_term({"type": "new_task", "task": task_info})
-                self.logger.info(f"New follow-up task added: {json.dumps(task_info, indent=2)}")
+                self.logger.info(f"New follow-up task added: {self.json_encoder.encode(task_info)}")
 
     def check_and_handle_sleep(self):
         current_time = self.time_experience.get_current_time()
@@ -228,6 +256,27 @@ class Agent:
         self.logger.info("Agent waking up")
         self.is_awake = True
         # Perform any wake-up procedures here
+
+    def setup_logging(self):
+        self.logger = logging.getLogger("Jiva")
+        self.logger.setLevel(logging.DEBUG)
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        
+        # Console Handler
+        ch = logging.StreamHandler()
+        ch.setLevel(logging.INFO)
+        ch.setFormatter(formatter)
+        self.logger.addHandler(ch)
+        
+        # File Handler
+        log_dir = 'logs'
+        os.makedirs(log_dir, exist_ok=True)
+        fh = RotatingFileHandler(os.path.join(log_dir, 'jiva.log'), maxBytes=10*1024*1024, backupCount=5)
+        fh.setLevel(logging.DEBUG)
+        fh.setFormatter(formatter)
+        self.logger.addHandler(fh)
+
+        self.logger.info("Logging setup complete")
 
 if __name__ == "__main__":
     # This allows us to run the agent directly for testing
