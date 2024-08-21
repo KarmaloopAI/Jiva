@@ -67,6 +67,7 @@ def main():
     # Register file actions
     file_actions = get_file_actions()
     for action_name, action_func in file_actions.items():
+        print(f"Registering action: {action_name}")
         agent.action_manager.register_action(action_name, action_func)
     
     print_welcome_message()

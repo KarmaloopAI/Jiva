@@ -7,7 +7,6 @@ import logging
 
 from core.llm_interface import LLMInterface
 from utils.qdrant_handler import QdrantHandler, VECTOR_SIZE
-from models.embeddings import get_embedding
 
 class DateTimeEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -67,6 +66,10 @@ class Memory:
         """Retrieve all items from short-term memory."""
         return self.short_term_memory
 
+    def get_recent_short_term_memory(self, n: int = 5) -> List[Dict[str, Any]]:
+        """Retrieve the n most recent items from short-term memory."""
+        return self.short_term_memory[-n:]
+
     def consolidate(self):
         """Consolidate short-term memory into long-term memory."""
         self.logger.info(f"Consolidating {len(self.short_term_memory)} memories")
@@ -104,7 +107,7 @@ class Memory:
     def update_long_term_memory(self, memory_id: str, updated_data: Dict[str, Any]):
         """Update a specific memory in long-term storage."""
         try:
-            embedding = get_embedding(json.dumps(updated_data))
+            embedding = self.llm_interface.get_embedding(json.dumps(updated_data))
             self.qdrant_handler.update_point(
                 id=memory_id,
                 vector=embedding,
@@ -113,3 +116,64 @@ class Memory:
             self.logger.info(f"Updated long-term memory: {memory_id}")
         except Exception as e:
             self.logger.error(f"Failed to update long-term memory: {e}")
+
+    def get_task_result(self, task_id: str) -> Dict[str, Any]:
+        """Retrieve the result of a specific task from memory."""
+        for memory_item in reversed(self.short_term_memory):
+            if memory_item['data'].get('task_id') == task_id:
+                return memory_item['data'].get('result', {})
+        
+        # If not found in short-term memory, check long-term memory
+        query = f"task_id:{task_id}"
+        long_term_results = self.query_long_term_memory(query, limit=1)
+        if long_term_results:
+            return long_term_results[0].get('result', {})
+        
+        return {}
+
+    def get_context_for_task(self, task_description: str, n: int = 5) -> Dict[str, Any]:
+        """Retrieve relevant context for a task from both short-term and long-term memory."""
+        context = {
+            "short_term": self.get_recent_short_term_memory(n),
+            "long_term": self.query_long_term_memory(task_description, n)
+        }
+        return context
+
+if __name__ == "__main__":
+    # This allows us to run some basic tests
+    from unittest.mock import MagicMock
+
+    # Mock LLMInterface and QdrantHandler
+    mock_llm = MagicMock()
+    mock_llm.get_embedding.return_value = [0.1] * VECTOR_SIZE
+
+    config = {
+        'qdrant_host': 'localhost',
+        'qdrant_port': 6333,
+        'collection_name': 'test_collection',
+        'max_short_term_memory': 5
+    }
+
+    memory = Memory(config, mock_llm)
+
+    # Test adding to short-term memory
+    for i in range(7):
+        memory.add_to_short_term({"test_data": f"Data {i}"})
+
+    print(f"Short-term memory size: {len(memory.get_short_term_memory())}")
+
+    # Test querying long-term memory
+    mock_llm.get_embedding.return_value = [0.2] * VECTOR_SIZE
+    results = memory.query_long_term_memory("test query")
+    print(f"Long-term memory query results: {results}")
+
+    # Test getting task result
+    memory.add_to_short_term({"task_id": "test_task", "result": {"output": "Test output"}})
+    result = memory.get_task_result("test_task")
+    print(f"Task result: {result}")
+
+    # Test getting context for task
+    context = memory.get_context_for_task("Test task description")
+    print(f"Context for task: {context}")
+
+    print("Memory tests completed.")

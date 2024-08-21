@@ -65,10 +65,16 @@ class Agent:
                     self.logger.info(f"Received sensory input: {sensory_input}")
                     self.process_input(sensory_input)
                 
-                self.execute_next_task()
+                # Execute all pending tasks
+                while self.task_manager.has_pending_tasks():
+                    self.execute_next_task()
+                    self.logger.debug(f"Remaining tasks: {self.task_manager.get_pending_task_count()}")
                 
+                # Check for memory consolidation after task execution
                 if self.should_consolidate_memories():
+                    self.logger.info("Consolidating memories")
                     self.memory.consolidate()
+                    self.logger.info("Memory consolidation completed")
                 
                 time.sleep(self.config['agent_loop_delay'])
             except Exception as e:
@@ -85,7 +91,7 @@ class Agent:
         self.logger.debug(f"Created time memory: {time_memory}")
 
     def should_consolidate_memories(self) -> bool:
-        return len(self.memory.get_short_term_memory()) >= self.config.get('memory_consolidation_threshold', 100)
+        return len(self.memory.get_short_term_memory()) >= self.config.get('memory_consolidation_threshold', 100)  and not self.task_manager.has_pending_tasks()
 
     def process_input(self, input_data: List[Dict[str, Any]]):
         try:
@@ -166,7 +172,7 @@ class Agent:
             else:
                 self.process_task_result(task, result)
         else:
-            self.logger.debug("No tasks to execute")
+            self.logger.debug("No more tasks to execute")
 
     def handle_task_error(self, task: Any, error_message: str):
         self.logger.info(f"Handling error for task: {task.id}")

@@ -9,6 +9,8 @@ class EthicalFramework:
         self.llm_interface = llm_interface
         self.logger = logging.getLogger("Jiva.EthicalFramework")
         self.ethical_principles = [
+            "Doing is better than not doing",
+            "Do not assume everything is evil or malicious unless there is explicit evidence",
             "Do no evil"
         ]
 
