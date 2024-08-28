@@ -1,6 +1,6 @@
 # core/memory.py
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from datetime import datetime
 import json
 import logging
@@ -117,19 +117,38 @@ class Memory:
         except Exception as e:
             self.logger.error(f"Failed to update long-term memory: {e}")
 
-    def get_task_result(self, task_id: str) -> Dict[str, Any]:
-        """Retrieve the result of a specific task from memory."""
+    def get_task_result(self, task_description: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve the result of the most recent task matching the given description.
+        
+        Args:
+            task_description (str): The description of the task to retrieve.
+        
+        Returns:
+            Optional[Dict[str, Any]]: The task result if found, None otherwise.
+        """
+        # Search in short-term memory first
         for memory_item in reversed(self.short_term_memory):
-            if memory_item['data'].get('task_id') == task_id:
-                return memory_item['data'].get('result', {})
+            if memory_item['data'].get('type') == 'task_result' and \
+               memory_item['data'].get('description') == task_description:
+                return {
+                    'result': memory_item['data'].get('result'),
+                    'task_id': memory_item['data'].get('task_id'),
+                    'timestamp': memory_item['timestamp']
+                }
         
         # If not found in short-term memory, check long-term memory
-        query = f"task_id:{task_id}"
+        query = f"type:task_result AND description:\"{task_description}\""
         long_term_results = self.query_long_term_memory(query, limit=1)
         if long_term_results:
-            return long_term_results[0].get('result', {})
+            result = long_term_results[0]
+            return {
+                'result': result.get('result'),
+                'task_id': result.get('task_id'),
+                'timestamp': result.get('timestamp')
+            }
         
-        return {}
+        return None
 
     def get_context_for_task(self, task_description: str, n: int = 5) -> Dict[str, Any]:
         """Retrieve relevant context for a task from both short-term and long-term memory."""

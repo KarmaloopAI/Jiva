@@ -8,8 +8,7 @@ def think(llm_interface: LLMInterface, prompt: str, context: Optional[Dict[str, 
     Use the LLM to generate a response based on a prompt and optional context.
 
     Args:
-        llm_interface (LLMInterface): The language model interface.
-        prompt (str): The prompt to send to the LLM.
+        prompt (str): The prompt to send to the LLM. Preferrably, keep this as static text when required_inputs is empty.
         context (Optional[Dict[str, Any]]): Additional context for the prompt. Defaults to None.
 
     Returns:

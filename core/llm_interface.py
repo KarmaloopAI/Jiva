@@ -4,10 +4,13 @@ import json
 import re
 import requests
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Union
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 EMBEDDING_SIZE = 3072  # Update this to match the actual size of your embeddings
+
+class JSONParseError(Exception):
+    pass
 
 class LLMInterface:
     def __init__(self, config: Dict[str, Any]):
@@ -52,39 +55,101 @@ class LLMInterface:
             self.logger.error(f"Error decoding JSON response from Ollama API: {str(e)}")
             raise
 
-    def parse_json(self, json_string: str) -> Any:
-        """Parse a JSON string into a Python object, attempting to fix common syntax errors."""
-        # Remove code block markers if present
-        json_string = json_string.strip('`')
-        if json_string.startswith('json\n'):
-            json_string = json_string[5:]
+    def parse_json(self, response: str) -> Union[Any, dict]:
+        """
+        Extract and parse a JSON object from an LLM response.
         
-        # Attempt to fix common JSON syntax errors
-        json_string = self._fix_json_syntax(json_string)
+        Args:
+        response (str): The full response from the LLM.
         
+        Returns:
+        Any: The parsed JSON object, or an error dictionary if parsing fails.
+        """
+        logger = logging.getLogger(__name__)
+        
+        # Attempt to directly parse the response as JSON
+        parsed_json = self._attempt_parse(response)
+        if parsed_json is not None:
+            return parsed_json
+
+        # Attempt to extract JSON from markdown-style code blocks or other common patterns
+        json_string = self._extract_json_from_response(response)
+        if json_string:
+            json_string = self._fix_json_syntax(json_string)
+            parsed_json = self._attempt_parse(json_string)
+            if parsed_json is not None:
+                return parsed_json
+        
+        # If all attempts fail, return an error dictionary with the raw response
+        logger.error("Failed to parse JSON after all attempts")
+        return {
+            "error": "Failed to parse JSON",
+            "raw_response": response
+        }
+
+    def _attempt_parse(self, json_string: str) -> Union[Any, None]:
+        """
+        Attempt to parse a string as JSON.
+        
+        Args:
+        json_string (str): The string to parse.
+        
+        Returns:
+        Any: The parsed JSON object, or None if parsing fails.
+        """
         try:
             return json.loads(json_string)
-        except json.JSONDecodeError as e:
-            self.logger.warning(f"Failed to parse JSON: {json_string}")
-            self.logger.warning(f"JSON decode error: {str(e)}")
-            
-            # If we still can't parse it, return an error message
-            return {
-                "error": "Failed to parse JSON",
-                "raw_response": json_string,
-                "parse_error": str(e)
-            }
-    
+        except json.JSONDecodeError:
+            return None
+
+    def _extract_json_from_response(self, response: str) -> Union[str, None]:
+        """
+        Extract JSON string from different potential formats in the response.
+        
+        Args:
+        response (str): The full response string.
+        
+        Returns:
+        str: The extracted JSON string, or None if no valid JSON is found.
+        """
+        logger = logging.getLogger(__name__)
+        
+        # Look for JSON in markdown code block with or without "json" identifier
+        json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', response)
+        if json_match:
+            logger.info("Found JSON in code block")
+            return json_match.group(1).strip()
+        
+        # Look for the first JSON-like structure in the text
+        json_match = re.search(r'(\{.*?\}|\[.*?\])', response, re.DOTALL)
+        if json_match:
+            logger.info("Found JSON-like structure in response")
+            return json_match.group(1).strip()
+        
+        logger.warning("No JSON structure found in response")
+        return None
+
     def _fix_json_syntax(self, json_string: str) -> str:
-        """Attempt to fix common JSON syntax errors."""
-        # Fix unclosed strings
-        json_string = re.sub(r'("(?:[^"\\]|\\.)*)"(?=[,\]}])', r'\1"', json_string)
+        """
+        Attempt to fix common JSON syntax errors.
+        
+        Args:
+        json_string (str): The JSON string with potential syntax errors.
+        
+        Returns:
+        str: A cleaned JSON string with common syntax issues fixed.
+        """
+        # Remove any text after the last closing bracket or brace
+        json_string = re.sub(r'([}\]])\s*[^}\]]*$', r'\1', json_string, flags=re.DOTALL)
         
         # Fix missing commas between array elements
-        json_string = re.sub(r'(\w+"|true|false|\d+)\s*\n\s*("|\w+:)', r'\1,\n\2', json_string)
+        json_string = re.sub(r'(\}\s*\{|\]\s*\[)', r'\1,', json_string)
         
         # Fix trailing commas in arrays and objects
         json_string = re.sub(r',\s*([\]}])', r'\1', json_string)
+        
+        # Fix unclosed quotes
+        json_string = re.sub(r'(?<!\\)"([^"]*?)(?<!\\)"(?=\s*[:,\]}])', r'"\1"', json_string)
         
         return json_string
 
@@ -93,7 +158,9 @@ class LLMInterface:
         prompt = f"""
         Input: {input_data}
 
-        Analyze the above input and extract key information. Provide a summary and any relevant details.
+        Analyze the above input, break it down into action_items to fulfil the overall goal of the input.
+        Carefully analyse the input to ensure you have factored it in its entirety.
+        Provide a summary and other relevant details structured into the JSON object below.
         Format your response as a JSON object with the following structure:
         {{
             "summary": "A brief summary of the input",

@@ -27,11 +27,11 @@ class ActionManager:
             self.logger.info(f"Executing action: {action_name}")
             try:
                 # Retrieve context for the action
-                context = self.memory.get_context_for_task(f"Action: {action_name}")
+                # context = self.memory.get_context_for_task(f"Action: {action_name}")
                 
                 # Add context to parameters
-                parameters['context'] = context
-                
+                # parameters['context'] = context
+
                 # Execute the action
                 result = self.actions[action_name](**parameters)
                 

@@ -32,8 +32,8 @@ class Agent:
         self.memory = Memory(config['memory'], self.llm_interface)
         self.time_experience = TimeExperience()
         self.ethical_framework = EthicalFramework(self.llm_interface)
-        self.action_manager = ActionManager(self.ethical_framework)
-        self.task_manager = TaskManager(self.llm_interface, self.ethical_framework, self.action_manager)
+        self.action_manager = ActionManager(self.ethical_framework, memory=self.memory, llm_interface=self.llm_interface)
+        self.task_manager = TaskManager(self.llm_interface, self.ethical_framework, self.action_manager, memory=self.memory)
         self.sensor_manager = SensorManager(config['sensors'])
         
         self.is_awake = True
@@ -120,7 +120,7 @@ class Agent:
 
     def is_goal_setting(self, processed_data: Dict[str, Any]) -> bool:
         self.logger.debug("Checking if input is goal-setting")
-        prompt = f"Processed input: {processed_data}\n\nIs this input setting a new goal for the agent? Respond with 'Yes' or 'No'."
+        prompt = f"Current Goal: {str(self.current_goal)}\n Processed input: {processed_data}\n\nIs this input setting a new goal for the agent? Respond with 'Yes' or 'No'.\n\n If the current goal is not set, then safely assume it is a new goal."
         response = self.llm_interface.generate(prompt)
         is_goal = response.strip().lower() == 'yes'
         self.logger.debug(f"Is goal-setting: {is_goal}")
@@ -213,7 +213,7 @@ class Agent:
         self.task_manager.complete_task(task.id, result)
         self.logger.debug(f"Task {task.id} marked as complete")
         
-        self.memory.add_to_short_term({"type": "task_result", "task_id": task.id, "result": result})
+        self.memory.add_to_short_term({"type": "task_result", "task_id": task.id, "task_description": task.description, "result": result})
         self.logger.debug("Added task result to short-term memory")
         
         prompt = f"Task: {task.description}\nResult: {result}\n\nBased on this task result, should we generate new tasks? Respond with 'Yes' or 'No'."

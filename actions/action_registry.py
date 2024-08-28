@@ -28,7 +28,7 @@ def get_action_registry(llm_interface: LLMInterface, memory: Memory) -> Dict[str
     Returns:
         Dict[str, Callable]: A dictionary mapping action names to their corresponding functions.
     """
-    return {
+    actions = {
         # File operations
         "read_file": read_file,
         "write_file": write_file,
@@ -42,11 +42,16 @@ def get_action_registry(llm_interface: LLMInterface, memory: Memory) -> Dict[str
         "write_csv": write_csv,
         
         # Memory operations
-        "retrieve_recent_memory": lambda n: retrieve_recent_memory(memory, n),
-        "retrieve_task_result": lambda task_id: retrieve_task_result(memory, task_id),
-        "retrieve_context_for_task": lambda task_description, n=5: retrieve_context_for_task(memory, task_description, n),
-        "query_long_term_memory": lambda query, limit=5: query_long_term_memory(memory, query, limit),
+        # "retrieve_recent_memory": lambda n: retrieve_recent_memory(memory, n),
+        # "retrieve_task_result": lambda task_description: retrieve_task_result(memory, task_description),
+        # "retrieve_context_for_task": lambda task_description, n=5: retrieve_context_for_task(memory, task_description, n),
+        # "query_long_term_memory": lambda query, limit=5: query_long_term_memory(memory, query, limit),
         
         # Think action
         "think": lambda prompt, context=None: think(llm_interface, prompt, context)
     }
+
+    # Set docstrings of lambda functions
+    actions["think"].__doc__ = think.__doc__
+
+    return actions

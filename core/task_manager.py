@@ -14,7 +14,7 @@ from core.memory import Memory
 class Task:
     def __init__(self, description: str, action: str, parameters: Dict[str, Any], 
                  priority: int = 1, deadline: Optional[datetime] = None, 
-                 parent_id: Optional[str] = None, required_inputs: List[str] = None):
+                 parent_id: Optional[str] = None, required_inputs: Dict[str, Any] = None):
         self.id = str(uuid.uuid4())
         self.description = description
         self.action = action
@@ -28,7 +28,7 @@ class Task:
         self.parent_id = parent_id
         self.subtasks: List[str] = []
         self.ethical_evaluation: Optional[Dict[str, Any]] = None
-        self.required_inputs = required_inputs or []
+        self.required_inputs = required_inputs or {}
         self.output = None
 
     def __lt__(self, other):
@@ -48,26 +48,70 @@ class TaskManager:
         self.memory = memory
         self.logger = logging.getLogger("Jiva.TaskManager")
 
-    def generate_tasks(self, goal: str, context: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def get_relevant_actions(self, goal: str, context: Dict[str, Any]) -> List[str]:
         # Get available actions with their descriptions and parameters
         available_actions = self.action_manager.get_available_actions()
         
         # Format the actions and their parameters for the prompt
         action_descriptions = []
         for action_name, action_info in available_actions.items():
-            params = action_info.get('parameters', {})
-            param_desc = ", ".join([f"{k}: {v}" for k, v in params.items()])
-            action_descriptions.append(f"{action_name} - Parameters: {param_desc}")
+            # param_desc = action_info['description']
+            action_descriptions.append(f"""- {action_name}\n
+            """)
         
-        actions_str = "\n".join(action_descriptions)
+        actions_str = "\n\n".join(action_descriptions)
 
         prompt = f"""
-        Goal: {goal}
-        Context: {context}
-        
-        Available actions and their parameters:
-        {actions_str}
+        # Given the below goal and context, identify the relevant actions from the list of actions below that would be required to complete this task. Respond with comma separated action names with no spaces.
+        Please make sure action names you return match exactly with the action names provided in the list below. Your task is to pick the relevant ones.
+        # Goal
+        {goal}
 
+        # Context
+        {context}
+        
+        # Available actions and their parameters
+        {actions_str}
+        """
+
+        response = self.llm_interface.generate(prompt)
+        action_names = []
+        if ',' in response:
+            split_result = response.split(',')
+            for action in split_result:
+                action_names.append(action.strip())
+        
+        return action_names
+
+    def generate_tasks(self, goal: str, context: Dict[str, Any]) -> List[Dict[str, Any]]:
+        # Get available actions with their descriptions and parameters
+        available_actions = self.action_manager.get_available_actions()
+
+        # Get actions relevant to this run.
+        relevant_actions = self.get_relevant_actions(goal=goal, context=context)
+        # Mandatory actions fo context
+        mandatory_actions = ['think']
+        
+        # Format the actions and their parameters for the prompt
+        action_descriptions = []
+        for action_name, action_info in available_actions.items():
+            if action_name in relevant_actions or action_name in mandatory_actions:
+                param_desc = action_info['description']
+                action_descriptions.append(f"""## {action_name}\n
+                ### Description (docstring)
+                {param_desc}
+                """)
+        
+        actions_str = "\n\n".join(action_descriptions)
+
+        prompt = f"""
+        # Goal
+        {goal}
+
+        ## Your approach
+        You strive to achieve a given task in as few steps as possible
+
+        # Your Task
         Generate a list of tasks to achieve the goal. Each task should have:
         1. A description
         2. An action name (from the available actions)
@@ -75,17 +119,31 @@ class TaskManager:
         4. A list of required inputs (task descriptions that this task depends on)
 
         Include 'think' actions to process information or make decisions, and other actions to perform specific operations.
+        'think' actions will require static prompts, so design these tasks well to accomplish the goal.
         Ensure that tasks are properly sequenced and that information flows correctly between tasks.
+        Use the required_inputs key to create a parameter name and value dependency between tasks. Once the action is called,
+        it will be invoked with parameter value obtained from a previous task.
 
-        Respond with a JSON array of tasks. Each task should be an object with the following structure:
+        The value of required_inputs should be a dictionary of parameter name (from the function) and the exact task description of a previous task.
+
+        # Context
+        ## Understanding the context
+        The context below is a series of short term memory objects of which the last one is the most recent input
+        ## The context items
+        {context}
+        
+        # Available actions and their parameters
+        {actions_str}
+
+        Respond only with a JSON array of tasks and nothing else. Each task should be an object with the following structure:
         {{
             "description": "Task description",
             "action": "action_name",
             "parameters": {{
-                "param1": "value1",
-                "param2": "value2"
+                "param1": "static_value_1",
+                "param2": "{{{{value2}}}}"
             }},
-            "required_inputs": ["Description of prerequisite task 1", "Description of prerequisite task 2"]
+            "required_inputs": {{"value2": "Exact Description of prerequisite task"}}
         }}
         """
         
@@ -98,14 +156,39 @@ class TaskManager:
             self.logger.debug(f"Parsed tasks: {tasks}")
             if not isinstance(tasks, list):
                 raise ValueError("Expected a list of tasks")
-            return tasks
+            
+            processed_tasks = self.add_raw_tasks(tasks)
+            return processed_tasks
         except Exception as e:
             self.logger.error(f"Error parsing LLM response: {e}")
             return [{"description": f"Analyze goal: {goal}", "action": "think", "parameters": {"prompt": goal}, "required_inputs": []}]
 
+    def add_raw_tasks(self, raw_tasks: Dict[str, Any]) -> List[Task]:
+        tasks: List[Task] = []
+        last_task_id = None
+        for raw_task in raw_tasks:
+            task = Task(**raw_task)
+
+            # Reset the last_task_id if this current task is a think task.
+            if task.action.strip().lower() == 'think':
+                last_task_id = None
+
+            task.parent_id = last_task_id if last_task_id else None
+            tasks.append(task)
+            self.task_queue.put(task)
+            self.all_tasks[task.id] = task
+            if last_task_id and last_task_id in self.all_tasks:
+                self.all_tasks[last_task_id].subtasks.append(task.id)
+
+            # If this is a think task, make it the parent for the next set of tasks.
+            if task and task.action.strip().lower() == 'think':
+                last_task_id = task.id
+
+        return tasks 
+
     def add_task(self, description: str, action: str, parameters: Dict[str, Any], 
                  priority: int = 1, deadline: Optional[datetime] = None, 
-                 parent_id: Optional[str] = None, required_inputs: List[str] = None) -> Optional[str]:
+                 parent_id: Optional[str] = None, required_inputs: Dict[str, Any] = None) -> Optional[str]:
         if self.ethical_framework.evaluate_task(description):
             task = Task(description, action, parameters, priority, deadline, parent_id, required_inputs)
             self.task_queue.put(task)
@@ -173,17 +256,16 @@ class TaskManager:
         self.logger.info(f"Executing task: {task.description}")
         try:
             # Gather inputs from required tasks
-            inputs = {}
-            for input_task_description in task.required_inputs:
-                input_task = next((t for t in self.all_tasks.values() if t.description == input_task_description), None)
-                if not input_task:
-                    raise Exception(f"Required input task '{input_task_description}' not found")
-                if input_task.status != "completed":
-                    raise Exception(f"Required input task '{input_task_description}' not completed")
-                inputs[input_task.id] = input_task.output
-
-            # Add inputs to task parameters
-            task.parameters['inputs'] = inputs
+            for param in task.required_inputs:
+                for t in self.all_tasks:
+                    if t.lower().strip() in param.lower().strip() or t.lower().strip() in str(task.required_inputs[param]).lower().strip():
+                        input_task = self.memory.get_task_result(task.required_inputs[param])
+                        task.parameters[param] = input_task['result']
+            
+            for param in task.parameters:    
+                # Now check if the param value is still unresolved, if yes, then set it to the result of the parent task
+                if str(task.parameters[param]).strip().startswith('{{') and task.parent_id and task.parent_id in self.all_tasks:
+                    task.parameters[param] = self.all_tasks[task.parent_id].result
 
             result = self.action_manager.execute_action(task.action, task.parameters)
             self.logger.info(f"Task executed successfully: {result}")

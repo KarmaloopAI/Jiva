@@ -4,7 +4,7 @@ import os
 import time
 from typing import Dict, Any
 from core.agent import Agent
-from actions.action_registry import get_file_actions
+from actions.action_registry import get_action_registry
 
 def load_config() -> Dict[str, Any]:
     return {
@@ -16,7 +16,7 @@ def load_config() -> Dict[str, Any]:
         },
         'llm': {
             'api_base_url': 'http://localhost:11434/api',
-            'model': 'gemma',
+            'model': 'gemma2',
             'max_retries': 3,
             'timeout': 90
         },
@@ -65,10 +65,9 @@ def main():
     agent = Agent(config)
     
     # Register file actions
-    file_actions = get_file_actions()
-    for action_name, action_func in file_actions.items():
-        print(f"Registering action: {action_name}")
-        agent.action_manager.register_action(action_name, action_func)
+    actions = get_action_registry(agent.llm_interface, agent.memory)
+    for action_name, action_func in actions.items():
+        print(f"Discovered action: {action_name}")
     
     print_welcome_message()
     print("Jiva is ready. Starting main loop...")

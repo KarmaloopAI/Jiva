@@ -56,7 +56,8 @@ def read_file(file_path: str) -> str:
 
 def write_file(file_path: str, content: str) -> str:
     """
-    Write the given content to a file.
+    Write the given content to a file. Creates the file if it does not exist. Does not need an append operation if the content is provided
+    in the parameters.
 
     Args:
         file_path (str): The path to the file where the content will be written.
@@ -78,7 +79,7 @@ def write_file(file_path: str, content: str) -> str:
 
 def append_file(file_path: str, content: str) -> str:
     """
-    Append the given content to the end of a file.
+    Append the given content to the end of a file if the file already exists.
 
     Args:
         file_path (str): The path to the file where the content will be appended.
