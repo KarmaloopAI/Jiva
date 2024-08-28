@@ -1,6 +1,11 @@
-# Jiva Framework
+# ♾️ Jiva Framework
 
-## 🧠 An AI Agent with Temporal Awareness and Ethical Decision-Making
+## AI Autonomous Agent for Open Source LLMs
+Jiva Framework was born out of the need to run autonomous goal-based agents that could run with Open Source LLMs like Llama, Gemma, Mistral and Phi at their core. This eliminates the cost
+concern that we would otherwise have when running against closed source proprietary models - specially when running autonomously.
+You could easily tweak it to act as your AutoLlama or AutoGemma to autonomously complete basic tasks.
+
+## An AI Agent with Temporal Awareness and Ethical Decision-Making
 
 Jiva Framework is an innovative open-source project aimed at creating an AI agent that experiences time, forms memories, and operates based on Dharmic principles. This framework provides a unique approach to AI development, incorporating concepts such as cyclical time perception, ethical decision-making, and continuous learning.
 
@@ -12,9 +17,12 @@ Jiva Framework is an innovative open-source project aimed at creating an AI agen
 - **Memory Systems**: Utilizes both short-term and long-term memory, powered by vector databases for efficient storage and retrieval.
 - **Ethical Framework**: Incorporates Dharmic principles into decision-making processes, ensuring responsible AI behavior.
 - **Task Management**: Autonomously generates, prioritizes, and executes tasks to achieve given goals.
-- **Adaptive Learning**: Engages in cyclical learning and refinement of knowledge through regular "sleep" cycles.
-- **Sensor Integration**: Modular design allows for easy integration of various input sensors.
-- **Action Management**: Ethical evaluation of actions before execution, with support for file operations and potential for expansion.
+- **Adaptive Learning**: Engages in cyclical learning and refinement of knowledge through regular "sleep" cycles. There is more to come on this, see below.
+- **Sensor Integration**: Modular design allows for easy integration of various input sensors. Supports only human-input as of now.
+- **Action Management**: Actions registry is meant to continually grow and become richer as development continues.
+
+### Long-term goals for Adaptive Learning
+A key goal of the project is to allow for the agent to sleep and fine-tune its underlying LLModel by consolidating its thoughts and actions throughout the day.
 
 ## 🚀 Getting Started
 
@@ -28,8 +36,8 @@ Jiva Framework is an innovative open-source project aimed at creating an AI agen
 
 1. Clone the repository:
    ```
-   git clone https://github.com/your-username/jiva-framework.git
-   cd jiva-framework
+   git clone https://github.com/KarmaloopAI/Jiva.git
+   cd Jiva
    ```
 
 2. Install the required dependencies:
@@ -55,7 +63,7 @@ python main.py
 
 ## 📚 Documentation
 
-For detailed documentation on the Jiva Framework's architecture, components, and usage, please refer to the [Wiki](https://github.com/your-username/jiva-framework/wiki).
+For detailed documentation on the Jiva Framework's architecture, components, and usage, please refer to the [Wiki](https://github.com/your-username/jiva-framework/wiki) (to-be-done).
 
 ## 🤝 Contributing
 

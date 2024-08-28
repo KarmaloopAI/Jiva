@@ -1,0 +1,24 @@
+{
+    "memory": {
+        "qdrant_host": "localhost",
+        "qdrant_port": 6333,
+        "collection_name": "jiva_memories",
+        "max_short_term_memory": 100
+    },
+    "llm": {
+        "api_base_url": "http://localhost:11434/api",
+        "model": "gemma2",
+        "max_retries": 3,
+        "timeout": 90
+    },
+    "sensors": {
+        "chat_interface": {
+            "prompt": "Jiva> "
+        }
+    },
+    "memory_consolidation_threshold": 2,
+    "actions": {},
+    "agent_loop_delay": 0.1,
+    "awake_duration": 80,
+    "sleep_duration": 20
+}
