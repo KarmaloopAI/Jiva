@@ -6,6 +6,7 @@
         "max_short_term_memory": 100
     },
     "llm": {
+        "provider": "ollama",
         "api_base_url": "http://localhost:11434/api",
         "model": "gemma2",
         "max_retries": 3,

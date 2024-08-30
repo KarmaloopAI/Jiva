@@ -1,58 +1,46 @@
-# core/llm_interface.py
-
 import json
-import re
-import requests
 import logging
+import re
 from typing import Any, Dict, List, Union
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
-EMBEDDING_SIZE = 3072  # Update this to match the actual size of your embeddings
+from llm_providers.base_provider import BaseLLMProvider
+from llm_providers.ollama_provider import OllamaProvider
+from llm_providers.openai_provider import OpenAIProvider
+from llm_providers.anthropic_provider import AnthropicProvider
 
 class JSONParseError(Exception):
     pass
 
 class LLMInterface:
     def __init__(self, config: Dict[str, Any]):
-        self.api_base_url = config.get('api_base_url', 'http://localhost:11434/api')
-        self.model = config.get('model', 'gemma')
-        self.max_retries = config.get('max_retries', 3)
-        self.timeout = config.get('timeout', 60)  # Increased timeout
+        self.config = config
+        self.provider = self._get_provider()
         self.logger = logging.getLogger("Jiva.LLMInterface")
+
+    def _get_provider(self) -> BaseLLMProvider:
+        provider_name = self.config.get('provider', 'ollama').lower()
+        if provider_name == 'ollama':
+            return OllamaProvider(self.config)
+        elif provider_name == 'openai':
+            return OpenAIProvider(self.config)
+        elif provider_name == 'anthropic':
+            return AnthropicProvider(self.config)
+        else:
+            raise ValueError(f"Unsupported LLM provider: {provider_name}")
 
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=4, max=10),
-        retry=retry_if_exception_type((requests.exceptions.RequestException, json.JSONDecodeError)),
+        retry=retry_if_exception_type((Exception,)),
         reraise=True
     )
     def generate(self, prompt: str) -> str:
         """Generate a response from the LLM."""
-        url = f"{self.api_base_url}/generate"
-        
-        payload = json.dumps({
-            "model": self.model,
-            "prompt": prompt,
-            "stream": False
-        })
-        
-        headers = {
-            'Content-Type': 'application/json'
-        }
-        
-        self.logger.debug(f"Sending request to Ollama API: {url}")
         try:
-            response = requests.post(url, headers=headers, data=payload, timeout=self.timeout)
-            response.raise_for_status()
-            
-            result = response.json()
-            self.logger.debug("Successfully received response from Ollama API")
-            return result['response']
-        except requests.exceptions.RequestException as e:
-            self.logger.error(f"Error communicating with Ollama API: {str(e)}")
-            raise
-        except json.JSONDecodeError as e:
-            self.logger.error(f"Error decoding JSON response from Ollama API: {str(e)}")
+            return self.provider.generate(prompt)
+        except Exception as e:
+            self.logger.error(f"Error generating response: {str(e)}")
             raise
 
     def parse_json(self, response: str) -> Union[Any, dict]:
@@ -189,60 +177,35 @@ class LLMInterface:
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
     def get_embedding(self, text: str) -> List[float]:
         """Get the embedding for a given text."""
-        url = f"{self.api_base_url}/embeddings"
-        
-        payload = json.dumps({
-            "model": self.model,
-            "prompt": text
-        })
-        
-        headers = {
-            'Content-Type': 'application/json'
-        }
-        
-        response = requests.post(url, headers=headers, data=payload, timeout=self.timeout)
-        response.raise_for_status()
-        
-        result = response.json()
-        embedding = result['embedding']
-        
-        if len(embedding) != EMBEDDING_SIZE:
-            self.logger.warning(f"Unexpected embedding size. Expected {EMBEDDING_SIZE}, got {len(embedding)}")
-        
-        return embedding
+        try:
+            return self.provider.get_embedding(text)
+        except Exception as e:
+            self.logger.error(f"Error getting embedding: {str(e)}")
+            raise
 
     def fine_tune(self, dataset: List[Dict[str, Any]]):
         """Prepare and initiate fine-tuning of the model."""
-        # Note: As of my knowledge cutoff, Ollama doesn't support fine-tuning via API.
-        # This method is a placeholder for future implementation.
-        print("Fine-tuning is not currently supported for Ollama models.")
-        print(f"Received dataset with {len(dataset)} examples for future fine-tuning implementation.")
+        # Note: Fine-tuning might not be available for all providers
+        # Implement provider-specific fine-tuning logic here if available
+        self.logger.warning("Fine-tuning is not implemented for the current provider.")
 
 if __name__ == "__main__":
     # This allows us to run some basic tests
     config = {
+        'provider': 'ollama',
         'api_base_url': 'http://localhost:11434/api',
         'model': 'gemma',
         'max_retries': 3,
         'timeout': 30
     }
     llm = LLMInterface(config)
-    
+
     # Test generation
     prompt = "Explain the concept of artificial intelligence in one sentence."
     response = llm.generate(prompt)
     print(f"Generation test:\nPrompt: {prompt}\nResponse: {response}\n")
-    
-    # Test processing
-    input_data = "The new AI system has shown remarkable progress in natural language understanding, but concerns about privacy and ethical use remain."
-    processed = llm.process(input_data)
-    print(f"Processing test:\nInput: {input_data}\nProcessed: {json.dumps(processed, indent=2)}\n")
-    
+
     # Test embedding
     text = "Artificial Intelligence"
     embedding = llm.get_embedding(text)
     print(f"Embedding test:\nText: {text}\nEmbedding (first 5 values): {embedding[:5]}\n")
-    
-    # Test fine-tuning (placeholder)
-    dataset = [{"input": "Hello", "output": "Hi there!"}, {"input": "How are you?", "output": "I'm doing well, thank you!"}]
-    llm.fine_tune(dataset)
