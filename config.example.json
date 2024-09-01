@@ -3,7 +3,8 @@
         "qdrant_host": "localhost",
         "qdrant_port": 6333,
         "collection_name": "jiva_memories",
-        "max_short_term_memory": 100
+        "max_short_term_memory": 100,
+        "vector_size": 3072
     },
     "llm": {
         "provider": "ollama",
@@ -11,6 +12,14 @@
         "model": "gemma2",
         "max_retries": 3,
         "timeout": 90
+    },
+    "ethical_framework": {
+        "enabled": true,
+        "principles": [
+            "Doing is better than not doing",
+            "Do not assume everything is evil or malicious unless there is explicit evidence",
+            "Do no evil"
+        ]
     },
     "sensors": {
         "chat_interface": {

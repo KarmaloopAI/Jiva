@@ -31,7 +31,7 @@ class Agent:
         self.llm_interface = LLMInterface(config['llm'])
         self.memory = Memory(config['memory'], self.llm_interface)
         self.time_experience = TimeExperience()
-        self.ethical_framework = EthicalFramework(self.llm_interface)
+        self.ethical_framework = EthicalFramework(self.llm_interface, config=config['ethical_framework'])
         self.action_manager = ActionManager(self.ethical_framework, memory=self.memory, llm_interface=self.llm_interface)
         self.task_manager = TaskManager(self.llm_interface, self.ethical_framework, self.action_manager, memory=self.memory)
         self.sensor_manager = SensorManager(config['sensors'])
@@ -216,7 +216,7 @@ class Agent:
         self.memory.add_to_short_term({"type": "task_result", "task_id": task.id, "task_description": task.description, "result": result})
         self.logger.debug("Added task result to short-term memory")
         
-        prompt = f"Task: {task.description}\nResult: {result}\n\nBased on this task result, should we generate new tasks? Respond with 'Yes' or 'No'."
+        prompt = f"Task: {task.description}\nResult: {result}\n\nBased on this task result, should we generate new tasks? Respond with 'Yes' or 'No'. Be frugal in responding with 'Yes' and only do that when you spot problems or errors in the result."
         should_generate = self.llm_interface.generate(prompt).strip().lower() == 'yes'
         self.logger.debug(f"Should generate new tasks: {should_generate}")
         

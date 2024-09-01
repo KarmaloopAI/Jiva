@@ -43,7 +43,7 @@ class LLMInterface:
             self.logger.error(f"Error generating response: {str(e)}")
             raise
 
-    def parse_json(self, response: str) -> Union[Any, dict]:
+    def parse_json(self, response: str) -> Union[Any, Dict[str, str]]:
         """
         Extract and parse a JSON object from an LLM response.
         
@@ -67,6 +67,11 @@ class LLMInterface:
             parsed_json = self._attempt_parse(json_string)
             if parsed_json is not None:
                 return parsed_json
+        
+        # If all attempts fail, try to construct a JSON-like structure
+        constructed_json = self._construct_json_from_text(response)
+        if constructed_json:
+            return constructed_json
         
         # If all attempts fail, return an error dictionary with the raw response
         logger.error("Failed to parse JSON after all attempts")
@@ -139,7 +144,53 @@ class LLMInterface:
         # Fix unclosed quotes
         json_string = re.sub(r'(?<!\\)"([^"]*?)(?<!\\)"(?=\s*[:,\]}])', r'"\1"', json_string)
         
+        # Remove newlines and extra spaces between keys and values
+        json_string = re.sub(r'"\s*:\s*"', '":"', json_string)
+        json_string = re.sub(r'"\s*:\s*\[', '":[', json_string)
+        json_string = re.sub(r'"\s*:\s*\{', '":{', json_string)
+        
         return json_string
+
+    def _construct_json_from_text(self, text: str) -> Union[Dict[str, Any], None]:
+        """
+        Attempt to construct a JSON-like structure from free text.
+        
+        Args:
+        text (str): The text to parse.
+        
+        Returns:
+        Dict[str, Any]: A constructed JSON-like dictionary, or None if parsing fails.
+        """
+        logger = logging.getLogger(__name__)
+        
+        # Look for key-value pairs in the text
+        pairs = re.findall(r'(?:^|\n)(["\w\s]+?):\s*(.+?)(?=\n["\w\s]+?:|$)', text, re.DOTALL)
+        if pairs:
+            result = {}
+            for key, value in pairs:
+                key = key.strip().strip('"')
+                value = value.strip()
+                # Check if value looks like a list
+                if value.startswith('[') and value.endswith(']'):
+                    try:
+                        value = json.loads(value)
+                    except json.JSONDecodeError:
+                        # If parsing as JSON fails, split by commas and strip whitespace
+                        value = [v.strip().strip('"') for v in value[1:-1].split(',')]
+                elif value.lower() in ['true', 'false']:
+                    value = value.lower() == 'true'
+                elif value.isdigit():
+                    value = int(value)
+                elif value.replace('.', '', 1).isdigit():
+                    value = float(value)
+                else:
+                    value = value.strip('"')
+                result[key] = value
+            logger.info("Constructed JSON-like structure from text")
+            return result
+        
+        logger.warning("Failed to construct JSON-like structure from text")
+        return None
 
     def process(self, input_data: Any) -> Dict[str, Any]:
         """Process input data and return structured information."""

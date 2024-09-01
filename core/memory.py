@@ -6,7 +6,7 @@ import json
 import logging
 
 from core.llm_interface import LLMInterface
-from utils.qdrant_handler import QdrantHandler, VECTOR_SIZE
+from utils.qdrant_handler import QdrantHandler
 
 class DateTimeEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -19,14 +19,19 @@ class Memory:
         self.config = config
         self.llm_interface = llm_interface
         self.short_term_memory: List[Dict[str, Any]] = []
-        self.qdrant_handler = QdrantHandler(
-            config['qdrant_host'],
-            config['qdrant_port'],
-            config['collection_name']
-        )
+        self.vector_size = config.get('vector_size', 3072)
         self.max_short_term_memory = config.get('max_short_term_memory', 100)
         self.logger = logging.getLogger("Jiva.Memory")
         self.json_encoder = DateTimeEncoder()
+        try:
+            self.qdrant_handler = QdrantHandler(
+                config['qdrant_host'],
+                config['qdrant_port'],
+                config['collection_name'],
+                self.vector_size
+            )
+        except Exception as e:
+            self.logger.error('Qdrant could not be connected to. Jiva will operate with limited memory capabilities.')
 
     def add_to_short_term(self, data: Dict[str, Any]):
         """Add a memory item to short-term memory."""
@@ -47,8 +52,8 @@ class Memory:
             serialized_item = self.json_encoder.encode(memory_item)
             embedding = self.llm_interface.get_embedding(serialized_item)
             
-            if len(embedding) != VECTOR_SIZE:
-                self.logger.error(f"Embedding size mismatch. Expected {VECTOR_SIZE}, got {len(embedding)}")
+            if len(embedding) != self.vector_size:
+                self.logger.error(f"Embedding size mismatch. Expected {self.vector_size}, got {len(embedding)}")
                 return
             
             point_id = self.qdrant_handler.add_point(
@@ -164,7 +169,7 @@ if __name__ == "__main__":
 
     # Mock LLMInterface and QdrantHandler
     mock_llm = MagicMock()
-    mock_llm.get_embedding.return_value = [0.1] * VECTOR_SIZE
+    mock_llm.get_embedding.return_value = [0.1] * 3072
 
     config = {
         'qdrant_host': 'localhost',
@@ -182,7 +187,7 @@ if __name__ == "__main__":
     print(f"Short-term memory size: {len(memory.get_short_term_memory())}")
 
     # Test querying long-term memory
-    mock_llm.get_embedding.return_value = [0.2] * VECTOR_SIZE
+    mock_llm.get_embedding.return_value = [0.2] * 3072
     results = memory.query_long_term_memory("test query")
     print(f"Long-term memory query results: {results}")
 

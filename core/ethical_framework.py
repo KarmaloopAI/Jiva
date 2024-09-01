@@ -5,16 +5,28 @@ import logging
 from core.llm_interface import LLMInterface
 
 class EthicalFramework:
-    def __init__(self, llm_interface: LLMInterface):
+    def __init__(self, llm_interface: LLMInterface, config: Dict[str, Any]):
         self.llm_interface = llm_interface
         self.logger = logging.getLogger("Jiva.EthicalFramework")
-        self.ethical_principles = [
+        
+        self.ethical_principles = config.get('principles', [
             "Doing is better than not doing",
             "Do not assume everything is evil or malicious unless there is explicit evidence",
             "Do no evil"
-        ]
+        ])
+        self.enabled = config.get('enabled', True)
+        self.logger.info(f"Ethical Framework initialized. Enabled: {self.enabled}")
+
+    def set_enabled(self, enabled: bool):
+        """Enable or disable the ethical framework."""
+        self.enabled = enabled
+        self.logger.info(f"Ethical Framework {'enabled' if enabled else 'disabled'}")
 
     def evaluate_task(self, task: Union[str, Dict[str, Any]]) -> bool:
+        if not self.enabled:
+            self.logger.info("Ethical Framework is disabled. Task approved without evaluation.")
+            return True
+
         if isinstance(task, dict):
             task_description = task.get('description', str(task))
         else:
@@ -56,6 +68,10 @@ class EthicalFramework:
             return True  # Default to allowing the task if there's an error
 
     def evaluate_action(self, action: str, params: Dict[str, Any]) -> bool:
+        if not self.enabled:
+            self.logger.info("Ethical Framework is disabled. Action approved without evaluation.")
+            return True
+
         prompt = f"""
         Action: {action}
         Parameters: {params}
@@ -81,6 +97,9 @@ class EthicalFramework:
             return False
 
     def get_ethical_explanation(self, task_or_action: str, is_task: bool = True) -> str:
+        if not self.enabled:
+            return "Ethical Framework is disabled. No ethical evaluation performed."
+
         prompt = f"""
         {'Task' if is_task else 'Action'}: {task_or_action}
 
@@ -103,6 +122,9 @@ class EthicalFramework:
         self.ethical_principles = new_principles
 
     def get_ethical_dilemma_resolution(self, scenario: str) -> str:
+        if not self.enabled:
+            return "Ethical Framework is disabled. No ethical dilemma resolution performed."
+
         prompt = f"""
         Ethical Dilemma Scenario:
         {scenario}
@@ -128,24 +150,18 @@ if __name__ == "__main__":
             import json
             return json.loads(json_str)
 
-    ef = EthicalFramework(MockLLMInterface())
-
-    # Test task evaluation
+    # Test with ethical framework enabled
+    ef_enabled = EthicalFramework(MockLLMInterface(), enabled=True)
     task = "Analyze user data to improve system performance"
-    is_ethical = ef.evaluate_task(task)
-    print(f"Is the task ethical? {is_ethical}")
+    is_ethical = ef_enabled.evaluate_task(task)
+    print(f"Ethical Framework Enabled - Is the task ethical? {is_ethical}")
 
-    # Test action evaluation
-    action = "send_email"
-    params = {"recipient": "user@example.com", "content": "Your account has been updated"}
-    is_ethical = ef.evaluate_action(action, params)
-    print(f"Is the action ethical? {is_ethical}")
+    # Test with ethical framework disabled
+    ef_disabled = EthicalFramework(MockLLMInterface(), enabled=False)
+    is_ethical = ef_disabled.evaluate_task(task)
+    print(f"Ethical Framework Disabled - Is the task ethical? {is_ethical}")
 
-    # Test getting ethical explanation
-    explanation = ef.get_ethical_explanation(task)
-    print(f"Ethical explanation: {explanation}")
-
-    # Test ethical dilemma resolution
-    dilemma = "Should we use user browsing data to personalize ads if it improves user experience but potentially infringes on privacy?"
-    resolution = ef.get_ethical_dilemma_resolution(dilemma)
-    print(f"Ethical dilemma resolution: {resolution}")
+    # Test enabling/disabling
+    ef_disabled.set_enabled(True)
+    is_ethical = ef_disabled.evaluate_task(task)
+    print(f"Ethical Framework Re-enabled - Is the task ethical? {is_ethical}")
