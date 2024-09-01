@@ -1,5 +1,6 @@
 # task_manager.py
 
+import re
 from typing import List, Dict, Any, Optional
 from queue import PriorityQueue
 from datetime import datetime
@@ -255,17 +256,21 @@ class TaskManager:
     def execute_task(self, task: Task) -> Any:
         self.logger.info(f"Executing task: {task.description}")
         try:
-            # Gather inputs from required tasks
-            for param in task.required_inputs:
-                for t in self.all_tasks:
-                    if t.lower().strip() in param.lower().strip() or t.lower().strip() in str(task.required_inputs[param]).lower().strip():
-                        input_task = self.memory.get_task_result(task.required_inputs[param])
-                        task.parameters[param] = input_task['result']
-            
-            for param in task.parameters:    
-                # Now check if the param value is still unresolved, if yes, then set it to the result of the parent task
-                if str(task.parameters[param]).strip().startswith('{{') and task.parent_id and task.parent_id in self.all_tasks:
-                    task.parameters[param] = self.all_tasks[task.parent_id].result
+            # Resolve parameters based on required inputs
+            for param, required_task_desc in task.required_inputs.items():
+                input_task_result = self.get_input_task_result(required_task_desc)
+                if input_task_result is not None:
+                    # Replace the placeholder in all parameters
+                    for key, value in task.parameters.items():
+                        if isinstance(value, str) and f'{{{{{param}}}}}' in value:
+                            task.parameters[key] = value.replace(f'{{{{{param}}}}}', str(input_task_result))
+                else:
+                    self.logger.warning(f"Could not find result for required input: {required_task_desc}")
+
+            # Check if any parameters still contain unresolved placeholders
+            for key, value in task.parameters.items():
+                if isinstance(value, str) and '{{' in value and '}}' in value:
+                    self.logger.warning(f"Parameter '{key}' contains unresolved placeholder: {value}")
 
             result = self.action_manager.execute_action(task.action, task.parameters)
             self.logger.info(f"Task executed successfully: {result}")
@@ -284,8 +289,22 @@ class TaskManager:
 
             return result
         except Exception as e:
-            self.logger.error(f"Error executing task: {str(e)}")
+            self.logger.error(f"Error executing task: {str(e)}", exc_info=True)
             return f"Error executing task: {str(e)}"
+
+    def get_input_task_result(self, task_description: str) -> Any:
+        """
+        Find the result of a task based on its exact description.
+        """
+        for task in reversed(self.all_tasks.values()):  # Start from the most recent task
+            if task.description.strip() == task_description.strip():
+                return task.result
+        
+        for task in reversed(self.all_tasks.values()):  # Start from the most recent task
+            if task_description.strip() in task.description.strip():
+                return task.result
+        
+        return None
 
     def has_pending_tasks(self) -> bool:
         return not self.task_queue.empty()

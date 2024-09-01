@@ -7,11 +7,10 @@ from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedR
 import logging
 import uuid
 
-VECTOR_SIZE = 3072  # Update this to match the actual size of your vectors
-
 class QdrantHandler:
-    def __init__(self, host: str, port: int, collection_name: str):
+    def __init__(self, host: str, port: int, collection_name: str, vector_size: int):
         self.client = QdrantClient(host=host, port=port)
+        self.vector_size = vector_size
         self.collection_name = collection_name
         self.logger = logging.getLogger("Jiva.QdrantHandler")
         self._ensure_collection_exists()
@@ -35,17 +34,17 @@ class QdrantHandler:
         try:
             self.client.create_collection(
                 collection_name=self.collection_name,
-                vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE)
+                vectors_config=VectorParams(size=self.vector_size, distance=Distance.COSINE)
             )
-            self.logger.info(f"Created new collection: {self.collection_name} with vector size {VECTOR_SIZE}")
+            self.logger.info(f"Created new collection: {self.collection_name} with vector size {self.vector_size}")
         except Exception as e:
             self.logger.error(f"Error creating collection: {e}")
             raise
 
     def add_point(self, vector: List[float], payload: Dict[str, Any]) -> str:
         try:
-            if len(vector) != VECTOR_SIZE:
-                raise ValueError(f"Vector dimension mismatch. Expected {VECTOR_SIZE}, got {len(vector)}")
+            if len(vector) != self.vector_size:
+                raise ValueError(f"Vector dimension mismatch. Expected {self.vector_size}, got {len(vector)}")
             point_id = str(uuid.uuid4())
             self.client.upsert(
                 collection_name=self.collection_name,
