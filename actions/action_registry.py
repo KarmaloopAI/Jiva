@@ -17,6 +17,8 @@ from actions.memory_retrieval import (
 )
 from actions.think import think
 
+from actions.web_interface import web_search, visit_page, find_links, set_llm_interface
+
 def get_action_registry(llm_interface: LLMInterface, memory: Memory) -> Dict[str, Callable]:
     """
     Get the registry of all available actions.
@@ -28,6 +30,7 @@ def get_action_registry(llm_interface: LLMInterface, memory: Memory) -> Dict[str
     Returns:
         Dict[str, Callable]: A dictionary mapping action names to their corresponding functions.
     """
+    set_llm_interface(llm=llm_interface)
     actions = {
         # File operations
         "read_file": read_file,
@@ -48,7 +51,10 @@ def get_action_registry(llm_interface: LLMInterface, memory: Memory) -> Dict[str
         # "query_long_term_memory": lambda query, limit=5: query_long_term_memory(memory, query, limit),
         
         # Think action
-        "think": lambda prompt, context=None: think(llm_interface, prompt, context)
+        "think": lambda prompt, context=None: think(llm_interface, prompt, context),
+        "web_search": web_search,
+        "visit_page": visit_page,
+        "find_links": find_links,
     }
 
     # Set docstrings of lambda functions
