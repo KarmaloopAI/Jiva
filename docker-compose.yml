@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  jiva:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    environment:
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - OLLAMA_HOST=http://ollama:11435
+    depends_on:
+      - qdrant
+      - ollama
+    stdin_open: true
+    tty: true
+    command: >
+        sh -c "
+            if [ ! -f /app/config.json ]; then
+                echo 'config.json not found. Creating from config.example.json...'
+                cp /app/config.example.json /app/config.json
+            fi
+            python main.py
+        "
+
+
+  qdrant:
+    image: qdrant/qdrant
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_storage:/qdrant/storage
+
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11435:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+
+volumes:
+  qdrant_storage:
+  ollama_models:
