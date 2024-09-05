@@ -5,7 +5,8 @@ from core.llm_interface import LLMInterface
 
 def think(llm_interface: LLMInterface, prompt: str, context: Optional[Dict[str, Any]] = None) -> str:
     """
-    Use the LLM to generate a response based on a prompt and optional context.
+    Use the LLM to generate a response based on a prompt and optional context. If the prompt depends on the result from a prior task, then infuse the results
+    of the prior task using a {{placeholder}} into the prompt or the context, and then correctly link it in required inputs.
 
     Args:
         prompt (str): The prompt to send to the LLM. Preferrably, keep this as static text when required_inputs is empty.

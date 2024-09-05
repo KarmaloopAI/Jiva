@@ -146,6 +146,8 @@ class TaskManager:
             }},
             "required_inputs": {{"value2": "Exact Description of prerequisite task"}}
         }}
+
+        Please ensure that the response adheres to the structure defined, and if there are any required_inputs, then they have been referenced with a placeholder like {{value}} in the parameters as shown in the example.
         """
         
         self.logger.debug(f"Generating tasks with prompt: {prompt}")
@@ -262,8 +264,8 @@ class TaskManager:
                 if input_task_result is not None:
                     # Replace the placeholder in all parameters
                     for key, value in task.parameters.items():
-                        if isinstance(value, str) and f'{{{{{param}}}}}' in value:
-                            task.parameters[key] = value.replace(f'{{{{{param}}}}}', str(input_task_result))
+                        if isinstance(value, str) and f'{{{{{param}}}}}' in str(value):
+                            task.parameters[key] = str(value).replace(f'{{{{{param}}}}}', str(input_task_result))
                 else:
                     self.logger.warning(f"Could not find result for required input: {required_task_desc}")
 
