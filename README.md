@@ -1,9 +1,10 @@
 # ♾️ Jiva Framework
 
 ## AI Autonomous Agent for Open Source LLMs
-Jiva Framework was born out of the need to run autonomous goal-based agents that could run with Open Source LLMs like Llama, Gemma, Mistral and Phi at their core. This eliminates the cost
-concern that we would otherwise have when running against closed source proprietary models - specially when running autonomously.
+Jiva Framework was born out of the need to run autonomous goal-based agents that could run with Open Source LLMs like Llama, Gemma, Mistral and Phi locally on your machine using Ollama. This eliminates the cost concern that we would otherwise have when running against closed source proprietary models - specially when running autonomously.
 You could easily tweak it to act as your AutoLlama or AutoGemma to autonomously complete basic tasks.
+
+Does your machine not have a GPU powerful enough to run LLMs locally? No problem! You can still run with proprietary LLMs like OpenAi by simply tweaking Jiva's ```config.json``` file.
 
 ## 🚀 Getting Started
 
