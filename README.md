@@ -6,6 +6,9 @@ You could easily tweak it to act as your AutoLlama or AutoGemma to autonomously 
 
 Does your machine not have a GPU powerful enough to run LLMs locally? No problem! You can still run with proprietary LLMs like OpenAi by simply tweaking Jiva's ```config.json``` file.
 
+## Quick Demo
+![Jiva in action](jiva_demo.gif)
+
 ## 🚀 Getting Started
 
 ### Quick start with Docker Compose
@@ -94,17 +97,19 @@ To start the Jiva agent, run:
 python main.py
 ```
 
+## Ready to customize and extend Jiva?
+### Head over to our documentation
+[Jiva Framework Documentation](docs/documentation-index.md)
+
 ## An AI Agent with Temporal Awareness and Ethical Decision-Making
 
-Jiva Framework is an innovative open-source project aimed at creating an AI agent that experiences time, forms memories, and operates based on Dharmic principles. This framework provides a unique approach to AI development, incorporating concepts such as cyclical time perception, ethical decision-making, and continuous learning.
-
-![Jiva Framework Logo](https://via.placeholder.com/150?text=Jiva+Framework)
+Jiva Framework is an innovative open-source project aimed at creating an AI agent that experiences time, forms memories, and operates based on ethical principles. This framework provides a unique approach to AI development, incorporating concepts such as cyclical time perception, ethical decision-making, and continuous learning.
 
 ## 🌟 Key Features
 
 - **Temporal Awareness**: Jiva operates on a day/night cycle, allowing for a more human-like perception of time.
 - **Memory Systems**: Utilizes both short-term and long-term memory, powered by vector databases for efficient storage and retrieval.
-- **Ethical Framework**: Incorporates Dharmic principles into decision-making processes, ensuring responsible AI behavior.
+- **Ethical Framework**: Incorporates ethical principles into decision-making processes, ensuring responsible AI behavior.
 - **Task Management**: Autonomously generates, prioritizes, and executes tasks to achieve given goals.
 - **Adaptive Learning**: Engages in cyclical learning and refinement of knowledge through regular "sleep" cycles. There is more to come on this, see below.
 - **Sensor Integration**: Modular design allows for easy integration of various input sensors. Supports only human-input as of now.
@@ -127,12 +132,14 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🙏 Acknowledgments
 
-- The Jiva Framework is inspired by Dharmic principles and modern AI research.
+- The Jiva Framework is inspired by ethical principles and modern AI research.
 - Special thanks to the open-source communities behind Ollama and Qdrant.
 
 ## 📞 Contact
 
-For questions, suggestions, or discussions about the Jiva Framework, please [open an issue](https://github.com/your-username/jiva-framework/issues) or join our [community chat](https://discord.gg/jiva-framework).
+You can reach out to me via LinkedIn here - [Abi Chatterjee](https://www.linkedin.com/in/abi-chatterjee/)
+
+For questions, suggestions, or discussions about the Jiva Framework, please [open an issue](https://github.com/KarmaloopAI/Jiva/issues).
 
 ---
 
