@@ -15,7 +15,7 @@ from core.memory import Memory
 class Task:
     def __init__(self, description: str, action: str, parameters: Dict[str, Any], 
                  priority: int = 1, deadline: Optional[datetime] = None, 
-                 parent_id: Optional[str] = None, required_inputs: Dict[str, Any] = None):
+                 parent_id: Optional[str] = None, required_inputs: Dict[str, Any] = None, goal: str = None):
         self.id = str(uuid.uuid4())
         self.description = description
         self.action = action
@@ -31,11 +31,22 @@ class Task:
         self.ethical_evaluation: Optional[Dict[str, Any]] = None
         self.required_inputs = required_inputs or {}
         self.output = None
+        self.goal = goal
 
     def __lt__(self, other):
+        if not isinstance(other, Task):
+            return NotImplemented
         if self.priority == other.priority:
             return self.created_at < other.created_at
         return self.priority > other.priority
+
+    def __eq__(self, other):
+        if not isinstance(other, Task):
+            return NotImplemented
+        return self.id == other.id
+
+    def __repr__(self):
+        return f"Task(id={self.id}, description='{self.description}', priority={self.priority}, status='{self.status}')"
 
 class TaskManager:
     def __init__(self, llm_interface: LLMInterface, ethical_framework: EthicalFramework, 
@@ -91,7 +102,7 @@ class TaskManager:
         # Get actions relevant to this run.
         relevant_actions = self.get_relevant_actions(goal=goal, context=context)
         # Mandatory actions fo context
-        mandatory_actions = ['think']
+        mandatory_actions = ['think', 'replan_tasks']
         
         # Format the actions and their parameters for the prompt
         action_descriptions = []
@@ -127,6 +138,9 @@ class TaskManager:
 
         The value of required_inputs should be a dictionary of parameter name (from the function) and the exact task description of a previous task.
 
+        If you do not have enough information to plan all of the tasks at once, you can create some initial tasks and temporarily end with a replan_tasks action.
+        Once information is gathered from previous tasks, a replan_tasks will prepare a fresh set of next tasks.
+
         # Context
         ## Understanding the context
         The context below is a series of short term memory objects of which the last one is the most recent input
@@ -160,17 +174,18 @@ class TaskManager:
             if not isinstance(tasks, list):
                 raise ValueError("Expected a list of tasks")
             
-            processed_tasks = self.add_raw_tasks(tasks)
+            processed_tasks = self.add_raw_tasks(tasks, goal)
             return processed_tasks
         except Exception as e:
             self.logger.error(f"Error parsing LLM response: {e}")
             return [{"description": f"Analyze goal: {goal}", "action": "think", "parameters": {"prompt": goal}, "required_inputs": []}]
 
-    def add_raw_tasks(self, raw_tasks: Dict[str, Any]) -> List[Task]:
+    def add_raw_tasks(self, raw_tasks: Dict[str, Any], goal: str) -> List[Task]:
         tasks: List[Task] = []
         last_task_id = None
         for raw_task in raw_tasks:
             task = Task(**raw_task)
+            task.goal = goal
 
             # Reset the last_task_id if this current task is a think task.
             if task.action.strip().lower() == 'think':
@@ -274,7 +289,11 @@ class TaskManager:
                 if isinstance(value, str) and '{{' in value and '}}' in value:
                     self.logger.warning(f"Parameter '{key}' contains unresolved placeholder: {value}")
 
-            result = self.action_manager.execute_action(task.action, task.parameters)
+            if task.action == 'replan_tasks':
+                new_tasks = self.replan_tasks(task)
+                result = str(new_tasks)
+            else:
+                result = self.action_manager.execute_action(task.action, task.parameters)
             self.logger.info(f"Task executed successfully: {result}")
             
             # Store the result
@@ -293,6 +312,34 @@ class TaskManager:
         except Exception as e:
             self.logger.error(f"Error executing task: {str(e)}", exc_info=True)
             return f"Error executing task: {str(e)}"
+    
+    def replan_tasks(self, task: Task):
+        """
+        Replans all tasks to achieve goal state.
+        """
+        current_tasks = []
+        for task_id in self.all_tasks:
+            t = self.all_tasks[task_id]
+            if t.goal == task.goal:
+                current_tasks.append({
+                    "description": t.description,
+                    "action": t.action,
+                    "parameters": t.parameters,
+                    "required_inputs": t.required_inputs,
+                    "result": str(t.result)[:100]
+                })
+        
+        context = {
+            "previous_tasks": current_tasks
+        }
+
+        replan_prompt = f"""
+        Replan tasks to achieve this goal: {task.goal}
+        You have partially executed some tasks to achieve this task and then requested replanning. The previous tasks and their results are available in context.
+        """
+
+        new_tasks = self.generate_tasks(task.goal, context)
+        return new_tasks
 
     def get_input_task_result(self, task_description: str) -> Any:
         """

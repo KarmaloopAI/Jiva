@@ -145,7 +145,7 @@ class Agent:
 
     def get_context(self) -> Dict[str, Any]:
         self.logger.debug("Retrieving context")
-        recent_memories = self.memory.get_short_term_memory()
+        recent_memories = self.memory.get_short_term_memory()[-2:]
         context = {
             "recent_memories": recent_memories,
             "current_time": self.time_experience.get_current_time().isoformat(),
