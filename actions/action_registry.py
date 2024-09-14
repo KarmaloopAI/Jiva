@@ -15,7 +15,7 @@ from actions.memory_retrieval import (
     retrieve_recent_memory, retrieve_task_result,
     retrieve_context_for_task, query_long_term_memory
 )
-from actions.think import think
+from actions.think import think, replan_tasks
 
 from actions.web_interface import web_search, visit_page, find_links, set_llm_interface
 
@@ -48,10 +48,11 @@ def get_action_registry(llm_interface: LLMInterface, memory: Memory) -> Dict[str
         # "retrieve_recent_memory": lambda n: retrieve_recent_memory(memory, n),
         # "retrieve_task_result": lambda task_description: retrieve_task_result(memory, task_description),
         # "retrieve_context_for_task": lambda task_description, n=5: retrieve_context_for_task(memory, task_description, n),
-        # "query_long_term_memory": lambda query, limit=5: query_long_term_memory(memory, query, limit),
+        "query_long_term_memory": lambda query, limit=5: query_long_term_memory(memory, query, limit),
         
         # Think action
         "think": lambda prompt, context=None: think(llm_interface, prompt, context),
+        "replan_tasks": replan_tasks,
         "web_search": web_search,
         "visit_page": visit_page,
         "find_links": find_links,
@@ -59,5 +60,6 @@ def get_action_registry(llm_interface: LLMInterface, memory: Memory) -> Dict[str
 
     # Set docstrings of lambda functions
     actions["think"].__doc__ = think.__doc__
+    actions["query_long_term_memory"].__doc__ = query_long_term_memory.__doc__
 
     return actions
