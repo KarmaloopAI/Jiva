@@ -111,8 +111,8 @@ class Agent:
                     context = self.get_context()
                     new_tasks = self.task_manager.generate_tasks(self.current_goal, context)
                     
-                    for task_id in new_tasks:
-                        task_info = self.task_manager.get_task_status(task_id)
+                    for task in new_tasks:
+                        task_info = self.task_manager.get_task_status(task.id)
                         self.memory.add_to_short_term({"type": "new_task", "task": task_info})
                         self.logger.info(f"New task added: {task_info}")
         except Exception as e:
@@ -138,8 +138,8 @@ class Agent:
         self.memory.add_to_short_term({"type": "new_goal", "goal": self.current_goal})
         self.logger.debug("Added new goal to short-term memory")
         
-        for task_id in new_tasks:
-            task_info = self.task_manager.get_task_status(task_id)
+        for task in new_tasks:
+            task_info = self.task_manager.get_task_status(task.id)
             self.memory.add_to_short_term({"type": "new_task", "task": task_info})
             self.logger.info(f"New task added for goal: {self.json_encoder.encode(task_info)}")
 
@@ -223,8 +223,8 @@ class Agent:
         if should_generate:
             context = self.get_context()
             new_tasks = self.task_manager.generate_tasks(self.current_goal, context)
-            for task_id in new_tasks:
-                task_info = self.task_manager.get_task_status(task_id)
+            for task in new_tasks:
+                task_info = self.task_manager.get_task_status(task.id)
                 self.memory.add_to_short_term({"type": "new_task", "task": task_info})
                 self.logger.info(f"New follow-up task added: {self.json_encoder.encode(task_info)}")
 

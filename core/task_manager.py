@@ -12,6 +12,15 @@ from core.ethical_framework import EthicalFramework
 from core.action_manager import ActionManager
 from core.memory import Memory
 
+def parse_int_or_default(value, default=1):
+    """
+    Parse a string as an integer, or return a default value if parsing fails.
+    """
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return default
+
 class Task:
     def __init__(self, description: str, action: str, parameters: Dict[str, Any], 
                  priority: int = 1, deadline: Optional[datetime] = None, 
@@ -20,7 +29,7 @@ class Task:
         self.description = description
         self.action = action
         self.parameters = parameters
-        self.priority = priority
+        self.priority = parse_int_or_default(priority)
         self.deadline = deadline
         self.created_at = datetime.now()
         self.completed_at = None
