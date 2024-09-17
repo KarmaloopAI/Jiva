@@ -4,7 +4,7 @@ import requests
 from anthropic import Anthropic
 from .base_provider import BaseLLMProvider
 
-class AnthropicLLMProvider(BaseLLMProvider):
+class AnthropicProvider(BaseLLMProvider):
     def __init__(self, config: Dict[str, Any]):
         self.anthropic_api_key = config.get('anthropic_api_key')
         self.anthropic_model = config.get('anthropic_model', 'claude-3-opus-20240229')
