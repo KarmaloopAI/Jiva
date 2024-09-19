@@ -31,3 +31,6 @@ openai==1.43.0
 playwright
 googlesearch-python
 markdownify
+
+# Mistral AI
+mistralai==1.1.0
