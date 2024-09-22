@@ -1,5 +1,5 @@
 from typing import List, Dict, Any
-from mistralai import Mistral, MistralClient
+from mistralai import Mistral
 from .base_provider import BaseLLMProvider
 
 class MistralAIProvider(BaseLLMProvider):
@@ -27,10 +27,8 @@ class MistralAIProvider(BaseLLMProvider):
         try:
             response = self.client.embeddings.create(
                 model="mistral-embed",
-                input=[text]
+                inputs=[text]
             )
             return response.data[0].embedding
         except Exception as e:
             raise Exception(f"Error generating embedding: {str(e)}")
-
-    # Additional methods can be added here as needed, such as streaming responses or handling specific Mistral AI features
