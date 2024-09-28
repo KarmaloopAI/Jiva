@@ -8,6 +8,7 @@ from llm_providers.base_provider import BaseLLMProvider
 from llm_providers.ollama_provider import OllamaProvider
 from llm_providers.openai_provider import OpenAIProvider
 from llm_providers.anthropic_provider import AnthropicProvider
+from llm_providers.mistral_ai_provider import MistralAIProvider
 
 class JSONParseError(Exception):
     pass
@@ -26,6 +27,8 @@ class LLMInterface:
             return OpenAIProvider(self.config)
         elif provider_name == 'anthropic':
             return AnthropicProvider(self.config)
+        elif provider_name == 'mistralai':
+            return MistralAIProvider(self.config)
         else:
             raise ValueError(f"Unsupported LLM provider: {provider_name}")
 
