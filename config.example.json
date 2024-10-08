@@ -31,7 +31,7 @@
   },
   "sensors": {
     "chat_interface": {
-      "prompt": "Jiva> "
+      "prompt": "∞ Jiva ∞ > "
     }
   },
   "memory_consolidation_threshold": 2,
