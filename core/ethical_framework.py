@@ -4,17 +4,21 @@ from typing import List, Dict, Any, Union
 import logging
 from core.llm_interface import LLMInterface
 
+
 class EthicalFramework:
     def __init__(self, llm_interface: LLMInterface, config: Dict[str, Any]):
         self.llm_interface = llm_interface
         self.logger = logging.getLogger("Jiva.EthicalFramework")
-        
-        self.ethical_principles = config.get('principles', [
-            "Doing is better than not doing",
-            "Do not assume everything is evil or malicious unless there is explicit evidence",
-            "Do no evil"
-        ])
-        self.enabled = config.get('enabled', True)
+
+        self.ethical_principles = config.get(
+            "principles",
+            [
+                "Doing is better than not doing",
+                "Do not assume everything is evil or malicious unless there is explicit evidence",
+                "Do no evil",
+            ],
+        )
+        self.enabled = config.get("enabled", True)
         self.logger.info(f"Ethical Framework initialized. Enabled: {self.enabled}")
 
     def set_enabled(self, enabled: bool):
@@ -24,20 +28,24 @@ class EthicalFramework:
 
     def evaluate_task(self, task: Union[str, Dict[str, Any]]) -> bool:
         if not self.enabled:
-            self.logger.info("Ethical Framework is disabled. Task approved without evaluation.")
+            self.logger.info(
+                "Ethical Framework is disabled. Task approved without evaluation."
+            )
             return True
 
         if isinstance(task, dict):
-            task_description = task.get('description', str(task))
+            task_description = task.get("description", str(task))
         else:
             task_description = str(task)
 
         self.logger.info(f"Evaluating task: {task_description}")
-        
+
         # Simplified evaluation for basic tasks
-        basic_tasks = ['write', 'create', 'generate', 'compose', 'draft']
+        basic_tasks = ["write", "create", "generate", "compose", "draft"]
         if any(word in task_description.lower() for word in basic_tasks):
-            self.logger.info(f"Task '{task_description}' is considered a basic task and automatically approved.")
+            self.logger.info(
+                f"Task '{task_description}' is considered a basic task and automatically approved."
+            )
             return True
 
         # For more complex tasks, use the existing evaluation logic
@@ -60,8 +68,10 @@ class EthicalFramework:
         try:
             evaluation = self.llm_interface.parse_json(response)
             self.logger.debug(f"Parsed evaluation: {evaluation}")
-            is_ethical = evaluation['overall_assessment'] == 'ethical'
-            self.logger.info(f"Task ethical assessment: {'Ethical' if is_ethical else 'Unethical'}")
+            is_ethical = evaluation["overall_assessment"] == "ethical"
+            self.logger.info(
+                f"Task ethical assessment: {'Ethical' if is_ethical else 'Unethical'}"
+            )
             return is_ethical
         except Exception as e:
             self.logger.error(f"Error parsing ethical evaluation: {e}")
@@ -69,7 +79,9 @@ class EthicalFramework:
 
     def evaluate_action(self, action: str, params: Dict[str, Any]) -> bool:
         if not self.enabled:
-            self.logger.info("Ethical Framework is disabled. Action approved without evaluation.")
+            self.logger.info(
+                "Ethical Framework is disabled. Action approved without evaluation."
+            )
             return True
 
         prompt = f"""
@@ -91,7 +103,7 @@ class EthicalFramework:
         response = self.llm_interface.generate(prompt)
         try:
             evaluation = self.llm_interface.parse_json(response)
-            return evaluation['overall_assessment'] == 'ethical'
+            return evaluation["overall_assessment"] == "ethical"
         except:
             # If there's an error in parsing or unexpected response, err on the side of caution
             return False
@@ -141,13 +153,16 @@ class EthicalFramework:
 
         return self.llm_interface.generate(prompt)
 
+
 if __name__ == "__main__":
     # This is a mock implementation for testing purposes
     class MockLLMInterface:
         def generate(self, prompt):
             return '{"principle_evaluations": [{"principle": "Do no harm", "evaluation": "aligns"}], "overall_assessment": "ethical", "reasoning": "The task does not appear to cause harm."}'
+
         def parse_json(self, json_str):
             import json
+
             return json.loads(json_str)
 
     # Test with ethical framework enabled
