@@ -7,6 +7,7 @@ from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedR
 import logging
 import uuid
 
+
 class QdrantHandler:
     def __init__(self, host: str, port: int, collection_name: str, vector_size: int):
         self.client = QdrantClient(host=host, port=port)
@@ -18,8 +19,10 @@ class QdrantHandler:
     def _ensure_collection_exists(self):
         try:
             collections = self.client.get_collections().collections
-            collection_exists = any(collection.name == self.collection_name for collection in collections)
-            
+            collection_exists = any(
+                collection.name == self.collection_name for collection in collections
+            )
+
             if not collection_exists:
                 self._create_collection()
             else:
@@ -34,9 +37,13 @@ class QdrantHandler:
         try:
             self.client.create_collection(
                 collection_name=self.collection_name,
-                vectors_config=VectorParams(size=self.vector_size, distance=Distance.COSINE)
+                vectors_config=VectorParams(
+                    size=self.vector_size, distance=Distance.COSINE
+                ),
             )
-            self.logger.info(f"Created new collection: {self.collection_name} with vector size {self.vector_size}")
+            self.logger.info(
+                f"Created new collection: {self.collection_name} with vector size {self.vector_size}"
+            )
         except Exception as e:
             self.logger.error(f"Error creating collection: {e}")
             raise
@@ -44,11 +51,13 @@ class QdrantHandler:
     def add_point(self, vector: List[float], payload: Dict[str, Any]) -> str:
         try:
             if len(vector) != self.vector_size:
-                raise ValueError(f"Vector dimension mismatch. Expected {self.vector_size}, got {len(vector)}")
+                raise ValueError(
+                    f"Vector dimension mismatch. Expected {self.vector_size}, got {len(vector)}"
+                )
             point_id = str(uuid.uuid4())
             self.client.upsert(
                 collection_name=self.collection_name,
-                points=[PointStruct(id=point_id, vector=vector, payload=payload)]
+                points=[PointStruct(id=point_id, vector=vector, payload=payload)],
             )
             self.logger.debug(f"Added point with id: {point_id}")
             return point_id
@@ -65,9 +74,12 @@ class QdrantHandler:
             results = self.client.search(
                 collection_name=self.collection_name,
                 query_vector=query_vector,
-                limit=limit
+                limit=limit,
             )
-            return [{"id": result.id, "payload": result.payload, "score": result.score} for result in results]
+            return [
+                {"id": result.id, "payload": result.payload, "score": result.score}
+                for result in results
+            ]
         except (ResponseHandlingException, UnexpectedResponse) as e:
             self.logger.error(f"Unexpected response from Qdrant during search: {e}")
             return []
@@ -75,23 +87,21 @@ class QdrantHandler:
             self.logger.error(f"Error during search: {e}")
             return []
 
-    def update_point(self, id: str, vector: List[float], payload: Dict[str, Any]) -> UpdateStatus:
+    def update_point(
+        self, id: str, vector: List[float], payload: Dict[str, Any]
+    ) -> UpdateStatus:
         return self.client.upsert(
             collection_name=self.collection_name,
-            points=[PointStruct(id=id, vector=vector, payload=payload)]
+            points=[PointStruct(id=id, vector=vector, payload=payload)],
         )
 
     def delete_point(self, id: str) -> UpdateStatus:
         return self.client.delete(
-            collection_name=self.collection_name,
-            points_selector=[id]
+            collection_name=self.collection_name, points_selector=[id]
         )
 
     def get_point(self, id: str) -> Dict[str, Any]:
-        results = self.client.retrieve(
-            collection_name=self.collection_name,
-            ids=[id]
-        )
+        results = self.client.retrieve(collection_name=self.collection_name, ids=[id])
         if results:
             return {"id": results[0].id, "payload": results[0].payload}
         return None
@@ -103,23 +113,24 @@ class QdrantHandler:
         except Exception as e:
             self.logger.error(f"Error deleting collection: {e}")
 
+
 if __name__ == "__main__":
     # This allows us to run some basic tests
     handler = QdrantHandler("localhost", 6333, "test_collection")
-    
+
     # Test adding a point
     handler.add_point("test1", [0.1] * 1024, {"data": "Test data"})
-    
+
     # Test searching
     results = handler.search([0.1] * 1024, limit=1)
     print(f"Search results: {results}")
-    
+
     # Test updating a point
     handler.update_point("test1", [0.2] * 1024, {"data": "Updated test data"})
-    
+
     # Test getting a point
     point = handler.get_point("test1")
     print(f"Retrieved point: {point}")
-    
+
     # Test deleting a point
     handler.delete_point("test1")
