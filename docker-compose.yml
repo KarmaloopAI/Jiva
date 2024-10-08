@@ -1,4 +1,4 @@
-version: '3.8'
+version: "3.8"
 
 services:
   jiva:
@@ -18,14 +18,13 @@ services:
     stdin_open: true
     tty: true
     command: >
-        sh -c "
-            if [ ! -f /app/config.json ]; then
-                echo 'config.json not found. Creating from config.example.json...'
-                cp /app/config.example.json /app/config.json
-            fi
-            python main.py
-        "
-
+      sh -c "
+          if [ ! -f /app/config.json ]; then
+              echo 'config.json not found. Creating from config.example.json...'
+              cp /app/config.example.json /app/config.json
+          fi
+          python main.py
+      "
 
   qdrant:
     image: qdrant/qdrant
