@@ -34,11 +34,20 @@ services:
       - qdrant_storage:/qdrant/storage
 
   ollama:
-    image: docker.io/ollama/ollama:latest
+    image: docker.io/ollama/ollama:rocm
     ports:
       - "11435:11434"
     volumes:
       - ollama_models:/root/.ollama
+    environment:
+      - "HSA_OVERRIDE_GFX_VERSION=10.3.0"
+    devices:
+      # Remember to run `setsebool -P  container_use_devices=true`
+      # to allow rootless container access to GPU devices
+      - "/dev/kfd"
+      - "/dev/dri"
+    group_add:
+      - "video"
 
 volumes:
   qdrant_storage:
