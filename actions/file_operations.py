@@ -6,6 +6,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
 def expand_user_path(file_path: str) -> str:
     """
     Expand a user's home directory symbol (e.g., "~/") to a full path, or return the original path if it's a simple filename.
@@ -20,6 +21,7 @@ def expand_user_path(file_path: str) -> str:
         return file_path
     return os.path.expanduser(file_path)
 
+
 def ensure_directory_exists(file_path: str) -> None:
     """
     Ensure that the directory for the given file path exists. Creates directories if they do not exist.
@@ -30,6 +32,7 @@ def ensure_directory_exists(file_path: str) -> None:
     directory = os.path.dirname(file_path)
     if directory:
         os.makedirs(directory, exist_ok=True)
+
 
 def read_file(file_path: str) -> str:
     """
@@ -43,7 +46,7 @@ def read_file(file_path: str) -> str:
     """
     try:
         full_path = os.path.abspath(expand_user_path(file_path))
-        with open(full_path, 'r') as file:
+        with open(full_path, "r") as file:
             content = file.read()
         logger.info(f"File read successfully: {full_path}")
         return content
@@ -53,6 +56,7 @@ def read_file(file_path: str) -> str:
     except IOError as e:
         logger.error(f"Error reading file {full_path}: {str(e)}")
         return f"Error reading file: {str(e)}"
+
 
 def write_file(file_path: str, content: str) -> str:
     """
@@ -69,13 +73,14 @@ def write_file(file_path: str, content: str) -> str:
     try:
         full_path = os.path.abspath(expand_user_path(file_path))
         ensure_directory_exists(full_path)
-        with open(full_path, 'w') as file:
+        with open(full_path, "w") as file:
             file.write(content)
         logger.info(f"File written successfully: {full_path}")
         return f"File written successfully: {full_path}"
     except IOError as e:
         logger.error(f"Error writing to file {full_path}: {str(e)}")
         return f"Error writing to file: {str(e)}"
+
 
 def append_file(file_path: str, content: str) -> str:
     """
@@ -91,13 +96,14 @@ def append_file(file_path: str, content: str) -> str:
     try:
         full_path = os.path.abspath(expand_user_path(file_path))
         ensure_directory_exists(full_path)
-        with open(full_path, 'a') as file:
+        with open(full_path, "a") as file:
             file.write(content)
         logger.info(f"Content appended successfully to: {full_path}")
         return f"Content appended successfully to: {full_path}"
     except IOError as e:
         logger.error(f"Error appending to file {full_path}: {str(e)}")
         return f"Error appending to file: {str(e)}"
+
 
 def delete_file(file_path: str) -> str:
     """
@@ -121,6 +127,7 @@ def delete_file(file_path: str) -> str:
         logger.error(f"Error deleting file {full_path}: {str(e)}")
         return f"Error deleting file: {str(e)}"
 
+
 def list_directory(directory_path: str) -> List[str]:
     """
     List all contents of the specified directory.
@@ -143,6 +150,7 @@ def list_directory(directory_path: str) -> List[str]:
         logger.error(f"Error listing directory {full_path}: {str(e)}")
         return [f"Error listing directory: {str(e)}"]
 
+
 def create_directory(directory_path: str) -> str:
     """
     Create a new directory at the specified path.
@@ -162,6 +170,7 @@ def create_directory(directory_path: str) -> str:
         logger.error(f"Error creating directory {full_path}: {str(e)}")
         return f"Error creating directory: {str(e)}"
 
+
 def read_json(file_path: str) -> Dict[str, Any]:
     """
     Read a JSON file and return its contents as a dictionary.
@@ -174,7 +183,7 @@ def read_json(file_path: str) -> Dict[str, Any]:
     """
     try:
         full_path = os.path.abspath(expand_user_path(file_path))
-        with open(full_path, 'r') as file:
+        with open(full_path, "r") as file:
             data = json.load(file)
         logger.info(f"JSON file read successfully: {full_path}")
         return data
@@ -187,6 +196,7 @@ def read_json(file_path: str) -> Dict[str, Any]:
     except IOError as e:
         logger.error(f"Error reading JSON file {full_path}: {str(e)}")
         return {"error": f"Error reading JSON file: {str(e)}"}
+
 
 def write_json(file_path: str, data: Dict[str, Any]) -> str:
     """
@@ -202,13 +212,14 @@ def write_json(file_path: str, data: Dict[str, Any]) -> str:
     try:
         full_path = os.path.abspath(expand_user_path(file_path))
         ensure_directory_exists(full_path)
-        with open(full_path, 'w') as file:
+        with open(full_path, "w") as file:
             json.dump(data, file, indent=2)
         logger.info(f"JSON file written successfully: {full_path}")
         return f"JSON file written successfully: {full_path}"
     except IOError as e:
         logger.error(f"Error writing JSON file {full_path}: {str(e)}")
         return f"Error writing JSON file: {str(e)}"
+
 
 def read_csv(file_path: str) -> List[Dict[str, Any]]:
     """
@@ -222,7 +233,7 @@ def read_csv(file_path: str) -> List[Dict[str, Any]]:
     """
     try:
         full_path = os.path.abspath(expand_user_path(file_path))
-        with open(full_path, 'r') as file:
+        with open(full_path, "r") as file:
             reader = csv.DictReader(file)
             data = list(reader)
         logger.info(f"CSV file read successfully: {full_path}")
@@ -236,6 +247,7 @@ def read_csv(file_path: str) -> List[Dict[str, Any]]:
     except IOError as e:
         logger.error(f"Error reading CSV file {full_path}: {str(e)}")
         return [{"error": f"Error reading CSV file: {str(e)}"}]
+
 
 def write_csv(file_path: str, data: List[Dict[str, Any]]) -> str:
     """
@@ -251,12 +263,12 @@ def write_csv(file_path: str, data: List[Dict[str, Any]]) -> str:
     if not data:
         logger.warning(f"No data to write to CSV file: {file_path}")
         return f"No data to write to CSV file: {file_path}"
-    
+
     try:
         full_path = os.path.abspath(expand_user_path(file_path))
         ensure_directory_exists(full_path)
         fieldnames = data[0].keys()
-        with open(full_path, 'w', newline='') as file:
+        with open(full_path, "w", newline="") as file:
             writer = csv.DictWriter(file, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(data)
@@ -266,10 +278,11 @@ def write_csv(file_path: str, data: List[Dict[str, Any]]) -> str:
         logger.error(f"Error writing CSV file {full_path}: {str(e)}")
         return f"Error writing CSV file: {str(e)}"
 
+
 if __name__ == "__main__":
     # Set up logging for testing
     logging.basicConfig(level=logging.INFO)
-    
+
     # Test the functions
     print(create_directory("test_dir"))
     print(write_file("test_dir/test.txt", "Hello, World!"))
@@ -279,7 +292,12 @@ if __name__ == "__main__":
     print(list_directory("test_dir"))
     print(write_json("test_dir/test.json", {"key": "value"}))
     print(read_json("test_dir/test.json"))
-    print(write_csv("test_dir/test.csv", [{"name": "John", "age": "30"}, {"name": "Jane", "age": "25"}]))
+    print(
+        write_csv(
+            "test_dir/test.csv",
+            [{"name": "John", "age": "30"}, {"name": "Jane", "age": "25"}],
+        )
+    )
     print(read_csv("test_dir/test.csv"))
     print(delete_file("test_dir/test.txt"))
     print(delete_file("test_dir/test.json"))

@@ -3,6 +3,7 @@
 from abc import ABC, abstractmethod
 from typing import Any
 
+
 class Sensor(ABC):
     def __init__(self, config: dict):
         self.config = config

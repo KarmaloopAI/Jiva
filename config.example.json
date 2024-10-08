@@ -1,42 +1,42 @@
 {
-    "memory": {
-        "qdrant_host": "${QDRANT_HOST:-localhost}",
-        "qdrant_port": "${QDRANT_PORT:-6333}",
-        "collection_name": "jiva_memories",
-        "max_short_term_memory": 100,
-        "vector_size": 3072,
-        "vector_size-example-mistralai-embedding": 1024
-    },
-    "llm": {
-        "provider": "ollama",
-        "api_base_url": "${OLLAMA_HOST:-http://localhost:11434}/api",
-        "model": "gemma2",
-        "max_retries": 3,
-        "timeout": 90
-    },
-    "llm-example-mistralai": {
-        "provider": "mistralai",
-        "model": "mistral-large-latest",
-        "api_key": "<YOUR MISTRAL AI API KEY>",
-        "max_retries": 3,
-        "timeout": 90
-    },
-    "ethical_framework": {
-        "enabled": true,
-        "principles": [
-            "Doing is better than not doing",
-            "Do not assume everything is evil or malicious unless there is explicit evidence",
-            "Do no evil"
-        ]
-    },
-    "sensors": {
-        "chat_interface": {
-            "prompt": "Jiva> "
-        }
-    },
-    "memory_consolidation_threshold": 2,
-    "actions": {},
-    "agent_loop_delay": 0.1,
-    "awake_duration": 80,
-    "sleep_duration": 20
+  "memory": {
+    "qdrant_host": "qdrant",
+    "qdrant_port": "6333",
+    "collection_name": "jiva_memories",
+    "max_short_term_memory": 100,
+    "vector_size": 3072,
+    "vector_size-example-mistralai-embedding": 1024
+  },
+  "llm": {
+    "provider": "ollama",
+    "api_base_url": "http://ollama:11434/api",
+    "model": "gemma2",
+    "max_retries": 3,
+    "timeout": 90
+  },
+  "llm-example-mistralai": {
+    "provider": "mistralai",
+    "model": "mistral-large-latest",
+    "api_key": "<YOUR MISTRAL AI API KEY>",
+    "max_retries": 3,
+    "timeout": 90
+  },
+  "ethical_framework": {
+    "enabled": true,
+    "principles": [
+      "Doing is better than not doing",
+      "Do not assume everything is evil or malicious unless there is explicit evidence",
+      "Do no evil"
+    ]
+  },
+  "sensors": {
+    "chat_interface": {
+      "prompt": "∞ Jiva ∞ > "
+    }
+  },
+  "memory_consolidation_threshold": 2,
+  "actions": {},
+  "agent_loop_delay": 0.1,
+  "awake_duration": 80,
+  "sleep_duration": 20
 }

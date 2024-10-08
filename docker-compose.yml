@@ -1,31 +1,30 @@
-version: '3.8'
+version: "3.8"
 
 services:
   jiva:
-    build: .
+    build: ./
     ports:
       - "8000:8000"
     volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
+      - ./data:/app/data:Z
+      - ./logs:/app/logs:Z
     environment:
-      - QDRANT_HOST=qdrant
-      - QDRANT_PORT=6333
-      - OLLAMA_HOST=http://ollama:11435
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: "6333"
+      OLLAMA_HOST: http://ollama:11435
     depends_on:
       - qdrant
       - ollama
     stdin_open: true
     tty: true
     command: >
-        sh -c "
-            if [ ! -f /app/config.json ]; then
-                echo 'config.json not found. Creating from config.example.json...'
-                cp /app/config.example.json /app/config.json
-            fi
-            python main.py
-        "
-
+      sh -c "
+        if [ ! -f /app/config.json ]; then
+          echo 'config.json not found. Creating from config.example.json...'
+          cp /app/config.example.json /app/config.json
+        fi
+        python main.py
+      "
 
   qdrant:
     image: qdrant/qdrant
@@ -35,11 +34,20 @@ services:
       - qdrant_storage:/qdrant/storage
 
   ollama:
-    image: ollama/ollama:latest
+    image: docker.io/ollama/ollama:rocm
     ports:
       - "11435:11434"
     volumes:
       - ollama_models:/root/.ollama
+    environment:
+      HSA_OVERRIDE_GFX_VERSION: "10.3.0"
+    devices:
+      # Remember to run `setsebool -P  container_use_devices=true`
+      # to allow rootless container access to GPU devices
+      - /dev/kfd
+      - /dev/dri
+    group_add:
+      - video
 
 volumes:
   qdrant_storage:
