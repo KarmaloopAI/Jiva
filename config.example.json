@@ -1,7 +1,7 @@
 {
   "memory": {
-    "qdrant_host": "${QDRANT_HOST:-localhost}",
-    "qdrant_port": "${QDRANT_PORT:-6333}",
+    "qdrant_host": "qdrant",
+    "qdrant_port": "6333",
     "collection_name": "jiva_memories",
     "max_short_term_memory": 100,
     "vector_size": 3072,
@@ -9,7 +9,7 @@
   },
   "llm": {
     "provider": "ollama",
-    "api_base_url": "${OLLAMA_HOST:-http://localhost:11434}/api",
+    "api_base_url": "http://ollama:11434/api",
     "model": "gemma2",
     "max_retries": 3,
     "timeout": 90
