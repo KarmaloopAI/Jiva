@@ -12,6 +12,7 @@ from core.ethical_framework import EthicalFramework
 from core.action_manager import ActionManager
 from core.memory import Memory
 
+
 def parse_int_or_default(value, default=1):
     """
     Parse a string as an integer, or return a default value if parsing fails.
@@ -21,10 +22,19 @@ def parse_int_or_default(value, default=1):
     except (ValueError, TypeError):
         return default
 
+
 class Task:
-    def __init__(self, description: str, action: str, parameters: Dict[str, Any], 
-                 priority: int = 1, deadline: Optional[datetime] = None, 
-                 parent_id: Optional[str] = None, required_inputs: Dict[str, Any] = None, goal: str = None):
+    def __init__(
+        self,
+        description: str,
+        action: str,
+        parameters: Dict[str, Any],
+        priority: int = 1,
+        deadline: Optional[datetime] = None,
+        parent_id: Optional[str] = None,
+        required_inputs: Dict[str, Any] = None,
+        goal: str = None,
+    ):
         self.id = str(uuid.uuid4())
         self.description = description
         self.action = action
@@ -57,9 +67,15 @@ class Task:
     def __repr__(self):
         return f"Task(id={self.id}, description='{self.description}', priority={self.priority}, status='{self.status}')"
 
+
 class TaskManager:
-    def __init__(self, llm_interface: LLMInterface, ethical_framework: EthicalFramework, 
-                 action_manager: ActionManager, memory: Memory):
+    def __init__(
+        self,
+        llm_interface: LLMInterface,
+        ethical_framework: EthicalFramework,
+        action_manager: ActionManager,
+        memory: Memory,
+    ):
         self.task_queue = PriorityQueue()
         self.completed_tasks: List[Task] = []
         self.all_tasks: Dict[str, Task] = {}
@@ -72,14 +88,14 @@ class TaskManager:
     def get_relevant_actions(self, goal: str, context: Dict[str, Any]) -> List[str]:
         # Get available actions with their descriptions and parameters
         available_actions = self.action_manager.get_available_actions()
-        
+
         # Format the actions and their parameters for the prompt
         action_descriptions = []
         for action_name, action_info in available_actions.items():
             # param_desc = action_info['description']
             action_descriptions.append(f"""- {action_name}\n
             """)
-        
+
         actions_str = "\n\n".join(action_descriptions)
 
         prompt = f"""
@@ -97,32 +113,34 @@ class TaskManager:
 
         response = self.llm_interface.generate(prompt)
         action_names = []
-        if ',' in response:
-            split_result = response.split(',')
+        if "," in response:
+            split_result = response.split(",")
             for action in split_result:
                 action_names.append(action.strip())
-        
+
         return action_names
 
-    def generate_tasks(self, goal: str, context: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def generate_tasks(
+        self, goal: str, context: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
         # Get available actions with their descriptions and parameters
         available_actions = self.action_manager.get_available_actions()
 
         # Get actions relevant to this run.
         relevant_actions = self.get_relevant_actions(goal=goal, context=context)
         # Mandatory actions fo context
-        mandatory_actions = ['think', 'replan_tasks']
-        
+        mandatory_actions = ["think", "replan_tasks"]
+
         # Format the actions and their parameters for the prompt
         action_descriptions = []
         for action_name, action_info in available_actions.items():
             if action_name in relevant_actions or action_name in mandatory_actions:
-                param_desc = action_info['description']
+                param_desc = action_info["description"]
                 action_descriptions.append(f"""## {action_name}\n
                 ### Description (docstring)
                 {param_desc}
                 """)
-        
+
         actions_str = "\n\n".join(action_descriptions)
 
         prompt = f"""
@@ -172,22 +190,29 @@ class TaskManager:
 
         Please ensure that the response adheres to the structure defined, and if there are any required_inputs, then they have been referenced with a placeholder like {{value}} in the parameters as shown in the example.
         """
-        
+
         self.logger.debug(f"Generating tasks with prompt: {prompt}")
         response = self.llm_interface.generate(prompt)
         self.logger.debug(f"LLM response: {response}")
-        
+
         try:
             tasks = self.llm_interface.parse_json(response)
             self.logger.debug(f"Parsed tasks: {tasks}")
             if not isinstance(tasks, list):
                 raise ValueError("Expected a list of tasks")
-            
+
             processed_tasks = self.add_raw_tasks(tasks, goal)
             return processed_tasks
         except Exception as e:
             self.logger.error(f"Error parsing LLM response: {e}")
-            return [{"description": f"Analyze goal: {goal}", "action": "think", "parameters": {"prompt": goal}, "required_inputs": []}]
+            return [
+                {
+                    "description": f"Analyze goal: {goal}",
+                    "action": "think",
+                    "parameters": {"prompt": goal},
+                    "required_inputs": [],
+                }
+            ]
 
     def add_raw_tasks(self, raw_tasks: Dict[str, Any], goal: str) -> List[Task]:
         tasks: List[Task] = []
@@ -197,7 +222,7 @@ class TaskManager:
             task.goal = goal
 
             # Reset the last_task_id if this current task is a think task.
-            if task.action.strip().lower() == 'think':
+            if task.action.strip().lower() == "think":
                 last_task_id = None
 
             task.parent_id = last_task_id if last_task_id else None
@@ -208,24 +233,41 @@ class TaskManager:
                 self.all_tasks[last_task_id].subtasks.append(task.id)
 
             # If this is a think task, make it the parent for the next set of tasks.
-            if task and task.action.strip().lower() == 'think':
+            if task and task.action.strip().lower() == "think":
                 last_task_id = task.id
 
-        return tasks 
+        return tasks
 
-    def add_task(self, description: str, action: str, parameters: Dict[str, Any], 
-                 priority: int = 1, deadline: Optional[datetime] = None, 
-                 parent_id: Optional[str] = None, required_inputs: Dict[str, Any] = None) -> Optional[str]:
+    def add_task(
+        self,
+        description: str,
+        action: str,
+        parameters: Dict[str, Any],
+        priority: int = 1,
+        deadline: Optional[datetime] = None,
+        parent_id: Optional[str] = None,
+        required_inputs: Dict[str, Any] = None,
+    ) -> Optional[str]:
         if self.ethical_framework.evaluate_task(description):
-            task = Task(description, action, parameters, priority, deadline, parent_id, required_inputs)
+            task = Task(
+                description,
+                action,
+                parameters,
+                priority,
+                deadline,
+                parent_id,
+                required_inputs,
+            )
             self.task_queue.put(task)
             self.all_tasks[task.id] = task
             if parent_id and parent_id in self.all_tasks:
                 self.all_tasks[parent_id].subtasks.append(task.id)
-            
+
             task.ethical_evaluation = {
-                "explanation": self.ethical_framework.get_ethical_explanation(description),
-                "is_ethical": True
+                "explanation": self.ethical_framework.get_ethical_explanation(
+                    description
+                ),
+                "is_ethical": True,
             }
             return task.id
         else:
@@ -244,7 +286,7 @@ class TaskManager:
             task.result = result
             task.output = result
             self.completed_tasks.append(task)
-            
+
             # Remove from queue if it's still there
             new_queue = PriorityQueue()
             while not self.task_queue.empty():
@@ -252,8 +294,10 @@ class TaskManager:
                 if queued_task.id != task_id:
                     new_queue.put(queued_task)
             self.task_queue = new_queue
-            
-            self.logger.info(f"Task {task_id} completed. Remaining tasks: {self.task_queue.qsize()}")
+
+            self.logger.info(
+                f"Task {task_id} completed. Remaining tasks: {self.task_queue.qsize()}"
+            )
             return True
         return False
 
@@ -275,7 +319,7 @@ class TaskManager:
                 "action": task.action,
                 "parameters": task.parameters,
                 "required_inputs": task.required_inputs,
-                "output": task.output
+                "output": task.output,
             }
         return None
 
@@ -288,40 +332,46 @@ class TaskManager:
                 if input_task_result is not None:
                     # Replace the placeholder in all parameters
                     for key, value in task.parameters.items():
-                        if isinstance(value, str) and f'{{{{{param}}}}}' in str(value):
-                            task.parameters[key] = str(value).replace(f'{{{{{param}}}}}', str(input_task_result))
+                        if isinstance(value, str) and f"{{{{{param}}}}}" in str(value):
+                            task.parameters[key] = str(value).replace(
+                                f"{{{{{param}}}}}", str(input_task_result)
+                            )
                 else:
-                    self.logger.warning(f"Could not find result for required input: {required_task_desc}")
+                    self.logger.warning(
+                        f"Could not find result for required input: {required_task_desc}"
+                    )
 
             # Check if any parameters still contain unresolved placeholders
             for key, value in task.parameters.items():
-                if isinstance(value, str) and '{{' in value and '}}' in value:
-                    self.logger.warning(f"Parameter '{key}' contains unresolved placeholder: {value}")
+                if isinstance(value, str) and "{{" in value and "}}" in value:
+                    self.logger.warning(
+                        f"Parameter '{key}' contains unresolved placeholder: {value}"
+                    )
 
-            if task.action == 'replan_tasks':
+            if task.action == "replan_tasks":
                 new_tasks = self.replan_tasks(task)
                 result = str(new_tasks)
             else:
-                result = self.action_manager.execute_action(task.action, task.parameters)
+                result = self.action_manager.execute_action(
+                    task.action, task.parameters
+                )
             self.logger.info(f"Task executed successfully: {result}")
-            
+
             # Store the result
             task.result = result
             task.output = result
             self.complete_task(task.id, result)
 
             # Store in memory
-            self.memory.add_to_short_term({
-                "task_id": task.id,
-                "description": task.description,
-                "result": result
-            })
+            self.memory.add_to_short_term(
+                {"task_id": task.id, "description": task.description, "result": result}
+            )
 
             return result
         except Exception as e:
             self.logger.error(f"Error executing task: {str(e)}", exc_info=True)
             return f"Error executing task: {str(e)}"
-    
+
     def replan_tasks(self, task: Task):
         """
         Replans all tasks to achieve goal state.
@@ -330,17 +380,17 @@ class TaskManager:
         for task_id in self.all_tasks:
             t = self.all_tasks[task_id]
             if t.goal == task.goal:
-                current_tasks.append({
-                    "description": t.description,
-                    "action": t.action,
-                    "parameters": t.parameters,
-                    "required_inputs": t.required_inputs,
-                    "result": str(t.result)[:100]
-                })
-        
-        context = {
-            "previous_tasks": current_tasks
-        }
+                current_tasks.append(
+                    {
+                        "description": t.description,
+                        "action": t.action,
+                        "parameters": t.parameters,
+                        "required_inputs": t.required_inputs,
+                        "result": str(t.result)[:100],
+                    }
+                )
+
+        context = {"previous_tasks": current_tasks}
 
         replan_prompt = f"""
         Replan tasks to achieve this goal: {task.goal}
@@ -354,14 +404,18 @@ class TaskManager:
         """
         Find the result of a task based on its exact description.
         """
-        for task in reversed(self.all_tasks.values()):  # Start from the most recent task
+        for task in reversed(
+            self.all_tasks.values()
+        ):  # Start from the most recent task
             if task.description.strip() == task_description.strip():
                 return task.result
-        
-        for task in reversed(self.all_tasks.values()):  # Start from the most recent task
+
+        for task in reversed(
+            self.all_tasks.values()
+        ):  # Start from the most recent task
             if task_description.strip() in task.description.strip():
                 return task.result
-        
+
         return None
 
     def has_pending_tasks(self) -> bool:
@@ -374,7 +428,10 @@ class TaskManager:
         tasks = list(self.task_queue.queue)
         self.logger.info(f"Current task queue state:")
         for i, task in enumerate(tasks):
-            self.logger.info(f"  {i+1}. ID: {task.id}, Description: {task.description}, Priority: {task.priority}")
+            self.logger.info(
+                f"  {i+1}. ID: {task.id}, Description: {task.description}, Priority: {task.priority}"
+            )
+
 
 if __name__ == "__main__":
     # This allows us to run some basic tests
@@ -394,7 +451,15 @@ if __name__ == "__main__":
 
     # Test task generation
     llm_interface.generate.return_value = '[{"description": "Test task", "priority": 3, "action": "think", "parameters": {"prompt": "Test prompt"}, "required_inputs": []}]'
-    llm_interface.parse_json.return_value = [{"description": "Test task", "priority": 3, "action": "think", "parameters": {"prompt": "Test prompt"}, "required_inputs": []}]
+    llm_interface.parse_json.return_value = [
+        {
+            "description": "Test task",
+            "priority": 3,
+            "action": "think",
+            "parameters": {"prompt": "Test prompt"},
+            "required_inputs": [],
+        }
+    ]
     ethical_framework.evaluate_task.return_value = True
     ethical_framework.get_ethical_explanation.return_value = "Ethical explanation"
 

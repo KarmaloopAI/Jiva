@@ -3,6 +3,7 @@
 import time
 from datetime import datetime, timedelta
 
+
 class TimeExperience:
     def __init__(self):
         self.start_time = datetime.now()
@@ -40,16 +41,17 @@ class TimeExperience:
         hour = self.current_time.hour
         return 6 <= hour < 18
 
+
 if __name__ == "__main__":
     # This allows us to run some basic tests
     te = TimeExperience()
     print(f"Start time: {te.format_time()}")
-    
+
     te.sleep(3600)  # Sleep for an hour
     te.update()
     print(f"After 1 hour: {te.format_time()}")
     print(f"Elapsed time: {te.get_elapsed_time()}")
-    
+
     te.set_time_scale(24)  # Speed up time (1 real second = 24 experienced seconds)
     te.sleep(3600)  # Sleep for an hour of experienced time (150 real seconds)
     te.update()

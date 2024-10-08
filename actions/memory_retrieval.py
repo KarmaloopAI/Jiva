@@ -3,6 +3,7 @@
 from typing import Dict, Any, List
 from core.memory import Memory
 
+
 def retrieve_recent_memory(memory: Memory, n: int = 5) -> List[Dict[str, Any]]:
     """
     Retrieve the n most recent items from short-term memory.
@@ -14,6 +15,7 @@ def retrieve_recent_memory(memory: Memory, n: int = 5) -> List[Dict[str, Any]]:
         List[Dict[str, Any]]: A list of dictionaries representing the most recent memory items.
     """
     return memory.get_recent_short_term_memory(n)
+
 
 def retrieve_task_result(memory: Memory, task_description: str) -> Dict[str, Any]:
     """
@@ -27,7 +29,10 @@ def retrieve_task_result(memory: Memory, task_description: str) -> Dict[str, Any
     """
     return memory.get_task_result(task_description)
 
-def retrieve_context_for_task(memory: Memory, task_description: str, n: int = 5) -> Dict[str, Any]:
+
+def retrieve_context_for_task(
+    memory: Memory, task_description: str, n: int = 5
+) -> Dict[str, Any]:
     """
     Retrieve relevant context for a task from both short-term and long-term memory.
 
@@ -40,7 +45,10 @@ def retrieve_context_for_task(memory: Memory, task_description: str, n: int = 5)
     """
     return memory.get_context_for_task(task_description, n)
 
-def query_long_term_memory(memory: Memory, query: str, limit: int = 5) -> List[Dict[str, Any]]:
+
+def query_long_term_memory(
+    memory: Memory, query: str, limit: int = 5
+) -> List[Dict[str, Any]]:
     """
     Query long-term memory based on semantic similarity.
 

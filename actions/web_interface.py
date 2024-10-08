@@ -14,9 +14,11 @@ from core.llm_interface import LLMInterface
 logger = logging.getLogger(__name__)
 llm_interface: LLMInterface = None
 
+
 def set_llm_interface(llm: LLMInterface):
     global llm_interface
     llm_interface = llm
+
 
 def web_search(query: str, num_results: int = 5) -> List[Dict[str, str]]:
     """
@@ -33,28 +35,31 @@ def web_search(query: str, num_results: int = 5) -> List[Dict[str, str]]:
         search_results = []
         for result in search(query, num_results=num_results):
             response = requests.get(result, timeout=5)
-            soup = BeautifulSoup(response.text, 'html.parser')
+            soup = BeautifulSoup(response.text, "html.parser")
             title = soup.title.string if soup.title else result
-            description = soup.find('meta', attrs={'name': 'description'})
-            description = description['content'] if description else "No description available."
+            description = soup.find("meta", attrs={"name": "description"})
+            description = (
+                description["content"] if description else "No description available."
+            )
 
             page_content = visit_page(result)
             relevant_content = extract_relevant_content(page_content, query)
-            
-            search_results.append({
-                'url': result,
-                'title': title[:100],  # Truncate long titles
-                'description': description[:200],  # Truncate long descriptions
-                'relevant_content': relevant_content
-            })
+
+            search_results.append(
+                {
+                    "url": result,
+                    "title": title[:100],  # Truncate long titles
+                    "description": description[:200],  # Truncate long descriptions
+                    "relevant_content": relevant_content,
+                }
+            )
     except Exception as e:
         logger.error(f"Error fetching details for {result}: {str(e)}")
-        search_results.append({
-            'url': result,
-            'title': result,
-            'description': "Unable to fetch details"
-        })
+        search_results.append(
+            {"url": result, "title": result, "description": "Unable to fetch details"}
+        )
     return search_results
+
 
 def visit_page(url: str, wait_for_selector: str = None, timeout: int = 30000) -> str:
     """
@@ -73,21 +78,24 @@ def visit_page(url: str, wait_for_selector: str = None, timeout: int = 30000) ->
             browser = p.chromium.launch()
             page = browser.new_page()
             page.goto(url, wait_until="networkidle", timeout=timeout)
-            
+
             if wait_for_selector:
                 try:
                     page.wait_for_selector(wait_for_selector, timeout=timeout)
                 except TimeoutError:
-                    logger.warning(f"Timeout waiting for selector '{wait_for_selector}' on {url}")
-            
+                    logger.warning(
+                        f"Timeout waiting for selector '{wait_for_selector}' on {url}"
+                    )
+
             content = page.content()
             browser.close()
-        
+
         return md(content)
     except Exception as e:
         logger.error(f"Error visiting page {url}: {str(e)}")
         return f"Error: Unable to visit page {url}"
-    
+
+
 def extract_relevant_content(markdown_content: str, query: str) -> str:
     """
     Use the LLM to extract the most relevant content from the markdown based on the search query.
@@ -124,6 +132,7 @@ def extract_relevant_content(markdown_content: str, query: str) -> str:
 
     return relevant_content
 
+
 def find_links(url: str, timeout: int = 30000) -> List[Dict[str, str]]:
     """
     Find relevant links on a given web page.
@@ -147,11 +156,12 @@ def find_links(url: str, timeout: int = 30000) -> List[Dict[str, str]]:
                 }))
             """)
             browser.close()
-        
+
         return links
     except Exception as e:
         logger.error(f"Error finding links on page {url}: {str(e)}")
         return []
+
 
 # Example usage:
 # search_results = web_search("Artificial Intelligence")
