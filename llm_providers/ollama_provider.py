@@ -1,5 +1,5 @@
 import json
-import requests
+import aiohttp
 from typing import List, Dict, Any
 from .base_provider import BaseLLMProvider
 
@@ -10,7 +10,7 @@ class OllamaProvider(BaseLLMProvider):
         self.max_retries = config.get('max_retries', 3)
         self.timeout = config.get('timeout', 60)
 
-    def generate(self, prompt: str) -> str:
+    async def generate(self, prompt: str) -> str:
         url = f"{self.api_base_url}/generate"
         payload = json.dumps({
             "model": self.model,
@@ -18,17 +18,21 @@ class OllamaProvider(BaseLLMProvider):
             "stream": False
         })
         headers = {'Content-Type': 'application/json'}
-        response = requests.post(url, headers=headers, data=payload, timeout=self.timeout)
-        response.raise_for_status()
-        return response.json()['response']
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers, data=payload, timeout=self.timeout) as response:
+                response.raise_for_status()
+                result = await response.json()
+                return result['response']
 
-    def get_embedding(self, text: str) -> List[float]:
+    async def get_embedding(self, text: str) -> List[float]:
         url = f"{self.api_base_url}/embeddings"
         payload = json.dumps({
             "model": self.model,
             "prompt": text
         })
         headers = {'Content-Type': 'application/json'}
-        response = requests.post(url, headers=headers, data=payload, timeout=self.timeout)
-        response.raise_for_status()
-        return response.json()['embedding']
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers, data=payload, timeout=self.timeout) as response:
+                response.raise_for_status()
+                result = await response.json()
+                return result['embedding']

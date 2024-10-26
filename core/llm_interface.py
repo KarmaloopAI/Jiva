@@ -1,3 +1,5 @@
+# core/llm_interface.py
+
 import json
 import logging
 import re
@@ -38,10 +40,10 @@ class LLMInterface:
         retry=retry_if_exception_type((Exception,)),
         reraise=True
     )
-    def generate(self, prompt: str) -> str:
+    async def generate(self, prompt: str) -> str:
         """Generate a response from the LLM."""
         try:
-            return self.provider.generate(prompt)
+            return await self.provider.generate(prompt)
         except Exception as e:
             self.logger.error(f"Error generating response: {str(e)}")
             raise
@@ -195,7 +197,7 @@ class LLMInterface:
         logger.warning("Failed to construct JSON-like structure from text")
         return None
 
-    def process(self, input_data: Any) -> Dict[str, Any]:
+    async def process(self, input_data: Any) -> Dict[str, Any]:
         """Process input data and return structured information."""
         prompt = f"""
         Input: {input_data}
@@ -216,7 +218,7 @@ class LLMInterface:
         """
         
         try:
-            response = self.generate(prompt)
+            response = await self.generate(prompt)
             return self.parse_json(response)
         except Exception as e:
             self.logger.error(f"Error processing input: {str(e)}")
@@ -229,15 +231,15 @@ class LLMInterface:
             }
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
-    def get_embedding(self, text: str) -> List[float]:
+    async def get_embedding(self, text: str) -> List[float]:
         """Get the embedding for a given text."""
         try:
-            return self.provider.get_embedding(text)
+            return await self.provider.get_embedding(text)
         except Exception as e:
             self.logger.error(f"Error getting embedding: {str(e)}")
             raise
 
-    def fine_tune(self, dataset: List[Dict[str, Any]]):
+    async def fine_tune(self, dataset: List[Dict[str, Any]]):
         """Prepare and initiate fine-tuning of the model."""
         # Note: Fine-tuning might not be available for all providers
         # Implement provider-specific fine-tuning logic here if available

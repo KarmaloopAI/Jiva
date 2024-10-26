@@ -15,7 +15,7 @@ class ActionManager:
         self.actions: Dict[str, Callable] = get_action_registry(llm_interface, memory)
         self.logger = logging.getLogger("Jiva.ActionManager")
 
-    def execute_action(self, action_name: str, parameters: Dict[str, Any]) -> Any:
+    async def execute_action(self, action_name: str, parameters: Dict[str, Any]) -> Any:
         """Execute an action if it's ethical."""
         if action_name not in self.actions:
             error_msg = f"Action '{action_name}' is not registered."
@@ -23,7 +23,7 @@ class ActionManager:
             raise ValueError(error_msg)
 
         # Evaluate the action ethically
-        if self.ethical_framework.evaluate_action(action_name, parameters):
+        if await self.ethical_framework.evaluate_action(action_name, parameters):
             self.logger.info(f"Executing action: {action_name}")
             try:
                 # Retrieve context for the action
@@ -33,7 +33,7 @@ class ActionManager:
                 # parameters['context'] = context
 
                 # Execute the action
-                result = self.actions[action_name](**parameters)
+                result = await self.actions[action_name](**parameters)
                 
                 # Store the result in memory
                 self.memory.add_to_short_term({
@@ -50,7 +50,7 @@ class ActionManager:
                 return {"error": error_msg}
         else:
             # If the action is deemed unethical, don't execute it
-            ethical_explanation = self.ethical_framework.get_ethical_explanation(f"{action_name}: {parameters}", is_task=False)
+            ethical_explanation = await self.ethical_framework.get_ethical_explanation(f"{action_name}: {parameters}", is_task=False)
             error_msg = f"Action not executed due to ethical concerns: {ethical_explanation}"
             self.logger.warning(error_msg)
             return {"error": error_msg}

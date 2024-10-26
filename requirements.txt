@@ -37,3 +37,6 @@ markdownify
 
 # Mistral AI
 mistralai==1.1.0
+
+# Async operations
+aiohttp==3.10.10

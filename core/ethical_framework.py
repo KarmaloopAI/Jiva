@@ -67,7 +67,7 @@ class EthicalFramework:
             self.logger.error(f"Error parsing ethical evaluation: {e}")
             return True  # Default to allowing the task if there's an error
 
-    def evaluate_action(self, action: str, params: Dict[str, Any]) -> bool:
+    async def evaluate_action(self, action: str, params: Dict[str, Any]) -> bool:
         if not self.enabled:
             self.logger.info("Ethical Framework is disabled. Action approved without evaluation.")
             return True
@@ -88,7 +88,7 @@ class EthicalFramework:
         3. A 'reasoning' field explaining the overall assessment
         """
 
-        response = self.llm_interface.generate(prompt)
+        response = await self.llm_interface.generate(prompt)
         try:
             evaluation = self.llm_interface.parse_json(response)
             return evaluation['overall_assessment'] == 'ethical'
@@ -96,7 +96,7 @@ class EthicalFramework:
             # If there's an error in parsing or unexpected response, err on the side of caution
             return False
 
-    def get_ethical_explanation(self, task_or_action: str, is_task: bool = True) -> str:
+    async def get_ethical_explanation(self, task_or_action: str, is_task: bool = True) -> str:
         if not self.enabled:
             return "Ethical Framework is disabled. No ethical evaluation performed."
 
@@ -113,7 +113,7 @@ class EthicalFramework:
         Format your response as a well-structured paragraph.
         """
 
-        return self.llm_interface.generate(prompt)
+        return await self.llm_interface.generate(prompt)
 
     def update_ethical_principles(self, new_principles: List[str]):
         """
@@ -121,7 +121,7 @@ class EthicalFramework:
         """
         self.ethical_principles = new_principles
 
-    def get_ethical_dilemma_resolution(self, scenario: str) -> str:
+    async def get_ethical_dilemma_resolution(self, scenario: str) -> str:
         if not self.enabled:
             return "Ethical Framework is disabled. No ethical dilemma resolution performed."
 
@@ -139,7 +139,7 @@ class EthicalFramework:
         Format your response as a well-structured analysis with clear reasoning and a final recommendation.
         """
 
-        return self.llm_interface.generate(prompt)
+        return await self.llm_interface.generate(prompt)
 
 if __name__ == "__main__":
     # This is a mock implementation for testing purposes

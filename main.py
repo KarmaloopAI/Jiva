@@ -2,7 +2,7 @@
 
 import json
 import os
-import time
+import asyncio
 from typing import Dict, Any
 from core.agent import Agent
 from actions.action_registry import get_action_registry
@@ -106,7 +106,7 @@ def print_welcome_message():
     print("Embracing the infinite potential of ethical AI")
     print("--------------------------------------------")
 
-def main():
+async def main():
     print("Initializing Jiva Framework...")
     setup_environment()
     config = load_config()
@@ -123,8 +123,7 @@ def main():
     print("Jiva is ready. Starting main loop...")
     print("(Press CTRL+C to exit)")
     try:
-        agent.run()
-        time.sleep(0.1)
+        await agent.run()
     except KeyboardInterrupt:
         print("\nShutting down Jiva...")
     finally:
@@ -132,4 +131,4 @@ def main():
         pass
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
