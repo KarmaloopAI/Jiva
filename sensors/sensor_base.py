@@ -8,7 +8,7 @@ class Sensor(ABC):
         self.config = config
 
     @abstractmethod
-    def get_input(self) -> Any:
+    async def get_input(self) -> Any:
         """
         Abstract method to be implemented by all sensors.
         This method should return the input received by the sensor.
@@ -16,7 +16,7 @@ class Sensor(ABC):
         pass
 
     @abstractmethod
-    def process_input(self, input_data: Any) -> Any:
+    async def process_input(self, input_data: Any) -> Any:
         """
         Abstract method to be implemented by all sensors.
         This method should process the raw input data and return it in a format

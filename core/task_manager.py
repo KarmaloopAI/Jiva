@@ -69,7 +69,7 @@ class TaskManager:
         self.memory = memory
         self.logger = logging.getLogger("Jiva.TaskManager")
 
-    def get_relevant_actions(self, goal: str, context: Dict[str, Any]) -> List[str]:
+    async def get_relevant_actions(self, goal: str, context: Dict[str, Any]) -> List[str]:
         # Get available actions with their descriptions and parameters
         available_actions = self.action_manager.get_available_actions()
         
@@ -95,21 +95,20 @@ class TaskManager:
         {actions_str}
         """
 
-        response = self.llm_interface.generate(prompt)
+        response = await self.llm_interface.generate(prompt)
         action_names = []
-        if ',' in response:
-            split_result = response.split(',')
-            for action in split_result:
-                action_names.append(action.strip())
+        split_result = response.split(',')
+        for action in split_result:
+            action_names.append(action.strip())
         
         return action_names
 
-    def generate_tasks(self, goal: str, context: Dict[str, Any]) -> List[Dict[str, Any]]:
+    async def generate_tasks(self, goal: str, context: Dict[str, Any]) -> List[Dict[str, Any]]:
         # Get available actions with their descriptions and parameters
         available_actions = self.action_manager.get_available_actions()
 
         # Get actions relevant to this run.
-        relevant_actions = self.get_relevant_actions(goal=goal, context=context)
+        relevant_actions = await self.get_relevant_actions(goal=goal, context=context)
         # Mandatory actions fo context
         mandatory_actions = ['think', 'replan_tasks']
         
@@ -174,7 +173,7 @@ class TaskManager:
         """
         
         self.logger.debug(f"Generating tasks with prompt: {prompt}")
-        response = self.llm_interface.generate(prompt)
+        response = await self.llm_interface.generate(prompt)
         self.logger.debug(f"LLM response: {response}")
         
         try:
@@ -279,7 +278,7 @@ class TaskManager:
             }
         return None
 
-    def execute_task(self, task: Task) -> Any:
+    async def execute_task(self, task: Task) -> Any:
         self.logger.info(f"Executing task: {task.description}")
         try:
             # Resolve parameters based on required inputs
@@ -299,10 +298,10 @@ class TaskManager:
                     self.logger.warning(f"Parameter '{key}' contains unresolved placeholder: {value}")
 
             if task.action == 'replan_tasks':
-                new_tasks = self.replan_tasks(task)
+                new_tasks = await self.replan_tasks(task)
                 result = str(new_tasks)
             else:
-                result = self.action_manager.execute_action(task.action, task.parameters)
+                result = await self.action_manager.execute_action(task.action, task.parameters)
             self.logger.info(f"Task executed successfully: {result}")
             
             # Store the result
@@ -322,7 +321,7 @@ class TaskManager:
             self.logger.error(f"Error executing task: {str(e)}", exc_info=True)
             return f"Error executing task: {str(e)}"
     
-    def replan_tasks(self, task: Task):
+    async def replan_tasks(self, task: Task):
         """
         Replans all tasks to achieve goal state.
         """
@@ -347,7 +346,7 @@ class TaskManager:
         You have partially executed some tasks to achieve this task and then requested replanning. The previous tasks and their results are available in context.
         """
 
-        new_tasks = self.generate_tasks(task.goal, context)
+        new_tasks = await self.generate_tasks(replan_prompt, context)
         return new_tasks
 
     def get_input_task_result(self, task_description: str) -> Any:

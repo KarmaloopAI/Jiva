@@ -4,30 +4,29 @@ from .base_provider import BaseLLMProvider
 
 class MistralAIProvider(BaseLLMProvider):
     def __init__(self, config: Dict[str, Any]):
-        self.api_key = config.get('api_key')
+        self.client = Mistral(api_key=config.get('api_key'))
         self.model = config.get('model', 'mistral-small-latest')
-        self.client = Mistral(api_key=self.api_key)
 
-    def generate(self, prompt: str) -> str:
+    async def generate(self, prompt: str) -> str:
         try:
-            response = self.client.chat.complete(
+            response = await self.client.chat.complete_async(
                 model=self.model,
                 messages=[
                     {
-                        "role": "user",
                         "content": prompt,
-                    }
+                        "role": "user",
+                    },
                 ],
             )
             return response.choices[0].message.content
         except Exception as e:
             raise Exception(f"Error generating response: {str(e)}")
 
-    def get_embedding(self, text: str) -> List[float]:
+    async def get_embedding(self, text: str) -> List[float]:
         try:
-            response = self.client.embeddings.create(
+            response = await self.client.embeddings.create_async(
                 model="mistral-embed",
-                inputs=[text]
+                input=text
             )
             return response.data[0].embedding
         except Exception as e:

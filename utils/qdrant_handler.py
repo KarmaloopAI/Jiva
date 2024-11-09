@@ -1,7 +1,7 @@
 # utils/qdrant_handler.py
 
 from typing import List, Dict, Any
-from qdrant_client import QdrantClient
+from qdrant_client import AsyncQdrantClient
 from qdrant_client.http.models import Distance, VectorParams, PointStruct, UpdateStatus
 from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
 import logging
@@ -9,7 +9,7 @@ import uuid
 
 class QdrantHandler:
     def __init__(self, host: str, port: int, collection_name: str, vector_size: int):
-        self.client = QdrantClient(host=host, port=port)
+        self.client = AsyncQdrantClient(host=host, port=port)
         self.vector_size = vector_size
         self.collection_name = collection_name
         self.logger = logging.getLogger("Jiva.QdrantHandler")
@@ -41,12 +41,12 @@ class QdrantHandler:
             self.logger.error(f"Error creating collection: {e}")
             raise
 
-    def add_point(self, vector: List[float], payload: Dict[str, Any]) -> str:
+    async def add_point(self, vector: List[float], payload: Dict[str, Any]) -> str:
         try:
             if len(vector) != self.vector_size:
                 raise ValueError(f"Vector dimension mismatch. Expected {self.vector_size}, got {len(vector)}")
             point_id = str(uuid.uuid4())
-            self.client.upsert(
+            await self.client.upsert(
                 collection_name=self.collection_name,
                 points=[PointStruct(id=point_id, vector=vector, payload=payload)]
             )
@@ -60,9 +60,9 @@ class QdrantHandler:
             self.logger.error(f"Error adding point: {e}")
             return None
 
-    def search(self, query_vector: List[float], limit: int = 5) -> List[Dict[str, Any]]:
+    async def search(self, query_vector: List[float], limit: int = 5) -> List[Dict[str, Any]]:
         try:
-            results = self.client.search(
+            results = await self.client.search(
                 collection_name=self.collection_name,
                 query_vector=query_vector,
                 limit=limit

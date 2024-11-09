@@ -3,7 +3,14 @@
 from typing import Dict, Any, List
 from core.memory import Memory
 
-def retrieve_recent_memory(memory: Memory, n: int = 5) -> List[Dict[str, Any]]:
+memory: Memory = None
+
+def set_memory(memory_instance: Memory):
+    global memory
+    memory = memory_instance
+
+
+def retrieve_recent_memory(n: int = 5) -> List[Dict[str, Any]]:
     """
     Retrieve the n most recent items from short-term memory.
 
@@ -15,7 +22,7 @@ def retrieve_recent_memory(memory: Memory, n: int = 5) -> List[Dict[str, Any]]:
     """
     return memory.get_recent_short_term_memory(n)
 
-def retrieve_task_result(memory: Memory, task_description: str) -> Dict[str, Any]:
+def retrieve_task_result(task_description: str) -> Dict[str, Any]:
     """
     Retrieve the result of a specific task from memory.
 
@@ -27,7 +34,7 @@ def retrieve_task_result(memory: Memory, task_description: str) -> Dict[str, Any
     """
     return memory.get_task_result(task_description)
 
-def retrieve_context_for_task(memory: Memory, task_description: str, n: int = 5) -> Dict[str, Any]:
+async def retrieve_context_for_task(task_description: str, n: int = 5) -> Dict[str, Any]:
     """
     Retrieve relevant context for a task from both short-term and long-term memory.
 
@@ -38,9 +45,9 @@ def retrieve_context_for_task(memory: Memory, task_description: str, n: int = 5)
     Returns:
         Dict[str, Any]: A dictionary containing the relevant context for the task.
     """
-    return memory.get_context_for_task(task_description, n)
+    return await memory.get_context_for_task(task_description, n)
 
-def query_long_term_memory(memory: Memory, query: str, limit: int = 5) -> List[Dict[str, Any]]:
+async def query_long_term_memory(query: str, limit: int = 5) -> List[Dict[str, Any]]:
     """
     Query long-term memory based on semantic similarity.
 
@@ -51,7 +58,7 @@ def query_long_term_memory(memory: Memory, query: str, limit: int = 5) -> List[D
     Returns:
         List[Dict[str, Any]]: A list of dictionaries representing the query results from long-term memory.
     """
-    return memory.query_long_term_memory(query, limit)
+    return await memory.query_long_term_memory(query, limit)
 
 
 # Example usage:

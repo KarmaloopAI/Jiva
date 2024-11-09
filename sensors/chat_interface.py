@@ -1,5 +1,4 @@
-# sensors/chat_interface.py
-
+import asyncio
 from .sensor_base import Sensor
 from typing import Any, Dict
 
@@ -8,10 +7,11 @@ class ChatInterface(Sensor):
         super().__init__(config)
         self.prompt = config.get('prompt', "Enter your message: ")
 
-    def get_input(self) -> str:
-        return input(self.prompt)
+    async def get_input(self) -> str:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, input, self.prompt)
 
-    def process_input(self, input_data: str) -> Dict[str, Any]:
+    async def process_input(self, input_data: str) -> Dict[str, Any]:
         return {
             "type": "chat",
             "content": input_data,

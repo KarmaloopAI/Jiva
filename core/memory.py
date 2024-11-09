@@ -46,17 +46,16 @@ class Memory:
         if len(self.short_term_memory) > self.max_short_term_memory:
             self._transfer_to_long_term(self.short_term_memory.pop(0))
 
-    def _transfer_to_long_term(self, memory_item: Dict[str, Any]):
-        """Transfer a memory item from short-term to long-term memory."""
+    async def _transfer_to_long_term(self, memory_item: Dict[str, Any]):
         try:
             serialized_item = self.json_encoder.encode(memory_item)
-            embedding = self.llm_interface.get_embedding(serialized_item)
+            embedding = await self.llm_interface.get_embedding(serialized_item)
             
             if len(embedding) != self.vector_size:
                 self.logger.error(f"Embedding size mismatch. Expected {self.vector_size}, got {len(embedding)}")
                 return
             
-            point_id = self.qdrant_handler.add_point(
+            point_id = await self.qdrant_handler.add_point(
                 vector=embedding,
                 payload=json.loads(serialized_item)
             )
@@ -75,19 +74,18 @@ class Memory:
         """Retrieve the n most recent items from short-term memory."""
         return self.short_term_memory[-n:]
 
-    def consolidate(self):
-        """Consolidate short-term memory into long-term memory."""
+    async def consolidate(self):
         self.logger.info(f"Consolidating {len(self.short_term_memory)} memories")
         for memory_item in self.short_term_memory:
-            self._transfer_to_long_term(memory_item)
+            await self._transfer_to_long_term(memory_item)
         self.short_term_memory.clear()
         self.logger.info("Memory consolidation completed")
 
-    def query_long_term_memory(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
+    async def query_long_term_memory(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
         """Query long-term memory based on semantic similarity."""
         try:
-            query_embedding = self.llm_interface.get_embedding(query)
-            results = self.qdrant_handler.search(
+            query_embedding = await self.llm_interface.get_embedding(query)
+            results = await self.qdrant_handler.search(
                 query_vector=query_embedding,
                 limit=limit
             )
@@ -155,7 +153,7 @@ class Memory:
         
         return None
 
-    def get_context_for_task(self, task_description: str, n: int = 5) -> Dict[str, Any]:
+    async def get_context_for_task(self, task_description: str, n: int = 5) -> Dict[str, Any]:
         """Retrieve relevant context for a task from both short-term and long-term memory."""
         context = {
             "short_term": self.get_recent_short_term_memory(n),

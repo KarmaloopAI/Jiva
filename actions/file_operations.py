@@ -1,3 +1,4 @@
+import asyncio
 import os
 import json
 import csv
@@ -31,7 +32,7 @@ def ensure_directory_exists(file_path: str) -> None:
     if directory:
         os.makedirs(directory, exist_ok=True)
 
-def read_file(file_path: str) -> str:
+async def read_file(file_path: str) -> str:
     """
     Read and return the contents of a file.
 
@@ -54,7 +55,7 @@ def read_file(file_path: str) -> str:
         logger.error(f"Error reading file {full_path}: {str(e)}")
         return f"Error reading file: {str(e)}"
 
-def write_file(file_path: str, content: str) -> str:
+async def write_file(file_path: str, content: str) -> str:
     """
     Write the given content to a file. Creates the file if it does not exist. Does not need an append operation if the content is provided
     in the parameters.
@@ -77,7 +78,7 @@ def write_file(file_path: str, content: str) -> str:
         logger.error(f"Error writing to file {full_path}: {str(e)}")
         return f"Error writing to file: {str(e)}"
 
-def append_file(file_path: str, content: str) -> str:
+async def append_file(file_path: str, content: str) -> str:
     """
     Append the given content to the end of a file if the file already exists.
 
@@ -99,7 +100,7 @@ def append_file(file_path: str, content: str) -> str:
         logger.error(f"Error appending to file {full_path}: {str(e)}")
         return f"Error appending to file: {str(e)}"
 
-def delete_file(file_path: str) -> str:
+async def delete_file(file_path: str) -> str:
     """
     Delete the specified file.
 
@@ -121,7 +122,7 @@ def delete_file(file_path: str) -> str:
         logger.error(f"Error deleting file {full_path}: {str(e)}")
         return f"Error deleting file: {str(e)}"
 
-def list_directory(directory_path: str) -> List[str]:
+async def list_directory(directory_path: str) -> List[str]:
     """
     List all contents of the specified directory.
 
@@ -143,7 +144,7 @@ def list_directory(directory_path: str) -> List[str]:
         logger.error(f"Error listing directory {full_path}: {str(e)}")
         return [f"Error listing directory: {str(e)}"]
 
-def create_directory(directory_path: str) -> str:
+async def create_directory(directory_path: str) -> str:
     """
     Create a new directory at the specified path.
 
@@ -162,7 +163,7 @@ def create_directory(directory_path: str) -> str:
         logger.error(f"Error creating directory {full_path}: {str(e)}")
         return f"Error creating directory: {str(e)}"
 
-def read_json(file_path: str) -> Dict[str, Any]:
+async def read_json(file_path: str) -> Dict[str, Any]:
     """
     Read a JSON file and return its contents as a dictionary.
 
@@ -188,7 +189,7 @@ def read_json(file_path: str) -> Dict[str, Any]:
         logger.error(f"Error reading JSON file {full_path}: {str(e)}")
         return {"error": f"Error reading JSON file: {str(e)}"}
 
-def write_json(file_path: str, data: Dict[str, Any]) -> str:
+async def write_json(file_path: str, data: Dict[str, Any]) -> str:
     """
     Write the given data to a JSON file.
 
@@ -210,7 +211,7 @@ def write_json(file_path: str, data: Dict[str, Any]) -> str:
         logger.error(f"Error writing JSON file {full_path}: {str(e)}")
         return f"Error writing JSON file: {str(e)}"
 
-def read_csv(file_path: str) -> List[Dict[str, Any]]:
+async def read_csv(file_path: str) -> List[Dict[str, Any]]:
     """
     Read a CSV file and return its contents as a list of dictionaries.
 
@@ -237,7 +238,7 @@ def read_csv(file_path: str) -> List[Dict[str, Any]]:
         logger.error(f"Error reading CSV file {full_path}: {str(e)}")
         return [{"error": f"Error reading CSV file: {str(e)}"}]
 
-def write_csv(file_path: str, data: List[Dict[str, Any]]) -> str:
+async def write_csv(file_path: str, data: List[Dict[str, Any]]) -> str:
     """
     Write a list of dictionaries to a CSV file.
 
@@ -266,22 +267,26 @@ def write_csv(file_path: str, data: List[Dict[str, Any]]) -> str:
         logger.error(f"Error writing CSV file {full_path}: {str(e)}")
         return f"Error writing CSV file: {str(e)}"
 
+
+async def main():
+    # Test the functions
+    print(await create_directory("test_dir"))
+    print(await write_file("test_dir/test.txt", "Hello, World!"))
+    print(await read_file("test_dir/test.txt"))
+    print(await append_file("test_dir/test.txt", "\nAppended content"))
+    print(await read_file("test_dir/test.txt"))
+    print(await list_directory("test_dir"))
+    print(await write_json("test_dir/test.json", {"key": "value"}))
+    print(await read_json("test_dir/test.json"))
+    print(await write_csv("test_dir/test.csv", [{"name": "John", "age": "30"}, {"name": "Jane", "age": "25"}]))
+    print(await read_csv("test_dir/test.csv"))
+    print(await delete_file("test_dir/test.txt"))
+    print(await delete_file("test_dir/test.json"))
+    print(await delete_file("test_dir/test.csv"))
+    print(await list_directory("test_dir"))
+
 if __name__ == "__main__":
     # Set up logging for testing
     logging.basicConfig(level=logging.INFO)
     
-    # Test the functions
-    print(create_directory("test_dir"))
-    print(write_file("test_dir/test.txt", "Hello, World!"))
-    print(read_file("test_dir/test.txt"))
-    print(append_file("test_dir/test.txt", "\nAppended content"))
-    print(read_file("test_dir/test.txt"))
-    print(list_directory("test_dir"))
-    print(write_json("test_dir/test.json", {"key": "value"}))
-    print(read_json("test_dir/test.json"))
-    print(write_csv("test_dir/test.csv", [{"name": "John", "age": "30"}, {"name": "Jane", "age": "25"}]))
-    print(read_csv("test_dir/test.csv"))
-    print(delete_file("test_dir/test.txt"))
-    print(delete_file("test_dir/test.json"))
-    print(delete_file("test_dir/test.csv"))
-    print(list_directory("test_dir"))
+    asyncio.run(main())
