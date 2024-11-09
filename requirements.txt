@@ -40,3 +40,7 @@ mistralai==1.1.0
 
 # Async operations
 aiohttp==3.10.10
+
+# For API
+fastapi==0.115.4
+uvicorn==0.32.0

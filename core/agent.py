@@ -42,10 +42,14 @@ class Agent:
         
         self.json_encoder = DateTimeEncoder()
         
+        self._execution_event = asyncio.Event()
         self.logger.info("Jiva Agent initialized successfully")
 
     async def run(self):
         self.logger.info("Starting Jiva Agent main loop")
+        last_task_check = 0
+        task_check_interval = 0.1  # Check for tasks every 100ms
+        
         while True:
             try:
                 await self.check_and_handle_sleep()
@@ -56,28 +60,29 @@ class Agent:
                 
                 self.time_experience.update()
                 current_time = self.time_experience.get_current_time()
-                self.logger.debug(f"Current time: {current_time}")
                 
-                self.create_time_memory(current_time)
-                
+                # Check for sensory input (non-blocking)
                 sensory_input = await self.sensor_manager.get_input()
-                
                 if sensory_input:
                     self.logger.info(f"Received sensory input: {sensory_input}")
                     await self.process_input(sensory_input)
                 
-                # Execute all pending tasks
-                while self.task_manager.has_pending_tasks():
+                # Execute tasks if we have any, regardless of input
+                current_time = asyncio.get_event_loop().time()
+                if self.task_manager.has_pending_tasks() and \
+                   (current_time - last_task_check) >= task_check_interval:
+                    last_task_check = current_time
                     await self.execute_next_task()
                     self.logger.debug(f"Remaining tasks: {self.task_manager.get_pending_task_count()}")
                 
-                # Check for memory consolidation after task execution
+                # Check for memory consolidation
                 if self.should_consolidate_memories():
                     self.logger.info("Consolidating memories")
                     await self.memory.consolidate()
-                    self.logger.info("Memory consolidation completed")
                 
-                await asyncio.sleep(self.config['agent_loop_delay'])
+                # Small sleep to prevent CPU hogging
+                await asyncio.sleep(0.01)
+                
             except Exception as e:
                 self.logger.error(f"Error in main loop: {str(e)}", exc_info=True)
                 await asyncio.sleep(5)  # Wait a bit before retrying
@@ -116,6 +121,10 @@ class Agent:
                         task_info = self.task_manager.get_task_status(task.id)
                         self.memory.add_to_short_term({"type": "new_task", "task": task_info})
                         self.logger.info(f"New task added: {task_info}")
+                
+                # Signal that there's work to be done
+                self._execution_event.set()
+                
         except Exception as e:
             self.logger.error(f"Error processing input: {str(e)}", exc_info=True)
 
@@ -251,7 +260,7 @@ class Agent:
         await self.memory.consolidate()
         
         self.logger.debug("Preparing fine-tuning dataset")
-        dataset = self.memory.prepare_fine_tuning_dataset()
+        dataset = await self.memory.prepare_fine_tuning_dataset()  # Add await here
         
         self.logger.info("Fine-tuning the model")
         await self.llm_interface.fine_tune(dataset)

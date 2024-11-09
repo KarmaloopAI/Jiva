@@ -1,11 +1,16 @@
 # main.py
 
 import json
+import logging
 import os
 import asyncio
+import uvicorn
+from api.main import app
 from typing import Dict, Any
 from core.agent import Agent
 from actions.action_registry import get_action_registry
+
+logger = logging.getLogger("Jiva.Main")
 
 def load_config(config_file: str = 'config.json') -> Dict[str, Any]:
     """
@@ -106,12 +111,48 @@ def print_welcome_message():
     print("Embracing the infinite potential of ethical AI")
     print("--------------------------------------------")
 
-async def main():
+async def run_agent_and_api(agent: Agent, host: str = "0.0.0.0", port: int = 8000):
+    """
+    Run both the Jiva agent and the API server concurrently.
+    
+    Args:
+        agent (Agent): The Jiva agent instance
+        host (str): Host address to bind the API server
+        port (int): Port number for the API server
+    """
+    # Store agent instance in FastAPI app state
+    app.state.agent = agent
+    
+    # Configure the uvicorn server
+    config = uvicorn.Config(
+        app,
+        host=host,
+        port=port,
+        loop="asyncio",
+        log_level="info"
+    )
+    server = uvicorn.Server(config)
+    
+    # Run both the agent and API server
+    try:
+        await asyncio.gather(
+            agent.run(),
+            server.serve()
+        )
+    except Exception as e:
+        logging.error(f"Error running agent and API: {str(e)}")
+        raise
+
+def main():
     print("Initializing Jiva Framework...")
     setup_environment()
     config = load_config()
+
+    # Get API configuration from environment or config
+    host = os.environ.get('API_HOST', config.get('api', {}).get('host', '0.0.0.0'))
+    port = int(os.environ.get('API_PORT', config.get('api', {}).get('port', 8000)))
     
-    print("Creating Agent...")
+    logger.info("Creating Agent...")
     agent = Agent(config)
     
     # Register file actions
@@ -121,14 +162,15 @@ async def main():
     
     print_welcome_message()
     print("Jiva is ready. Starting main loop...")
+    logger.info(f"Starting main loop and API server on {host}:{port}...")
     print("(Press CTRL+C to exit)")
     try:
-        await agent.run()
+        asyncio.run(run_agent_and_api(agent, host, port))
     except KeyboardInterrupt:
-        print("\nShutting down Jiva...")
+        logger.info("\nShutting down Jiva...")
     finally:
         # Perform any cleanup if necessary
         pass
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
