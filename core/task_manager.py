@@ -97,10 +97,9 @@ class TaskManager:
 
         response = await self.llm_interface.generate(prompt)
         action_names = []
-        if ',' in response:
-            split_result = response.split(',')
-            for action in split_result:
-                action_names.append(action.strip())
+        split_result = response.split(',')
+        for action in split_result:
+            action_names.append(action.strip())
         
         return action_names
 
