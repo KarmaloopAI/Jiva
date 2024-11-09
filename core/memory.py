@@ -94,11 +94,11 @@ class Memory:
             self.logger.error(f"Failed to query long-term memory: {e}")
             return []
 
-    def prepare_fine_tuning_dataset(self) -> List[Dict[str, Any]]:
+    async def prepare_fine_tuning_dataset(self) -> List[Dict[str, Any]]:
         """Prepare a dataset for fine-tuning based on recent memories."""
-        recent_memories = self.short_term_memory + self.query_long_term_memory("", limit=100)
-        # This is a placeholder. In a real implementation, you'd process these
-        # memories into a format suitable for fine-tuning your specific LLM.
+        # Need to await the async query_long_term_memory call
+        long_term_memories = await self.query_long_term_memory("", limit=100)
+        recent_memories = self.short_term_memory + long_term_memories
         return recent_memories
 
     def forget(self, threshold: float):

@@ -182,6 +182,10 @@ class TaskManager:
             if not isinstance(tasks, list):
                 raise ValueError("Expected a list of tasks")
             
+            for task in tasks:
+                if not isinstance(task.get('parameters', {}), dict):
+                    task['parameters'] = {"prompt": str(task.get('parameters', ''))}
+            
             processed_tasks = self.add_raw_tasks(tasks, goal)
             return processed_tasks
         except Exception as e:
@@ -281,8 +285,14 @@ class TaskManager:
     async def execute_task(self, task: Task) -> Any:
         self.logger.info(f"Executing task: {task.description}")
         try:
+            # Ensure parameters is always a dict
+            if isinstance(task.parameters, str):
+                task.parameters = {"prompt": task.parameters}
+            elif task.parameters is None:
+                task.parameters = {}
+
             # Resolve parameters based on required inputs
-            for param, required_task_desc in task.required_inputs.items():
+            for param, required_task_desc in (task.required_inputs or {}).items():
                 input_task_result = self.get_input_task_result(required_task_desc)
                 if input_task_result is not None:
                     # Replace the placeholder in all parameters
@@ -297,11 +307,13 @@ class TaskManager:
                 if isinstance(value, str) and '{{' in value and '}}' in value:
                     self.logger.warning(f"Parameter '{key}' contains unresolved placeholder: {value}")
 
+            # Execute the task
             if task.action == 'replan_tasks':
                 new_tasks = await self.replan_tasks(task)
                 result = str(new_tasks)
             else:
                 result = await self.action_manager.execute_action(task.action, task.parameters)
+            
             self.logger.info(f"Task executed successfully: {result}")
             
             # Store the result
@@ -319,8 +331,61 @@ class TaskManager:
             return result
         except Exception as e:
             self.logger.error(f"Error executing task: {str(e)}", exc_info=True)
+            await self.handle_task_error(task, str(e))
             return f"Error executing task: {str(e)}"
-    
+
+    async def handle_task_error(self, task: Task, error_message: str) -> None:
+        """Handle task execution errors by generating new tasks or providing solutions."""
+        self.logger.info(f"Handling error for task: {task.id}")
+        prompt = f"""
+        Task: {task.description}
+        Action: {task.action}
+        Parameters: {task.parameters}
+        Error: {error_message}
+
+        The task encountered an error. Suggest a solution or alternative approach to complete the task.
+        If the task needs to be broken down into smaller steps, provide those steps.
+        
+        Format your response as JSON with the following structure:
+        {{
+            "solution": "Brief description of the solution",
+            "new_tasks": [
+                {{
+                    "description": "Task description",
+                    "action": "action_name",
+                    "parameters": {{"param_name": "param_value"}},
+                    "required_inputs": {{}}
+                }}
+            ]
+        }}
+        """
+        try:
+            solution = await self.llm_interface.generate(prompt)
+            parsed_solution = self.llm_interface.parse_json(solution)
+            
+            if isinstance(parsed_solution, dict) and "new_tasks" in parsed_solution:
+                new_tasks = parsed_solution["new_tasks"]
+                tasks_added = self.add_raw_tasks(new_tasks, task.goal)
+                self.logger.info(f"Added {len(tasks_added)} new tasks to handle error")
+            else:
+                self.logger.warning("Could not generate new tasks from solution")
+            
+            # Mark the original task as failed
+            task.status = "failed"
+            task.result = {
+                "error": error_message,
+                "solution_attempted": True
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error handling task failure: {str(e)}")
+            # Mark the original task as failed
+            task.status = "failed"
+            task.result = {
+                "error": error_message,
+                "solution_attempted": False
+            }
+
     async def replan_tasks(self, task: Task):
         """
         Replans all tasks to achieve goal state.
