@@ -29,6 +29,11 @@
             "Do no evil"
         ]
     },
+    "sleep_cycle": {
+        "enabled": false,
+        "awake_duration": 4800,
+        "sleep_duration": 1200
+    },
     "sensors": {
         "chat_interface": {
             "prompt": "Jiva> "

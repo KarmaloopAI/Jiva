@@ -167,3 +167,103 @@ async def generic_exception_handler(request, exc):
         status_code=500,
         content={"detail": "Internal server error"}
     )
+
+@app.post("/trigger", response_model=Dict[str, Any])
+async def trigger_agent(agent = Depends(get_agent)) -> Dict[str, Any]:
+    """Trigger the agent to check and execute pending tasks if it's idle."""
+    try:
+        if not agent.is_awake:
+            raise HTTPException(
+                status_code=400, 
+                detail="Agent is sleeping and cannot be triggered"
+            )
+
+        # First get all pending tasks
+        pending_tasks = agent.task_manager.get_pending_tasks()
+        
+        if not pending_tasks:
+            return {
+                "status": "no_action",
+                "message": "No pending tasks to execute",
+                "debug": {
+                    "queue_size": 0,
+                    "queue_tasks": [],
+                    "all_pending_count": 0,
+                    "all_pending": [],
+                    "has_pending_tasks": False
+                }
+            }
+        
+        # Requeue the pending tasks
+        agent.task_manager.requeue_pending_tasks()
+        
+        # Signal the agent to check for tasks
+        agent._task_trigger.set()
+        
+        return {
+            "status": "triggered",
+            "message": f"Agent triggered to execute {len(pending_tasks)} pending tasks",
+            "debug": {
+                "queue_size": len(pending_tasks),
+                "queue_tasks": [
+                    {
+                        "id": task.id,
+                        "description": task.description,
+                        "status": task.status,
+                        "created_at": task.created_at.isoformat()
+                    } for task in pending_tasks
+                ],
+                "all_pending_count": len(pending_tasks),
+                "all_pending": [
+                    {
+                        "id": task.id,
+                        "description": task.description
+                    } for task in pending_tasks
+                ],
+                "has_pending_tasks": True
+            }
+        }
+            
+    except Exception as e:
+        logger.error(f"Error triggering agent: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/about", response_model=Dict[str, Any])
+async def get_about(agent = Depends(get_agent)) -> Dict[str, Any]:
+    """Get information about the agent and its configuration."""
+    try:
+        # Get config without sensitive information
+        config = agent.config.copy()
+        # Remove sensitive fields
+        for provider in ['llm', 'mistral-llm']:
+            if provider in config:
+                if 'api_key' in config[provider]:
+                    config[provider]['api_key'] = '***'
+        
+        # Get available actions
+        actions = agent.action_manager.get_available_actions()
+        clean_actions = {}
+        for action_name, action_info in actions.items():
+            clean_actions[action_name] = {
+                "description": action_info["description"],
+                "parameters": action_info["parameters"]
+            }
+
+        # Add sleep cycle status
+        status = {
+            "sleep_cycle": {
+                "enabled": agent.sleep_config.get('enabled', False),
+                "is_awake": agent.is_awake,
+                "last_sleep_time": agent.last_sleep_time.isoformat() if agent.last_sleep_time else None
+            }
+        }
+        
+        return {
+            "config": config,
+            "available_actions": clean_actions,
+            "sensors": list(agent.sensor_manager.get_available_sensors()),
+            "status": status
+        }
+    except Exception as e:
+        logger.error(f"Error getting agent information: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))

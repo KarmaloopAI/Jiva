@@ -36,6 +36,11 @@ class Agent:
         self.task_manager = TaskManager(self.llm_interface, self.ethical_framework, self.action_manager, memory=self.memory)
         self.sensor_manager = SensorManager(config['sensors'])
         
+        self.sleep_config = config.get('sleep_cycle', {
+            'enabled': False,
+            'awake_duration': 4800,  # 80 minutes default
+            'sleep_duration': 1200    # 20 minutes default
+        })
         self.is_awake = True
         self.last_sleep_time = self.time_experience.get_current_time()
         self.current_goal = None
@@ -43,6 +48,7 @@ class Agent:
         self.json_encoder = DateTimeEncoder()
         
         self._execution_event = asyncio.Event()
+        self._task_trigger = asyncio.Event()
         self.logger.info("Jiva Agent initialized successfully")
 
     async def run(self):
@@ -59,7 +65,6 @@ class Agent:
                     continue
                 
                 self.time_experience.update()
-                current_time = self.time_experience.get_current_time()
                 
                 # Check for sensory input (non-blocking)
                 sensory_input = await self.sensor_manager.get_input()
@@ -67,21 +72,30 @@ class Agent:
                     self.logger.info(f"Received sensory input: {sensory_input}")
                     await self.process_input(sensory_input)
                 
-                # Execute tasks if we have any, regardless of input
+                # Execute tasks if we have any or if triggered
                 current_time = asyncio.get_event_loop().time()
-                if self.task_manager.has_pending_tasks() and \
-                   (current_time - last_task_check) >= task_check_interval:
+                if (self.task_manager.has_pending_tasks() and 
+                    (current_time - last_task_check) >= task_check_interval) or \
+                   self._task_trigger.is_set():
+                    
+                    self._task_trigger.clear()  # Reset trigger
                     last_task_check = current_time
-                    await self.execute_next_task()
-                    self.logger.debug(f"Remaining tasks: {self.task_manager.get_pending_task_count()}")
+                    
+                    while self.task_manager.has_pending_tasks():
+                        await self.execute_next_task()
+                        self.logger.debug(f"Remaining tasks: {self.task_manager.get_pending_task_count()}")
+                        await asyncio.sleep(0)  # Allow other coroutines to run
                 
                 # Check for memory consolidation
                 if self.should_consolidate_memories():
                     self.logger.info("Consolidating memories")
                     await self.memory.consolidate()
                 
-                # Small sleep to prevent CPU hogging
-                await asyncio.sleep(0.01)
+                # Wait for trigger or timeout
+                try:
+                    await asyncio.wait_for(self._task_trigger.wait(), timeout=self.config['agent_loop_delay'])
+                except asyncio.TimeoutError:
+                    pass  # Normal timeout, continue the loop
                 
             except Exception as e:
                 self.logger.error(f"Error in main loop: {str(e)}", exc_info=True)
@@ -236,39 +250,54 @@ class Agent:
                 self.logger.info(f"New follow-up task added: {self.json_encoder.encode(task_info)}")
 
     async def check_and_handle_sleep(self):
+        # First check if sleep cycle is enabled
+        if not self.sleep_config.get('enabled', False):
+            if not self.is_awake:
+                # If sleep was disabled while agent was sleeping, wake it up
+                await self.wake_up()
+            return
+
         current_time = self.time_experience.get_current_time()
         time_since_last_sleep = current_time - self.last_sleep_time
         
-        awake_duration = timedelta(seconds=self.config['awake_duration'])
-        sleep_duration = timedelta(seconds=self.config['sleep_duration'])
+        awake_duration = timedelta(seconds=self.sleep_config.get('awake_duration', 4800))
+        sleep_duration = timedelta(seconds=self.sleep_config.get('sleep_duration', 1200))
         
-        self.logger.debug(f"Time since last sleep: {time_since_last_sleep}, Awake duration: {awake_duration}, Sleep duration: {sleep_duration}")
+        self.logger.debug(f"Time since last sleep: {time_since_last_sleep}, "
+                         f"Awake duration: {awake_duration}, "
+                         f"Sleep duration: {sleep_duration}, "
+                         f"Sleep enabled: {self.sleep_config['enabled']}")
         
-        if time_since_last_sleep >= awake_duration:
+        if self.is_awake and time_since_last_sleep >= awake_duration:
             self.logger.info("Agent is tired, going to sleep")
             await self.sleep()
         elif not self.is_awake and time_since_last_sleep >= sleep_duration:
             self.logger.info("Agent has slept enough, waking up")
             await self.wake_up()
+            self.last_sleep_time = current_time
 
     async def sleep(self):
+        if not self.sleep_config.get('enabled', False):
+            self.logger.info("Sleep cycle disabled, staying awake")
+            return
+
         self.logger.info("Agent entering sleep state")
         self.is_awake = False
-        self.last_sleep_time = self.time_experience.get_current_time()
         
         self.logger.debug("Consolidating memory")
         await self.memory.consolidate()
         
         self.logger.debug("Preparing fine-tuning dataset")
-        dataset = await self.memory.prepare_fine_tuning_dataset()  # Add await here
+        dataset = await self.memory.prepare_fine_tuning_dataset()
         
-        self.logger.info("Fine-tuning the model")
-        await self.llm_interface.fine_tune(dataset)
+        self.logger.info("Fine-tuning model skipped (not implemented)")
+        # Skipping fine-tuning for now
+        # await self.llm_interface.fine_tune(dataset)
 
     async def wake_up(self):
         self.logger.info("Agent waking up")
         self.is_awake = True
-        # Perform any wake-up procedures here
+        self.time_experience.update()
 
     def setup_logging(self):
         self.logger = logging.getLogger("Jiva")
