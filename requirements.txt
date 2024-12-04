@@ -1,7 +1,7 @@
 # requirements.txt
 
 # HTTP requests
-requests==2.26.0
+requests==2.32.2
 
 # Vector database client
 qdrant-client==1.11.1
