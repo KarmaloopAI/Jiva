@@ -192,29 +192,49 @@ class TaskManager:
             self.logger.error(f"Error parsing LLM response: {e}")
             return [{"description": f"Analyze goal: {goal}", "action": "think", "parameters": {"prompt": goal}, "required_inputs": []}]
 
-    def add_raw_tasks(self, raw_tasks: Dict[str, Any], goal: str) -> List[Task]:
+    def add_raw_tasks(self, raw_tasks: List[Dict[str, Any]], goal: str) -> List[Task]:
+        """Add tasks from raw task dictionaries."""
         tasks: List[Task] = []
         last_task_id = None
         for raw_task in raw_tasks:
             task = Task(**raw_task)
             task.goal = goal
 
-            # Reset the last_task_id if this current task is a think task.
             if task.action.strip().lower() == 'think':
                 last_task_id = None
 
             task.parent_id = last_task_id if last_task_id else None
             tasks.append(task)
-            self.task_queue.put(task)
+            
+            # Add task to both dictionaries and queue
             self.all_tasks[task.id] = task
+            self.task_queue.put(task)  # Make sure tasks get into the queue
+            
             if last_task_id and last_task_id in self.all_tasks:
                 self.all_tasks[last_task_id].subtasks.append(task.id)
 
-            # If this is a think task, make it the parent for the next set of tasks.
-            if task and task.action.strip().lower() == 'think':
+            if task.action.strip().lower() == 'think':
                 last_task_id = task.id
 
-        return tasks 
+        return tasks
+
+    def requeue_pending_tasks(self):
+        """Re-queue any tasks that are pending but not in the queue."""
+        requeued_count = 0
+        pending_tasks = [
+            task for task in self.all_tasks.values()
+            if task.status == "pending"
+        ]
+        
+        # Clear the queue and rebuild it with pending tasks
+        self.task_queue = PriorityQueue()
+        for task in pending_tasks:
+            self.task_queue.put(task)
+            requeued_count += 1
+            self.logger.debug(f"Re-queued pending task: {task.id}")
+            
+        self.logger.info(f"Requeued {requeued_count} pending tasks")
+        return pending_tasks
 
     def add_task(self, description: str, action: str, parameters: Dict[str, Any], 
                  priority: int = 1, deadline: Optional[datetime] = None, 
@@ -429,7 +449,19 @@ class TaskManager:
         return None
 
     def has_pending_tasks(self) -> bool:
-        return not self.task_queue.empty()
+        """Check for any pending tasks and ensure they're in the queue."""
+        pending_tasks = self.get_pending_tasks()
+        if pending_tasks:
+            # Requeue if we have pending tasks
+            self.requeue_pending_tasks()
+        return bool(pending_tasks)
+    
+    def get_pending_tasks(self) -> List[Task]:
+        """Get all pending tasks from all_tasks."""
+        return [
+            task for task in self.all_tasks.values()
+            if task.status == "pending"
+        ]
 
     def get_pending_task_count(self) -> int:
         return self.task_queue.qsize()
