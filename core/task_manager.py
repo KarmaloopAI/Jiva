@@ -129,7 +129,8 @@ class TaskManager:
         {goal}
 
         ## Your approach
-        You strive to achieve a given task in as few steps as possible
+        You strive to achieve a given task in as few steps as possible.
+        If the goal or input contains references to time-based scheduling, ignore it from your task plan, because we have a scheduler that will pick it up.
 
         # Your Task
         Generate a list of tasks to achieve the goal. Each task should have:

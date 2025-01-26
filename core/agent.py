@@ -9,6 +9,7 @@ from logging.handlers import RotatingFileHandler
 from typing import Any, Dict, List
 
 from core.memory import Memory
+from core.scheduler import Scheduler
 from core.time_experience import TimeExperience
 from core.task_manager import TaskManager
 from core.ethical_framework import EthicalFramework
@@ -49,9 +50,13 @@ class Agent:
         
         self._execution_event = asyncio.Event()
         self._task_trigger = asyncio.Event()
+        self.scheduler = Scheduler(self)
         self.logger.info("Jiva Agent initialized successfully")
 
     async def run(self):
+        self.logger.info("Starting Scheduler")
+        await self.scheduler.start()
+
         self.logger.info("Starting Jiva Agent main loop")
         last_task_check = 0
         task_check_interval = 0.1  # Check for tasks every 100ms
@@ -110,6 +115,36 @@ class Agent:
         self.memory.add_to_short_term(time_memory)
         self.logger.debug(f"Created time memory: {time_memory}")
 
+    async def analyze_goal_scheduling(self, processed_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Determine if a goal needs scheduling and its schedule."""
+        prompt = f"""
+        Analyze if this goal requires scheduling/repetition: {processed_data}
+        
+        If it needs scheduling, specify:
+        1. Schedule frequency (in cron format)
+        2. Any validation requirements
+        
+        Respond in JSON format:
+        {{
+            "needs_schedule": true/false,
+            "schedule": "cron_expression",
+            "validation": {{"type": "llm", "prompt": "validation_prompt"}}
+        }}
+        Only include schedule and validation if needs_schedule is true.
+        """
+        
+        response = await self.llm_interface.generate(prompt)
+        schedule_info = self.llm_interface.parse_json(response)
+        
+        if schedule_info.get("needs_schedule", False):
+            self.scheduler.add_scheduled_goal(
+                goal=processed_data.get("content"),
+                schedule=schedule_info["schedule"],
+                validation=schedule_info.get("validation")
+            )
+        
+        return schedule_info
+
     def should_consolidate_memories(self) -> bool:
         return len(self.memory.get_short_term_memory()) >= self.config.get('memory_consolidation_threshold', 100) and not self.task_manager.has_pending_tasks()
 
@@ -125,7 +160,8 @@ class Agent:
                 
                 if await self.is_goal_setting(processed_data):
                     self.logger.info("Input identified as goal-setting")
-                    await self.set_new_goal(processed_data)
+                    schedule_info = await self.analyze_goal_scheduling(processed_data)
+                    await self.set_new_goal(processed_data, schedule_info)
                 else:
                     self.logger.info("Generating tasks based on input")
                     context = self.get_context()
@@ -150,7 +186,7 @@ class Agent:
         self.logger.debug(f"Is goal-setting: {is_goal}")
         return is_goal
 
-    async def set_new_goal(self, processed_data: Dict[str, Any]):
+    async def set_new_goal(self, processed_data: Dict[str, Any], schedule_info: Dict[str, Any] = None):
         self.logger.info("Setting new goal")
         prompt = f"Processed input: {self.json_encoder.encode(processed_data)}\n\nExtract the main goal from this input. Respond with a clear, concise goal statement."
         self.current_goal = await self.llm_interface.generate(prompt)
@@ -160,7 +196,13 @@ class Agent:
         context = self.get_context()
         new_tasks = await self.task_manager.generate_tasks(self.current_goal, context)
         
-        self.memory.add_to_short_term({"type": "new_goal", "goal": self.current_goal})
+        # Store goal with scheduling info
+        goal_memory = {
+            "type": "new_goal",
+            "goal": self.current_goal,
+            "schedule_info": schedule_info
+        }
+        self.memory.add_to_short_term(goal_memory)
         self.logger.debug("Added new goal to short-term memory")
         
         for task in new_tasks:
