@@ -1,5 +1,6 @@
 # actions/think.py
 
+import asyncio
 from typing import Dict, Any, Optional
 from core.llm_interface import LLMInterface
 
@@ -30,6 +31,32 @@ async def replan_tasks():
     This method takes no arguments and returns an empty string since it is only meant to be a placeholder.
     """
     return ''
+
+async def sleep(seconds: int):
+    """
+    This method is used as a placeholder in a task list to state that task execution must be paused for a given amount of time.
+
+    Args:
+        seconds (int): The number of seconds to pause for.
+    Returns:
+        str: This method returns an empty string since it is only meant to be a placeholder.
+    """
+    # Code to sleep an async method for x seconds
+    await asyncio.sleep(seconds)
+
+    return ''
+
+async def rerun_tasks(task_name: str) -> str:
+    """
+    Mark a previous task as the resumption point for task execution.
+
+    Args:
+        task_name (str): Exact description of the task from which to resume execution.
+
+    Returns:
+        str: Name of the task to resume from.
+    """
+    return task_name
 
 # Example usage:
 # story = think(llm_interface, "Write a short story about two friends", {"genre": "comedy", "word_limit": 200})

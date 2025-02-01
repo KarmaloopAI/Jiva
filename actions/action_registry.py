@@ -54,6 +54,10 @@ def get_action_registry(llm_interface: LLMInterface, memory: Memory) -> Dict[str
         # Think action
         "think": think.think,
         "replan_tasks": think.replan_tasks,
+        "sleep": think.sleep,
+        "rerun_tasks": think.rerun_tasks,
+
+        # Web search actions
         "web_search": wi.web_search,
         "visit_page": wi.visit_page,
         "find_links": wi.find_links,
