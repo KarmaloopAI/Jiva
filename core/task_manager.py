@@ -29,6 +29,7 @@ class Task:
         self.description = description
         self.action = action
         self.parameters = parameters
+        self.original_parameters = parameters.copy()    # Retain a copy of the original parameters
         self.priority = parse_int_or_default(priority)
         self.deadline = deadline
         self.created_at = datetime.now()
@@ -110,7 +111,7 @@ class TaskManager:
         # Get actions relevant to this run.
         relevant_actions = await self.get_relevant_actions(goal=goal, context=context)
         # Mandatory actions fo context
-        mandatory_actions = ['think', 'replan_tasks']
+        mandatory_actions = ['think', 'replan_tasks', 'sleep', 'rerun_tasks']
         
         # Format the actions and their parameters for the prompt
         action_descriptions = []
@@ -331,6 +332,9 @@ class TaskManager:
             if task.action == 'replan_tasks':
                 new_tasks = await self.replan_tasks(task)
                 result = str(new_tasks)
+            elif task.action == 'rerun_tasks':
+                new_tasks = await self.handle_rerun_tasks(task)
+                result = str(new_tasks)
             else:
                 result = await self.action_manager.execute_action(task.action, task.parameters)
             
@@ -433,6 +437,75 @@ class TaskManager:
 
         new_tasks = await self.generate_tasks(replan_prompt, context)
         return new_tasks
+
+    async def handle_rerun_tasks(self, task: Task) -> List[Task]:
+        """
+        Handle rerun_tasks action by evaluating if iteration is needed and recreating all tasks
+        from the specified start point up to the current task.
+        """
+        # Find the starting task (point A) by matching description from parameters
+        start_task_name = task.parameters.get("task_name")
+        if not start_task_name:
+            self.logger.error("No task name provided for rerun_tasks")
+            return []
+
+        # Get all tasks with the same goal, ordered by creation time
+        goal_tasks = sorted(
+            [t for t in self.all_tasks.values() if t.goal == task.goal],
+            key=lambda x: x.created_at
+        )
+
+        # Find the starting task and current task indices
+        start_idx = None
+        current_idx = None
+        for idx, t in enumerate(goal_tasks):
+            if t.description == start_task_name:
+                start_idx = idx
+            if t.id == task.id:  # This is our current rerun_tasks task (point B)
+                current_idx = idx
+                break
+
+        if start_idx is None or current_idx is None:
+            self.logger.error(f"Could not find task sequence for rerun_tasks: start={start_task_name}")
+            return []
+
+        # Get the execution history of the starting task
+        previous_runs = [t for t in goal_tasks[:current_idx] 
+                        if t.description == start_task_name]
+        
+        timestamps = [t.created_at.isoformat() for t in previous_runs]
+        current_time = datetime.now().isoformat()
+        
+        prompt = f"""Goal: {task.goal}
+    Previous executions of '{start_task_name}': {timestamps}
+    Current time: {current_time}
+
+    Should another iteration of these tasks be executed? Consider the time elapsed between runs.
+    Respond with only 'yes' or 'no'."""
+
+        should_rerun = await self.llm_interface.generate(prompt)
+        
+        if should_rerun.strip().lower() == 'yes':
+            # Create new tasks for all tasks from start_idx to current_idx (exclusive)
+            new_tasks = []
+            for original_task in goal_tasks[start_idx:current_idx+1]:
+                new_task = Task(
+                    description=original_task.description,
+                    action=original_task.action,
+                    parameters=original_task.original_parameters.copy(),
+                    required_inputs=original_task.required_inputs.copy(),
+                    goal=task.goal,
+                    priority=original_task.priority
+                )
+                self.all_tasks[new_task.id] = new_task
+                self.task_queue.put(new_task)
+                new_tasks.append(new_task)
+                
+            self.logger.info(f"Rerunning {len(new_tasks)} tasks from '{start_task_name}'")
+            return new_tasks
+                
+        self.logger.info(f"No rerun needed for tasks starting with '{start_task_name}'")
+        return []
 
     def get_input_task_result(self, task_description: str) -> Any:
         """
