@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>actions/action_registry.py | Jiva Documentation</title>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500&family=Ubuntu+Mono&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="site-header">
+        <div class="header-left">
+            <div class="logo">
+                <img src="../assets/logo-placeholder.png" alt="Fluen" width="32" height="32">
+                <a href="../index.html" class="logo-text">Fluen Documentation</a>
+            </div>
+        </div>
+        
+        <div class="header-center">
+            <div class="search-container">
+                <input type="search" class="search-input" placeholder="Search documentation... (Press '/' to focus)">
+                <div class="search-results"></div>
+            </div>
+        </div>
+        
+        <div class="header-right">
+            <button id="themeToggle" class="theme-toggle" aria-label="Toggle theme">
+                <svg class="sun-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <circle cx="12" cy="12" r="4"></circle>
+                    <path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path>
+                </svg>
+                <svg class="moon-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="display: none;">
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                </svg>
+            </button>
+        </div>
+    </header>
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <h1><a href="../index.html">Jiva</a></h1>
+            <p>Python Project</p>
+        </div>
+
+        <div class="sidebar-content">
+            <nav class="file-navigation">
+                <div class="nav-section">
+                    <h3>Function</h3>
+                    <ul>
+                        <li>
+                            <a href="#get_action_registry">
+                                get_action_registry
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+                <div class="nav-section">
+                    <h3>Variable</h3>
+                    <ul>
+                        <li>
+                            <a href="#actions">
+                                actions
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </nav>
+        </div>
+    </aside>
+
+    <!-- Main content -->
+    <main class="main-content">
+        <!-- File header -->
+        <div class="file-header">
+            <div class="breadcrumbs">
+                <a href="../index.html">Jiva</a>
+                <span class="separator">/</span>
+                <span class="current">actions/action_registry.py</span>
+            </div>
+
+            <div class="file-metadata">
+                <div class="metadata-item">
+                    <span class="metadata-label">Language</span>
+                    <span class="metadata-value">Python</span>
+                </div>
+                <div class="metadata-item">
+                    <span class="metadata-label">Last Modified</span>
+                    <span class="metadata-value">2025-02-08T21:14:12.224371</span>
+                </div>
+            </div>
+
+            <div class="file-purpose">
+                <h1>actions/action_registry.py</h1>
+                <p>This script serves as a registry for various actions by mapping action names to their respective functions. These actions are functionalities related to file operations, memory operations, thinking or planning tasks, and web interface interactions. The registry is used to standardize and centralize how actions are accessed and called in the system.</p>
+            </div>
+        </div>
+
+        <!-- Dependencies section -->
+        <section class="file-dependencies">
+            <h2>Dependencies</h2>
+            <div class="dependencies-list">
+                <div class="dependency-item">
+                    <span class="dependency-name">typing.Dict</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">typing.Callable</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">typing.Any</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">core.llm_interface.LLMInterface</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">core.memory.Memory</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">actions.file_operations</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">actions.memory_retrieval</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">actions.think</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">actions.web_interface</span>
+                    <span class="dependency-type">external</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Dependency visualization -->
+        <section class="dependency-section">
+            <h2>Visualization</h2>
+            <div class="graph-wrapper">
+                <div id="dependencyGraph" class="dependency-graph"></div>
+            </div>
+        </section>
+
+        <!-- Code elements -->
+        <section class="code-elements">
+            <h2>Code Elements</h2>
+            <div class="element-group">
+                <h3>Function</h3>
+                
+                <div id="get_action_registry" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>get_action_registry</code>
+                            <span class="scope-badge">global</span>
+                        </div>
+                        <span class="line-number">Line 15</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Provides a dictionary of action names mapped to their corresponding functions.
+                        </div>
+
+                        <div class="element-documentation">
+                            This function binds various actions with provided interfaces (LLMInterface and Memory) and returns a dictionary of action names to functions, allowing actions to be accessed by name.
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="element-group">
+                <h3>Variable</h3>
+                
+                <div id="actions" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>actions</code>
+                            <span class="scope-badge">local within get_action_registry</span>
+                        </div>
+                        <span class="line-number">Line 26</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Stores the mapping of action names to their corresponding functions.
+                        </div>
+
+                        <div class="element-documentation">
+                            A dictionary variable that holds the mapping of action names to their corresponding callable functions. Its content is dynamically constructed based on the input parameters for LLMInterface and Memory, as well as imported actions.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <footer class="site-footer">
+            <p>Powered by <a href="https://fluen.io" target="_blank">Fluen.io</a></p>
+        </footer>
+    </main>
+    <!-- Add D3.js before other scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+    <!-- Add default graph data in case the server doesn't provide it -->
+
+    <script src="../assets/script.js"></script>
+<script>window.lineageData = {"nodes": [{"id": "actions/action_registry.py", "type": "current"}], "links": []};</script></body>
+</html>

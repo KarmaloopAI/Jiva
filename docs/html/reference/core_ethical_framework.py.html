@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>core/ethical_framework.py | Jiva Documentation</title>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500&family=Ubuntu+Mono&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="site-header">
+        <div class="header-left">
+            <div class="logo">
+                <img src="../assets/logo-placeholder.png" alt="Fluen" width="32" height="32">
+                <a href="../index.html" class="logo-text">Fluen Documentation</a>
+            </div>
+        </div>
+        
+        <div class="header-center">
+            <div class="search-container">
+                <input type="search" class="search-input" placeholder="Search documentation... (Press '/' to focus)">
+                <div class="search-results"></div>
+            </div>
+        </div>
+        
+        <div class="header-right">
+            <button id="themeToggle" class="theme-toggle" aria-label="Toggle theme">
+                <svg class="sun-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <circle cx="12" cy="12" r="4"></circle>
+                    <path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path>
+                </svg>
+                <svg class="moon-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="display: none;">
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                </svg>
+            </button>
+        </div>
+    </header>
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <h1><a href="../index.html">Jiva</a></h1>
+            <p>Python Project</p>
+        </div>
+
+        <div class="sidebar-content">
+            <nav class="file-navigation">
+                <div class="nav-section">
+                    <h3>Class</h3>
+                    <ul>
+                        <li>
+                            <a href="#ethicalframework">
+                                EthicalFramework
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#mockllminterface">
+                                MockLLMInterface
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+                <div class="nav-section">
+                    <h3>Method</h3>
+                    <ul>
+                        <li>
+                            <a href="#__init__">
+                                __init__
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#set_enabled">
+                                set_enabled
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#evaluate_task">
+                                evaluate_task
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#update_ethical_principles">
+                                update_ethical_principles
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+                <div class="nav-section">
+                    <h3>Async Method</h3>
+                    <ul>
+                        <li>
+                            <a href="#evaluate_action">
+                                evaluate_action
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#get_ethical_explanation">
+                                get_ethical_explanation
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#get_ethical_dilemma_resolution">
+                                get_ethical_dilemma_resolution
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </nav>
+        </div>
+    </aside>
+
+    <!-- Main content -->
+    <main class="main-content">
+        <!-- File header -->
+        <div class="file-header">
+            <div class="breadcrumbs">
+                <a href="../index.html">Jiva</a>
+                <span class="separator">/</span>
+                <span class="current">core/ethical_framework.py</span>
+            </div>
+
+            <div class="file-metadata">
+                <div class="metadata-item">
+                    <span class="metadata-label">Language</span>
+                    <span class="metadata-value">Python</span>
+                </div>
+                <div class="metadata-item">
+                    <span class="metadata-label">Last Modified</span>
+                    <span class="metadata-value">2025-02-08T21:07:50.658522</span>
+                </div>
+            </div>
+
+            <div class="file-purpose">
+                <h1>core/ethical_framework.py</h1>
+                <p>This code implements an ethical framework for evaluating tasks and actions based on predefined ethical principles, utilizing a language model interface to perform such evaluations.</p>
+            </div>
+        </div>
+
+        <!-- Dependencies section -->
+        <section class="file-dependencies">
+            <h2>Dependencies</h2>
+            <div class="dependencies-list">
+                <div class="dependency-item">
+                    <span class="dependency-name">typing.List</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">typing.Dict</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">typing.Any</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">typing.Union</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">logging</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">core.llm_interface.LLMInterface</span>
+                    <span class="dependency-type">external</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Dependency visualization -->
+        <section class="dependency-section">
+            <h2>Visualization</h2>
+            <div class="graph-wrapper">
+                <div id="dependencyGraph" class="dependency-graph"></div>
+            </div>
+        </section>
+
+        <!-- Code elements -->
+        <section class="code-elements">
+            <h2>Code Elements</h2>
+            <div class="element-group">
+                <h3>Class</h3>
+                
+                <div id="ethicalframework" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>EthicalFramework</code>
+                            <span class="scope-badge">global</span>
+                        </div>
+                        <span class="line-number">Line 8</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Manages ethical evaluations and decision-making logic based on ethical principles.
+                        </div>
+
+                        <div class="element-documentation">
+                            The class encapsulates functionalities to enable/disable the ethical framework, evaluate tasks or actions for ethical considerations, and update ethical principles.
+                        </div>
+                    </div>
+                </div>
+                <div id="mockllminterface" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>MockLLMInterface</code>
+                            <span class="scope-badge">local</span>
+                        </div>
+                        <span class="line-number">Line 128</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Simulates a language model interface for testing purposes.
+                        </div>
+
+                        <div class="element-documentation">
+                            Provides a simple mock implementation for generating responses and parsing JSON, facilitating testing of the EthicalFramework.
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="element-group">
+                <h3>Method</h3>
+                
+                <div id="__init__" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>__init__</code>
+                            <span class="scope-badge">instance</span>
+                        </div>
+                        <span class="line-number">Line 9</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Initializes the EthicalFramework instance with a language model interface and configuration.
+                        </div>
+
+                        <div class="element-documentation">
+                            Constructor that sets initial values for the framework, including the language model interface, logger, ethical principles, and enabled status.
+                        </div>
+                    </div>
+                </div>
+                <div id="set_enabled" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>set_enabled</code>
+                            <span class="scope-badge">instance</span>
+                        </div>
+                        <span class="line-number">Line 19</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Enables or disables the ethical framework.
+                        </div>
+
+                        <div class="element-documentation">
+                            Updates the 'enabled' status of the framework and logs the action.
+                        </div>
+                    </div>
+                </div>
+                <div id="evaluate_task" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>evaluate_task</code>
+                            <span class="scope-badge">instance</span>
+                        </div>
+                        <span class="line-number">Line 24</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Evaluates a task to determine if it is ethical based on the defined principles.
+                        </div>
+
+                        <div class="element-documentation">
+                            Checks if the framework is enabled, then evaluates the task using a basic rule set or generates a prompt for the LLMInterface to assess.
+                        </div>
+                    </div>
+                </div>
+                <div id="update_ethical_principles" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>update_ethical_principles</code>
+                            <span class="scope-badge">instance</span>
+                        </div>
+                        <span class="line-number">Line 98</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Updates the list of ethical principles used by the framework.
+                        </div>
+
+                        <div class="element-documentation">
+                            Allows modification of the framework's ethical principles, supporting adaptability over time.
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="element-group">
+                <h3>Async Method</h3>
+                
+                <div id="evaluate_action" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>evaluate_action</code>
+                            <span class="scope-badge">instance</span>
+                        </div>
+                        <span class="line-number">Line 61</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Asynchronously evaluates an action and its parameters for ethical considerations.
+                        </div>
+
+                        <div class="element-documentation">
+                            Evaluates actions by creating a prompt for the LLMInterface, which in turn gives an ethical assessment based on the provided details.
+                        </div>
+                    </div>
+                </div>
+                <div id="get_ethical_explanation" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>get_ethical_explanation</code>
+                            <span class="scope-badge">instance</span>
+                        </div>
+                        <span class="line-number">Line 84</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Retrieves a detailed ethical explanation for a given task or action.
+                        </div>
+
+                        <div class="element-documentation">
+                            Asynchronously requests a generated explanation from the LLMInterface detailing how a task or action aligns with or violates ethical principles.
+                        </div>
+                    </div>
+                </div>
+                <div id="get_ethical_dilemma_resolution" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>get_ethical_dilemma_resolution</code>
+                            <span class="scope-badge">instance</span>
+                        </div>
+                        <span class="line-number">Line 104</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Asynchronously resolves ethical dilemmas based on the framework&#39;s principles.
+                        </div>
+
+                        <div class="element-documentation">
+                            Analyzes dilemmas by leveraging the LLMInterface to generate a reasoned resolution to ethical challenges.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <footer class="site-footer">
+            <p>Powered by <a href="https://fluen.io" target="_blank">Fluen.io</a></p>
+        </footer>
+    </main>
+    <!-- Add D3.js before other scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+    <!-- Add default graph data in case the server doesn't provide it -->
+
+    <script src="../assets/script.js"></script>
+<script>window.lineageData = {"nodes": [{"id": "core/ethical_framework.py", "type": "current"}], "links": []};</script></body>
+</html>

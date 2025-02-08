@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>main.py | Jiva Documentation</title>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500&family=Ubuntu+Mono&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="site-header">
+        <div class="header-left">
+            <div class="logo">
+                <img src="../assets/logo-placeholder.png" alt="Fluen" width="32" height="32">
+                <a href="../index.html" class="logo-text">Fluen Documentation</a>
+            </div>
+        </div>
+        
+        <div class="header-center">
+            <div class="search-container">
+                <input type="search" class="search-input" placeholder="Search documentation... (Press '/' to focus)">
+                <div class="search-results"></div>
+            </div>
+        </div>
+        
+        <div class="header-right">
+            <button id="themeToggle" class="theme-toggle" aria-label="Toggle theme">
+                <svg class="sun-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <circle cx="12" cy="12" r="4"></circle>
+                    <path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path>
+                </svg>
+                <svg class="moon-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="display: none;">
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                </svg>
+            </button>
+        </div>
+    </header>
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <h1><a href="../index.html">Jiva</a></h1>
+            <p>Python Project</p>
+        </div>
+
+        <div class="sidebar-content">
+            <nav class="file-navigation">
+                <div class="nav-section">
+                    <h3>Function</h3>
+                    <ul>
+                        <li>
+                            <a href="#load_config">
+                                load_config
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#deep_update">
+                                deep_update
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#setup_environment">
+                                setup_environment
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#print_welcome_message">
+                                print_welcome_message
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#run_agent_and_api">
+                                run_agent_and_api
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#main">
+                                main
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+                <div class="nav-section">
+                    <h3>Variable</h3>
+                    <ul>
+                        <li>
+                            <a href="#logger">
+                                logger
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </nav>
+        </div>
+    </aside>
+
+    <!-- Main content -->
+    <main class="main-content">
+        <!-- File header -->
+        <div class="file-header">
+            <div class="breadcrumbs">
+                <a href="../index.html">Jiva</a>
+                <span class="separator">/</span>
+                <span class="current">main.py</span>
+            </div>
+
+            <div class="file-metadata">
+                <div class="metadata-item">
+                    <span class="metadata-label">Language</span>
+                    <span class="metadata-value">Python</span>
+                </div>
+                <div class="metadata-item">
+                    <span class="metadata-label">Last Modified</span>
+                    <span class="metadata-value">2025-02-08T21:05:35.343734</span>
+                </div>
+            </div>
+
+            <div class="file-purpose">
+                <h1>main.py</h1>
+                <p>The primary purpose of this code is to initialize and run the Jiva AI Framework, which involves loading configurations, setting up the environment, initializing an agent, registering actions, and concurrently running a FastAPI application and the agent.</p>
+            </div>
+        </div>
+
+        <!-- Dependencies section -->
+        <section class="file-dependencies">
+            <h2>Dependencies</h2>
+            <div class="dependencies-list">
+                <div class="dependency-item">
+                    <span class="dependency-name">json</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">logging</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">os</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">asyncio</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">uvicorn</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">api.main</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">typing</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">core.agent</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">actions.action_registry</span>
+                    <span class="dependency-type">external</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Dependency visualization -->
+        <section class="dependency-section">
+            <h2>Visualization</h2>
+            <div class="graph-wrapper">
+                <div id="dependencyGraph" class="dependency-graph"></div>
+            </div>
+        </section>
+
+        <!-- Code elements -->
+        <section class="code-elements">
+            <h2>Code Elements</h2>
+            <div class="element-group">
+                <h3>Function</h3>
+                
+                <div id="load_config" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>load_config</code>
+                            <span class="scope-badge">main module</span>
+                        </div>
+                        <span class="line-number">Line 10</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Load configuration from a JSON file or fallback to default values.
+                        </div>
+
+                        <div class="element-documentation">
+                            Load configuration from a file. Returns a dictionary with configuration settings.
+                        </div>
+                    </div>
+                </div>
+                <div id="deep_update" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>deep_update</code>
+                            <span class="scope-badge">main module</span>
+                        </div>
+                        <span class="line-number">Line 54</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Recursively update a dictionary with another dictionary.
+                        </div>
+
+                        <div class="element-documentation">
+                            Performs deep merging of two dictionaries.
+                        </div>
+                    </div>
+                </div>
+                <div id="setup_environment" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>setup_environment</code>
+                            <span class="scope-badge">main module</span>
+                        </div>
+                        <span class="line-number">Line 66</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Set up necessary directories used by the application.
+                        </div>
+
+                        <div class="element-documentation">
+                            Creates 'data' and 'logs' directories if they don't exist.
+                        </div>
+                    </div>
+                </div>
+                <div id="print_welcome_message" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>print_welcome_message</code>
+                            <span class="scope-badge">main module</span>
+                        </div>
+                        <span class="line-number">Line 71</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Print a welcome message to the console.
+                        </div>
+
+                        <div class="element-documentation">
+                            Displays an ASCII art and welcome message.
+                        </div>
+                    </div>
+                </div>
+                <div id="run_agent_and_api" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>run_agent_and_api</code>
+                            <span class="scope-badge">main module</span>
+                        </div>
+                        <span class="line-number">Line 90</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Run both the Jiva agent and the FastAPI server concurrently.
+                        </div>
+
+                        <div class="element-documentation">
+                            Uses asyncio to run the agent and server concurrently.
+                        </div>
+                    </div>
+                </div>
+                <div id="main" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>main</code>
+                            <span class="scope-badge">main module</span>
+                        </div>
+                        <span class="line-number">Line 112</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Entry point for the application, initializing the framework and starting the main loop.
+                        </div>
+
+                        <div class="element-documentation">
+                            Sets up the environment, loads configuration, initializes the agent, and starts the agent and API server.
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="element-group">
+                <h3>Variable</h3>
+                
+                <div id="logger" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>logger</code>
+                            <span class="scope-badge">main module</span>
+                        </div>
+                        <span class="line-number">Line 8</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Logger instance for the module.
+                        </div>
+
+                        <div class="element-documentation">
+                            Used for logging messages within the module.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <footer class="site-footer">
+            <p>Powered by <a href="https://fluen.io" target="_blank">Fluen.io</a></p>
+        </footer>
+    </main>
+    <!-- Add D3.js before other scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+    <!-- Add default graph data in case the server doesn't provide it -->
+
+    <script src="../assets/script.js"></script>
+<script>window.lineageData = {"nodes": [{"id": "main.py", "type": "current"}], "links": []};</script></body>
+</html>

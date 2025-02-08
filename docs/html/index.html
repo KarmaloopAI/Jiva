@@ -1,0 +1,1374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jiva Documentation</title>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500&family=Ubuntu+Mono&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="site-header">
+        <div class="header-left">
+            <div class="logo">
+                <img src="assets/logo-placeholder.png" alt="Fluen" width="32" height="32">
+                <span class="logo-text">Fluen Documentation</span>
+            </div>
+        </div>
+        
+        <div class="header-center">
+            <div class="search-container">
+                <input type="search" class="search-input" placeholder="Search documentation... (Press '/' to focus)">
+                <div class="search-results"></div>
+            </div>
+        </div>
+        
+        <div class="header-right">
+            <button id="themeToggle" class="theme-toggle" aria-label="Toggle theme">
+                <svg class="sun-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <circle cx="12" cy="12" r="4"></circle>
+                    <path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path>
+                </svg>
+                <svg class="moon-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="display: none;">
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                </svg>
+            </button>
+        </div>
+    </header>
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <h1>Jiva</h1>
+            <p>Python Project</p>
+        </div>
+
+        <div class="sidebar-content">
+            <div class="file-group">
+                <h3>Python</h3>
+                <ul>
+                    <li><a href="reference/actions_web_interface.py.html">actions/web_interface.py</a></li>
+                    <li><a href="reference/actions_file_operations.py.html">actions/file_operations.py</a></li>
+                    <li><a href="reference/main.py.html">main.py</a></li>
+                    <li><a href="reference/core_memory.py.html">core/memory.py</a></li>
+                    <li><a href="reference/llm_providers_anthropic_provider.py.html">llm_providers/anthropic_provider.py</a></li>
+                    <li><a href="reference/core_llm_interface.py.html">core/llm_interface.py</a></li>
+                    <li><a href="reference/core_ethical_framework.py.html">core/ethical_framework.py</a></li>
+                    <li><a href="reference/core_agent.py.html">core/agent.py</a></li>
+                    <li><a href="reference/llm_providers_ollama_provider.py.html">llm_providers/ollama_provider.py</a></li>
+                    <li><a href="reference/models_embeddings.py.html">models/embeddings.py</a></li>
+                    <li><a href="reference/utils_qdrant_handler.py.html">utils/qdrant_handler.py</a></li>
+                    <li><a href="reference/llm_providers_base_provider.py.html">llm_providers/base_provider.py</a></li>
+                    <li><a href="reference/core_task_manager.py.html">core/task_manager.py</a></li>
+                    <li><a href="reference/actions_memory_retrieval.py.html">actions/memory_retrieval.py</a></li>
+                    <li><a href="reference/core_time_experience.py.html">core/time_experience.py</a></li>
+                    <li><a href="reference/core_sensor_manager.py.html">core/sensor_manager.py</a></li>
+                    <li><a href="reference/llm_providers_mistral_ai_provider.py.html">llm_providers/mistral_ai_provider.py</a></li>
+                    <li><a href="reference/sensors_sensor_base.py.html">sensors/sensor_base.py</a></li>
+                    <li><a href="reference/actions_action_registry.py.html">actions/action_registry.py</a></li>
+                    <li><a href="reference/api_main.py.html">api/main.py</a></li>
+                    <li><a href="reference/llm_providers_openai_provider.py.html">llm_providers/openai_provider.py</a></li>
+                    <li><a href="reference/sensors_chat_interface.py.html">sensors/chat_interface.py</a></li>
+                    <li><a href="reference/actions_think.py.html">actions/think.py</a></li>
+                    <li><a href="reference/core_action_manager.py.html">core/action_manager.py</a></li>
+                </ul>
+            </div>
+            <div class="file-group">
+                <h3>Unknown</h3>
+                <ul>
+                    <li><a href="reference/config.json.html">config.json</a></li>
+                    <li><a href="reference/LICENSE.html">LICENSE</a></li>
+                    <li><a href="reference/config.example.json.html">config.example.json</a></li>
+                    <li><a href="reference/logs_logs-backup_jiva.log.2.html">logs/logs-backup/jiva.log.2</a></li>
+                    <li><a href="reference/.fluen_cache_state.json.html">.fluen/cache/state.json</a></li>
+                    <li><a href="reference/logs_logs-backup_jiva.log.1.html">logs/logs-backup/jiva.log.1</a></li>
+                    <li><a href="reference/Dockerfile.html">Dockerfile</a></li>
+                    <li><a href="reference/requirements.txt.html">requirements.txt</a></li>
+                    <li><a href="reference/fluen_config.yml.html">fluen_config.yml</a></li>
+                    <li><a href="reference/docker-compose.yml.html">docker-compose.yml</a></li>
+                    <li><a href="reference/README.md.html">README.md</a></li>
+                </ul>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Main content -->
+    <main class="main-content">
+        <div class="project-overview">
+            <h1>Jiva</h1>
+            <p class="project-description"><p>The <strong>Jiva Framework</strong> is a powerful AI-driven framework that allows for the creation and management of autonomous, goal-based agents utilizing open-source Language Learning Models (LLMs) on local machines. It offers optional support for integrating proprietary models like OpenAI, Mistral AI, and Anthropic. Jiva provides robust systems for asynchronous operations, memory management, ethical task evaluations, and seamless API integration through FastAPI. The framework is designed to support autonomous systems in performing complex tasks while ensuring ethical compliance and efficient resource utilization.</p></p>
+            
+            <div class="metadata-grid">
+                <div class="metadata-item">
+                    <span class="metadata-label">Primary Language</span>
+                    <span class="metadata-value">Python</span>
+                </div>
+                <div class="metadata-item">
+                    <span class="metadata-label">Last Updated</span>
+                    <span class="metadata-value">2025-02-08T21:15:17.638431</span>
+                </div>
+                <div class="metadata-item">
+                    <span class="metadata-label">Git Commit</span>
+                    <span class="metadata-value">fe577ea5</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="tabs-container">
+            <nav class="tabs" role="tablist">
+                <button class="tab active" data-tab="features">Features</button>
+                <button class="tab" data-tab="architecture">Architecture</button>
+                <button class="tab" data-tab="tech-stack">Tech Stack</button>
+                <button class="tab" data-tab="dependencies">Dependencies</button>
+            </nav>
+
+            <div class="tab-content">
+                <div class="tab-pane active" id="features">
+                    <div class="features-grid">
+                        <div class="feature-card">
+                            <div class="feature-header">
+                                <h3>Asynchronous Operations</h3>
+                                <span class="feature-status implemented">implemented</span>
+                            </div>
+                            <p class="feature-category">Core</p>
+                            <p class="feature-description"><p>Utilizes Python's <code>asyncio</code> along with <code>aiohttp</code> for handling asynchronous operations, allowing efficient I/O-bound task execution and management.</p></p>
+                        </div>
+                        <div class="feature-card">
+                            <div class="feature-header">
+                                <h3>Memory Management</h3>
+                                <span class="feature-status implemented">implemented</span>
+                            </div>
+                            <p class="feature-category">Core</p>
+                            <p class="feature-description"><p>Incorporates a sophisticated memory management system to handle short-term and long-term memory using semantic embeddings and a connection to a Qdrant vector database.</p></p>
+                        </div>
+                        <div class="feature-card">
+                            <div class="feature-header">
+                                <h3>Ethical Task Evaluation</h3>
+                                <span class="feature-status implemented">implemented</span>
+                            </div>
+                            <p class="feature-category">Core</p>
+                            <p class="feature-description"><p>Implements an ethical framework to evaluate and prioritize tasks based on predefined principles, ensuring actions adhere to ethical standards.</p></p>
+                        </div>
+                        <div class="feature-card">
+                            <div class="feature-header">
+                                <h3>API Integration</h3>
+                                <span class="feature-status implemented">implemented</span>
+                            </div>
+                            <p class="feature-category">Integration</p>
+                            <p class="feature-description"><p>Leverages FastAPI and Uvicorn for building and serving APIs, providing endpoints to manage and monitor Jiva agents and their tasks.</p></p>
+                        </div>
+                        <div class="feature-card">
+                            <div class="feature-header">
+                                <h3>Dockerized Deployment</h3>
+                                <span class="feature-status implemented">implemented</span>
+                            </div>
+                            <p class="feature-category">Integration</p>
+                            <p class="feature-description"><p>Supports Docker and Docker Compose for containerized deployment, allowing consistent application setup and environment management.</p></p>
+                        </div>
+                        <div class="feature-card">
+                            <div class="feature-header">
+                                <h3>Web Search and Interface</h3>
+                                <span class="feature-status implemented">implemented</span>
+                            </div>
+                            <p class="feature-category">Integration</p>
+                            <p class="feature-description"><p>Provides an interface for conducting web searches, visiting pages, and extracting relevant content asynchronously using language models.</p></p>
+                        </div>
+                        <div class="feature-card">
+                            <div class="feature-header">
+                                <h3>Command Line Interface</h3>
+                                <span class="feature-status implemented">implemented</span>
+                            </div>
+                            <p class="feature-category">UI</p>
+                            <p class="feature-description"><p>Includes a CLI tool built with <code>click</code> for command line interactions, facilitating easy management and deployment of agents.</p></p>
+                        </div>
+                        <div class="feature-card">
+                            <div class="feature-header">
+                                <h3>Test and Validation Framework</h3>
+                                <span class="feature-status implemented">implemented</span>
+                            </div>
+                            <p class="feature-category">Core</p>
+                            <p class="feature-description"><p>Integrates <code>pytest</code> for testing functionalities, ensuring the reliability and correctness of implemented features.</p></p>
+                        </div>
+                    </div>
+                </div>
+            
+                <div class="tab-pane" id="architecture">
+                    <div class="architecture-content">
+                        <div class="architecture-summary">
+                            <h3>Overview</h3>
+                            <p><p>The <strong>Jiva</strong> project is an advanced autonomous agent framework implemented primarily using <strong>Python</strong>. It employs asynchronous programming heavily with a focus on APIs, task management, and integration with various language models (LLMs). The architecture is modular, with a clean separation of concerns across components such as API management, agent execution, memory handling, and ethical evaluations using a multi-container setup via Docker and Docker Compose.</p></p>
+                        </div>
+                        
+                        <div class="component-section">
+                            <h3>Primary Components</h3>
+                            <div class="components-grid">
+                                <div class="component-card">
+                                    <h4>Jiva Agent</h4>
+                                    <p>Act as the core autonomous agent handling tasks, managing memory, and executing actions based on sensor inputs.</p>
+                                    <div class="component-deps">
+                                        <strong>Dependencies:</strong>
+                                        <ul>
+                                            <li>core.memory</li>
+                                            <li>core.ethical_framework</li>
+                                            <li>core.task_manager</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                                <div class="component-card">
+                                    <h4>API Layer</h4>
+                                    <p>Provide HTTP endpoints to interact with and monitor the agent, allowing control and configuration from external systems.</p>
+                                    <div class="component-deps">
+                                        <strong>Dependencies:</strong>
+                                        <ul>
+                                            <li>FastAPI</li>
+                                            <li>Uvicorn</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                                <div class="component-card">
+                                    <h4>LLM Providers</h4>
+                                    <p>Abstract interaction with various language model APIs providing functionalities like text generation and embeddings.</p>
+                                    <div class="component-deps">
+                                        <strong>Dependencies:</strong>
+                                        <ul>
+                                            <li>OpenAI API</li>
+                                            <li>Anthropic</li>
+                                            <li>Ollama</li>
+                                            <li>Qdrant</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                                <div class="component-card">
+                                    <h4>Memory Management</h4>
+                                    <p>Handle short-term and long-term memory operations using semantic embeddings and database interactions.</p>
+                                    <div class="component-deps">
+                                        <strong>Dependencies:</strong>
+                                        <ul>
+                                            <li>Qdrant vector database</li>
+                                            <li>utils.qdrant_handler</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+            
+                        <div class="patterns-section">
+                            <h3>Design Patterns</h3>
+                            <div class="patterns-grid">
+                                <div class="pattern-card">
+                                    <h4>Asynchronous Programming</h4>
+                                    <p>To handle multiple concurrent operations efficiently, allowing the system to perform tasks like web scraping and API calls without blocking.</p>
+                                    <span class="pattern-location">Found in: Implemented using `asyncio`, `aiohttp`, and integrated across the system for file operations, web interactions, and API requests.</span>
+                                </div>
+                                <div class="pattern-card">
+                                    <h4>Strategy Pattern</h4>
+                                    <p>To select different language model providers at runtime based on configuration and needs.</p>
+                                    <span class="pattern-location">Found in: Located in `llm_providers` where different LLM API providers like OpenAI, Anthropic, etc., are implemented.</span>
+                                </div>
+                                <div class="pattern-card">
+                                    <h4>Dependency Injection</h4>
+                                    <p>For managing and injecting dependencies, especially LLM providers and configuration options.</p>
+                                    <span class="pattern-location">Found in: Configuration files like `config.json` and example setup in various provider classes.</span>
+                                </div>
+                                <div class="pattern-card">
+                                    <h4>Observer Pattern</h4>
+                                    <p>To react to sensor data inputs in real-time, allowing the agent to respond to changes in its environment.</p>
+                                    <span class="pattern-location">Found in: In `core/sensor_manager.py`, where different sensors contribute data.</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            
+                <div class="tab-pane" id="tech-stack">
+                    <div class="tech-stack-content">
+                        <div class="tech-section">
+                            <h3>Languages</h3>
+                            <div class="tech-grid">
+                                <div class="tech-card">
+                                    <h4>Python</h4>
+                                    <p>Primary language for development</p>
+                                    <div class="features-used">
+                                        <strong>Key Features:</strong>
+                                        <ul>
+                                            <li>Asynchronous programming</li>
+                                            <li>Data serialization</li>
+                                            <li>File operations</li>
+                                            <li>Abstract base classes</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+            
+                        <div class="tech-section">
+                            <h3>Frameworks</h3>
+                            <div class="tech-grid">
+                                <div class="tech-card">
+                                    <h4>FastAPI</h4>
+                                    <p>Building APIs</p>
+                                    <div class="features-used">
+                                        <strong>Key Features:</strong>
+                                        <ul>
+                                            <li>Asynchronous request handling</li>
+                                            <li>Creating REST endpoints</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                                <div class="tech-card">
+                                    <h4>Playwright</h4>
+                                    <p>Automated browser testing and interaction</p>
+                                    <div class="features-used">
+                                        <strong>Key Features:</strong>
+                                        <ul>
+                                            <li>Browser automation</li>
+                                            <li>Web page interaction</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                                <div class="tech-card">
+                                    <h4>aiohttp</h4>
+                                    <p>Handling asynchronous HTTP requests</p>
+                                    <div class="features-used">
+                                        <strong>Key Features:</strong>
+                                        <ul>
+                                            <li>Asynchronous HTTP handling</li>
+                                            <li>Client sessions</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                                <div class="tech-card">
+                                    <h4>BeautifulSoup</h4>
+                                    <p>Web scraping and HTML parsing</p>
+                                    <div class="features-used">
+                                        <strong>Key Features:</strong>
+                                        <ul>
+                                            <li>Parsing HTML</li>
+                                            <li>Extracting data from web pages</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                                <div class="tech-card">
+                                    <h4>Markdownify</h4>
+                                    <p>Converting HTML to Markdown</p>
+                                    <div class="features-used">
+                                        <strong>Key Features:</strong>
+                                        <ul>
+                                            <li>HTML to Markdown conversion</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                                <div class="tech-card">
+                                    <h4>Uvicorn</h4>
+                                    <p>ASGI server for FastAPI</p>
+                                    <div class="features-used">
+                                        <strong>Key Features:</strong>
+                                        <ul>
+                                            <li>Serving FastAPI applications</li>
+                                            <li>Asynchronous server handling</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                                <div class="tech-card">
+                                    <h4>pytest</h4>
+                                    <p>Testing framework</p>
+                                    <div class="features-used">
+                                        <strong>Key Features:</strong>
+                                        <ul>
+                                            <li>Unit testing</li>
+                                            <li>Test discovery</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                                <div class="tech-card">
+                                    <h4>pandas</h4>
+                                    <p>Data manipulation and analysis</p>
+                                    <div class="features-used">
+                                        <strong>Key Features:</strong>
+                                        <ul>
+                                            <li>DataFrames</li>
+                                            <li>CSV manipulation</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                                <div class="tech-card">
+                                    <h4>click</h4>
+                                    <p>Building command-line interfaces</p>
+                                    <div class="features-used">
+                                        <strong>Key Features:</strong>
+                                        <ul>
+                                            <li>Command line argument parsing</li>
+                                            <li>CLI tool creation</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+            
+                        <div class="tech-section">
+                            <h3>Code Patterns</h3>
+                            <div class="patterns-grid">
+                                <div class="pattern-card">
+                                    <h4>Asynchronous Programming</h4>
+                                    <p>Using asyncio and other async libraries to perform non-blocking operations</p>
+                                    <span class="example-location">Example: core/agent.py, actions/web_interface.py</span>
+                                </div>
+                                <div class="pattern-card">
+                                    <h4>Factory Pattern</h4>
+                                    <p>Abstract base class for creating different LLM providers</p>
+                                    <span class="example-location">Example: llm_providers/base_provider.py</span>
+                                </div>
+                                <div class="pattern-card">
+                                    <h4>Command Pattern</h4>
+                                    <p>Managing actions in a centralized registry for execution</p>
+                                    <span class="example-location">Example: actions/action_registry.py</span>
+                                </div>
+                                <div class="pattern-card">
+                                    <h4>Decorator Pattern</h4>
+                                    <p>Decorators for retry mechanisms and logging</p>
+                                    <span class="example-location">Example: core/task_manager.py</span>
+                                </div>
+                                <div class="pattern-card">
+                                    <h4>Configuration Management</h4>
+                                    <p>Using JSON and YAML for configuration setup</p>
+                                    <span class="example-location">Example: config.json, fluen_config.yml</span>
+                                </div>
+                                <div class="pattern-card">
+                                    <h4>Dependency Injection</h4>
+                                    <p>Injecting dependencies like LLM providers and database clients</p>
+                                    <span class="example-location">Example: core/agent.py, api/main.py</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="tab-pane" id="dependencies" role="tabpanel">
+                    <div class="dependencies-grid">
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>typing</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                            <div class="dependency-usage">
+                                <h4>Used By:</h4>
+                                <ul>
+                                    <li><a href="reference/actions_file_operations.py.html">actions/file_operations.py</a></li>
+                                    <li><a href="reference/main.py.html">main.py</a></li>
+                                    <li><a href="reference/core_memory.py.html">core/memory.py</a></li>
+                                    <li><a href="reference/llm_providers_anthropic_provider.py.html">llm_providers/anthropic_provider.py</a></li>
+                                    <li><a href="reference/core_llm_interface.py.html">core/llm_interface.py</a></li>
+                                    <li><a href="reference/llm_providers_ollama_provider.py.html">llm_providers/ollama_provider.py</a></li>
+                                    <li><a href="reference/llm_providers_base_provider.py.html">llm_providers/base_provider.py</a></li>
+                                    <li><a href="reference/actions_memory_retrieval.py.html">actions/memory_retrieval.py</a></li>
+                                    <li><a href="reference/core_sensor_manager.py.html">core/sensor_manager.py</a></li>
+                                    <li><a href="reference/llm_providers_mistral_ai_provider.py.html">llm_providers/mistral_ai_provider.py</a></li>
+                                    <li><a href="reference/sensors_sensor_base.py.html">sensors/sensor_base.py</a></li>
+                                    <li><a href="reference/llm_providers_openai_provider.py.html">llm_providers/openai_provider.py</a></li>
+                                    <li><a href="reference/sensors_chat_interface.py.html">sensors/chat_interface.py</a></li>
+                                    <li><a href="reference/actions_think.py.html">actions/think.py</a></li>
+                                    <li><a href="reference/core_action_manager.py.html">core/action_manager.py</a></li>
+                                </ul>
+                            </div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>bs4</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>playwright</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                            <div class="dependency-usage">
+                                <h4>Used By:</h4>
+                                <ul>
+                                    <li><a href="reference/requirements.txt.html">requirements.txt</a></li>
+                                </ul>
+                            </div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>aiohttp</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                            <div class="dependency-usage">
+                                <h4>Used By:</h4>
+                                <ul>
+                                    <li><a href="reference/llm_providers_anthropic_provider.py.html">llm_providers/anthropic_provider.py</a></li>
+                                    <li><a href="reference/llm_providers_ollama_provider.py.html">llm_providers/ollama_provider.py</a></li>
+                                </ul>
+                            </div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>googlesearch</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>markdownify</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                            <div class="dependency-usage">
+                                <h4>Used By:</h4>
+                                <ul>
+                                    <li><a href="reference/requirements.txt.html">requirements.txt</a></li>
+                                </ul>
+                            </div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>logging</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                            <div class="dependency-usage">
+                                <h4>Used By:</h4>
+                                <ul>
+                                    <li><a href="reference/actions_file_operations.py.html">actions/file_operations.py</a></li>
+                                    <li><a href="reference/main.py.html">main.py</a></li>
+                                    <li><a href="reference/core_memory.py.html">core/memory.py</a></li>
+                                    <li><a href="reference/core_llm_interface.py.html">core/llm_interface.py</a></li>
+                                    <li><a href="reference/core_ethical_framework.py.html">core/ethical_framework.py</a></li>
+                                    <li><a href="reference/core_agent.py.html">core/agent.py</a></li>
+                                    <li><a href="reference/utils_qdrant_handler.py.html">utils/qdrant_handler.py</a></li>
+                                    <li><a href="reference/core_task_manager.py.html">core/task_manager.py</a></li>
+                                    <li><a href="reference/api_main.py.html">api/main.py</a></li>
+                                    <li><a href="reference/core_action_manager.py.html">core/action_manager.py</a></li>
+                                </ul>
+                            </div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>asyncio</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                            <div class="dependency-usage">
+                                <h4>Used By:</h4>
+                                <ul>
+                                    <li><a href="reference/actions_file_operations.py.html">actions/file_operations.py</a></li>
+                                    <li><a href="reference/main.py.html">main.py</a></li>
+                                    <li><a href="reference/core_agent.py.html">core/agent.py</a></li>
+                                    <li><a href="reference/core_sensor_manager.py.html">core/sensor_manager.py</a></li>
+                                    <li><a href="reference/api_main.py.html">api/main.py</a></li>
+                                    <li><a href="reference/sensors_chat_interface.py.html">sensors/chat_interface.py</a></li>
+                                    <li><a href="reference/actions_think.py.html">actions/think.py</a></li>
+                                </ul>
+                            </div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>core.llm_interface</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                            <div class="dependency-usage">
+                                <h4>Used By:</h4>
+                                <ul>
+                                    <li><a href="reference/actions_think.py.html">actions/think.py</a></li>
+                                </ul>
+                            </div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>os</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                            <div class="dependency-usage">
+                                <h4>Used By:</h4>
+                                <ul>
+                                    <li><a href="reference/main.py.html">main.py</a></li>
+                                    <li><a href="reference/core_agent.py.html">core/agent.py</a></li>
+                                </ul>
+                            </div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>json</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                            <div class="dependency-usage">
+                                <h4>Used By:</h4>
+                                <ul>
+                                    <li><a href="reference/main.py.html">main.py</a></li>
+                                    <li><a href="reference/core_memory.py.html">core/memory.py</a></li>
+                                    <li><a href="reference/llm_providers_anthropic_provider.py.html">llm_providers/anthropic_provider.py</a></li>
+                                    <li><a href="reference/core_llm_interface.py.html">core/llm_interface.py</a></li>
+                                    <li><a href="reference/core_agent.py.html">core/agent.py</a></li>
+                                    <li><a href="reference/llm_providers_ollama_provider.py.html">llm_providers/ollama_provider.py</a></li>
+                                    <li><a href="reference/models_embeddings.py.html">models/embeddings.py</a></li>
+                                </ul>
+                            </div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>csv</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>uvicorn</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>api.main</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>core.agent</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>actions.action_registry</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>None (This is a license, not a code)</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>datetime</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                            <div class="dependency-usage">
+                                <h4>Used By:</h4>
+                                <ul>
+                                    <li><a href="reference/core_agent.py.html">core/agent.py</a></li>
+                                    <li><a href="reference/core_time_experience.py.html">core/time_experience.py</a></li>
+                                    <li><a href="reference/api_main.py.html">api/main.py</a></li>
+                                </ul>
+                            </div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>core.llm_interface.LLMInterface</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                            <div class="dependency-usage">
+                                <h4>Used By:</h4>
+                                <ul>
+                                    <li><a href="reference/core_ethical_framework.py.html">core/ethical_framework.py</a></li>
+                                    <li><a href="reference/core_task_manager.py.html">core/task_manager.py</a></li>
+                                    <li><a href="reference/actions_action_registry.py.html">actions/action_registry.py</a></li>
+                                    <li><a href="reference/core_action_manager.py.html">core/action_manager.py</a></li>
+                                </ul>
+                            </div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>utils.qdrant_handler.QdrantHandler</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>qdrant</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>ollama</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>mistralai</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                            <div class="dependency-usage">
+                                <h4>Used By:</h4>
+                                <ul>
+                                    <li><a href="reference/llm_providers_mistral_ai_provider.py.html">llm_providers/mistral_ai_provider.py</a></li>
+                                </ul>
+                            </div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>anthropic.AsyncAnthropic</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>.base_provider.BaseLLMProvider</h3>
+                                <span class="dependency-type">internal</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>re</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                            <div class="dependency-usage">
+                                <h4>Used By:</h4>
+                                <ul>
+                                    <li><a href="reference/core_task_manager.py.html">core/task_manager.py</a></li>
+                                </ul>
+                            </div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>tenacity</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>llm_providers.base_provider</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>llm_providers.ollama_provider</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>llm_providers.openai_provider</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>llm_providers.anthropic_provider</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>llm_providers.mistral_ai_provider</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>typing.List</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                            <div class="dependency-usage">
+                                <h4>Used By:</h4>
+                                <ul>
+                                    <li><a href="reference/utils_qdrant_handler.py.html">utils/qdrant_handler.py</a></li>
+                                    <li><a href="reference/core_task_manager.py.html">core/task_manager.py</a></li>
+                                </ul>
+                            </div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>typing.Dict</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                            <div class="dependency-usage">
+                                <h4>Used By:</h4>
+                                <ul>
+                                    <li><a href="reference/utils_qdrant_handler.py.html">utils/qdrant_handler.py</a></li>
+                                    <li><a href="reference/core_task_manager.py.html">core/task_manager.py</a></li>
+                                    <li><a href="reference/actions_action_registry.py.html">actions/action_registry.py</a></li>
+                                </ul>
+                            </div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>typing.Any</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                            <div class="dependency-usage">
+                                <h4>Used By:</h4>
+                                <ul>
+                                    <li><a href="reference/utils_qdrant_handler.py.html">utils/qdrant_handler.py</a></li>
+                                    <li><a href="reference/core_task_manager.py.html">core/task_manager.py</a></li>
+                                    <li><a href="reference/actions_action_registry.py.html">actions/action_registry.py</a></li>
+                                </ul>
+                            </div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>typing.Union</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>RotatingFileHandler</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>Memory</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>TimeExperience</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>TaskManager</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>EthicalFramework</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>LLMInterface</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>SensorManager</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>ActionManager</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>base_provider</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                            <div class="dependency-usage">
+                                <h4>Used By:</h4>
+                                <ul>
+                                    <li><a href="reference/llm_providers_mistral_ai_provider.py.html">llm_providers/mistral_ai_provider.py</a></li>
+                                </ul>
+                            </div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>java</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>requests</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>qdrant_client.AsyncQdrantClient</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>qdrant_client.http.models.Distance</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>qdrant_client.http.models.VectorParams</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>qdrant_client.http.models.PointStruct</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>qdrant_client.http.models.UpdateStatus</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>qdrant_client.http.exceptions.ResponseHandlingException</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>qdrant_client.http.exceptions.UnexpectedResponse</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>uuid</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                            <div class="dependency-usage">
+                                <h4>Used By:</h4>
+                                <ul>
+                                    <li><a href="reference/core_task_manager.py.html">core/task_manager.py</a></li>
+                                </ul>
+                            </div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>abc</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                            <div class="dependency-usage">
+                                <h4>Used By:</h4>
+                                <ul>
+                                    <li><a href="reference/sensors_sensor_base.py.html">sensors/sensor_base.py</a></li>
+                                </ul>
+                            </div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>typing.Optional</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>queue.PriorityQueue</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>datetime.datetime</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>core.ethical_framework.EthicalFramework</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                            <div class="dependency-usage">
+                                <h4>Used By:</h4>
+                                <ul>
+                                    <li><a href="reference/core_action_manager.py.html">core/action_manager.py</a></li>
+                                </ul>
+                            </div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>core.action_manager.ActionManager</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>core.memory.Memory</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                            <div class="dependency-usage">
+                                <h4>Used By:</h4>
+                                <ul>
+                                    <li><a href="reference/actions_action_registry.py.html">actions/action_registry.py</a></li>
+                                    <li><a href="reference/core_action_manager.py.html">core/action_manager.py</a></li>
+                                </ul>
+                            </div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>python:v1.46.0-jammy (Playwright official image)</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>requirements.txt (Python packages)</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>Chromium (Playwright)</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>requests==2.26.0</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>qdrant-client==1.11.1</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>tenacity==8.0.1</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>typing-extensions==4.12.2</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>python-dotenv==0.19.2</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>pytest==7.0.1</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>click==8.0.3</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>pandas==1.3.5</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>openai==1.43.0</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>anthropic==0.34.2</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>googlesearch-python</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>mistralai==1.1.0</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>aiohttp==3.10.10</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>fastapi==0.115.4</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>uvicorn==0.32.0</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>core.memory</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>time</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>sensors.sensor_base.Sensor</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>sensors.chat_interface.ChatInterface</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>OpenAI API</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>Docker</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                            <div class="dependency-usage">
+                                <h4>Used By:</h4>
+                                <ul>
+                                    <li><a href="reference/README.md.html">README.md</a></li>
+                                </ul>
+                            </div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>Docker Compose</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                            <div class="dependency-usage">
+                                <h4>Used By:</h4>
+                                <ul>
+                                    <li><a href="reference/README.md.html">README.md</a></li>
+                                </ul>
+                            </div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>typing.Callable</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>actions.file_operations</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>actions.memory_retrieval</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>actions.think</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>actions.web_interface</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>Python 3.7+</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>Ollama</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>Qdrant</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>OpenAI API (if using proprietary LLMs)</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>fastapi</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>openai</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>.base_provider</h3>
+                                <span class="dependency-type">internal</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>sys</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>select</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>sensor_base.Sensor</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>actions.action_registry.get_action_registry</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                        <div class="dependency-card">
+                            <div class="dependency-header">
+                                <h3>inspect</h3>
+                                <span class="dependency-type">external</span>
+                            </div>
+                            <div class="dependency-version">N/A</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <footer class="site-footer">
+            <p>Powered by <a href="https://fluen.io" target="_blank">Fluen.io</a></p>
+        </footer>
+    </main>
+
+    <script src="assets/script.js"></script>
+</body>
+</html>

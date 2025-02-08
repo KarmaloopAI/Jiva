@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>README.md | Jiva Documentation</title>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500&family=Ubuntu+Mono&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="site-header">
+        <div class="header-left">
+            <div class="logo">
+                <img src="../assets/logo-placeholder.png" alt="Fluen" width="32" height="32">
+                <a href="../index.html" class="logo-text">Fluen Documentation</a>
+            </div>
+        </div>
+        
+        <div class="header-center">
+            <div class="search-container">
+                <input type="search" class="search-input" placeholder="Search documentation... (Press '/' to focus)">
+                <div class="search-results"></div>
+            </div>
+        </div>
+        
+        <div class="header-right">
+            <button id="themeToggle" class="theme-toggle" aria-label="Toggle theme">
+                <svg class="sun-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <circle cx="12" cy="12" r="4"></circle>
+                    <path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path>
+                </svg>
+                <svg class="moon-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="display: none;">
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                </svg>
+            </button>
+        </div>
+    </header>
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <h1><a href="../index.html">Jiva</a></h1>
+            <p>Python Project</p>
+        </div>
+
+        <div class="sidebar-content">
+            <nav class="file-navigation">
+                <div class="nav-section">
+                    <h3>Configuration File</h3>
+                    <ul>
+                        <li>
+                            <a href="#config.json">
+                                config.json
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#docker-compose.yml">
+                                docker-compose.yml
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+                <div class="nav-section">
+                    <h3>Entry Point Script</h3>
+                    <ul>
+                        <li>
+                            <a href="#main.py">
+                                main.py
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+                <div class="nav-section">
+                    <h3>Dependencies File</h3>
+                    <ul>
+                        <li>
+                            <a href="#requirements.txt">
+                                requirements.txt
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </nav>
+        </div>
+    </aside>
+
+    <!-- Main content -->
+    <main class="main-content">
+        <!-- File header -->
+        <div class="file-header">
+            <div class="breadcrumbs">
+                <a href="../index.html">Jiva</a>
+                <span class="separator">/</span>
+                <span class="current">README.md</span>
+            </div>
+
+            <div class="file-metadata">
+                <div class="metadata-item">
+                    <span class="metadata-label">Language</span>
+                    <span class="metadata-value">Unknown</span>
+                </div>
+                <div class="metadata-item">
+                    <span class="metadata-label">Last Modified</span>
+                    <span class="metadata-value">2025-02-08T21:14:12.225062</span>
+                </div>
+            </div>
+
+            <div class="file-purpose">
+                <h1>README.md</h1>
+                <p>The Jiva Framework is designed to run autonomous, goal-based agents using open-source language learning models (LLMs) on local machines, with optional support for proprietary models.</p>
+            </div>
+        </div>
+
+        <!-- Dependencies section -->
+        <section class="file-dependencies">
+            <h2>Dependencies</h2>
+            <div class="dependencies-list">
+                <div class="dependency-item">
+                    <span class="dependency-name">Docker</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">Docker Compose</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">Python 3.7+</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">Ollama</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">Qdrant</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">OpenAI API (if using proprietary LLMs)</span>
+                    <span class="dependency-type">external</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Dependency visualization -->
+        <section class="dependency-section">
+            <h2>Visualization</h2>
+            <div class="graph-wrapper">
+                <div id="dependencyGraph" class="dependency-graph"></div>
+            </div>
+        </section>
+
+        <!-- Code elements -->
+        <section class="code-elements">
+            <h2>Code Elements</h2>
+            <div class="element-group">
+                <h3>Configuration File</h3>
+                
+                <div id="config.json" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>config.json</code>
+                            <span class="scope-badge">Project-wide</span>
+                        </div>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Defines configuration settings for running the Jiva framework, including the LLM provider and model settings.
+                        </div>
+
+                        <div class="element-documentation">
+                            This configuration file allows users to set their preferred LLM provider, whether open-source or proprietary, alongside other settings like API keys and model specifics.
+                        </div>
+                    </div>
+                </div>
+                <div id="docker-compose.yml" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>docker-compose.yml</code>
+                            <span class="scope-badge">Project-wide</span>
+                        </div>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Defines Docker services for deploying the Jiva framework and its dependencies.
+                        </div>
+
+                        <div class="element-documentation">
+                            Includes definitions for services like Qdrant, Ollama, and Jiva, outlining how to build and run these services in a Docker environment.
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="element-group">
+                <h3>Entry Point Script</h3>
+                
+                <div id="main.py" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>main.py</code>
+                            <span class="scope-badge">Executable</span>
+                        </div>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Serves as the main entry point to start the Jiva agent.
+                        </div>
+
+                        <div class="element-documentation">
+                            This Python script is responsible for launching the Jiva framework, initiating the necessary components and processes for the AI agent to operate.
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="element-group">
+                <h3>Dependencies File</h3>
+                
+                <div id="requirements.txt" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>requirements.txt</code>
+                            <span class="scope-badge">Project-wide</span>
+                        </div>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Lists the Python packages required for running the Jiva framework.
+                        </div>
+
+                        <div class="element-documentation">
+                            This file specifies all Python dependencies needed, providing a way to install them using pip to ensure the environment is correctly set up.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <footer class="site-footer">
+            <p>Powered by <a href="https://fluen.io" target="_blank">Fluen.io</a></p>
+        </footer>
+    </main>
+    <!-- Add D3.js before other scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+    <!-- Add default graph data in case the server doesn't provide it -->
+
+    <script src="../assets/script.js"></script>
+<script>window.lineageData = {"nodes": [{"id": "README.md", "type": "current"}], "links": []};</script></body>
+</html>

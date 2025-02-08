@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>core/action_manager.py | Jiva Documentation</title>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500&family=Ubuntu+Mono&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="site-header">
+        <div class="header-left">
+            <div class="logo">
+                <img src="../assets/logo-placeholder.png" alt="Fluen" width="32" height="32">
+                <a href="../index.html" class="logo-text">Fluen Documentation</a>
+            </div>
+        </div>
+        
+        <div class="header-center">
+            <div class="search-container">
+                <input type="search" class="search-input" placeholder="Search documentation... (Press '/' to focus)">
+                <div class="search-results"></div>
+            </div>
+        </div>
+        
+        <div class="header-right">
+            <button id="themeToggle" class="theme-toggle" aria-label="Toggle theme">
+                <svg class="sun-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <circle cx="12" cy="12" r="4"></circle>
+                    <path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path>
+                </svg>
+                <svg class="moon-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="display: none;">
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                </svg>
+            </button>
+        </div>
+    </header>
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <h1><a href="../index.html">Jiva</a></h1>
+            <p>Python Project</p>
+        </div>
+
+        <div class="sidebar-content">
+            <nav class="file-navigation">
+                <div class="nav-section">
+                    <h3>Class</h3>
+                    <ul>
+                        <li>
+                            <a href="#actionmanager">
+                                ActionManager
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#mockethicalframework">
+                                MockEthicalFramework
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+                <div class="nav-section">
+                    <h3>Method</h3>
+                    <ul>
+                        <li>
+                            <a href="#__init__">
+                                __init__
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#execute_action">
+                                execute_action
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#get_available_actions">
+                                get_available_actions
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#_get_function_parameters">
+                                _get_function_parameters
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#get_action_ethical_summary">
+                                get_action_ethical_summary
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#evaluate_action">
+                                evaluate_action
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#get_ethical_explanation">
+                                get_ethical_explanation
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </nav>
+        </div>
+    </aside>
+
+    <!-- Main content -->
+    <main class="main-content">
+        <!-- File header -->
+        <div class="file-header">
+            <div class="breadcrumbs">
+                <a href="../index.html">Jiva</a>
+                <span class="separator">/</span>
+                <span class="current">core/action_manager.py</span>
+            </div>
+
+            <div class="file-metadata">
+                <div class="metadata-item">
+                    <span class="metadata-label">Language</span>
+                    <span class="metadata-value">Python</span>
+                </div>
+                <div class="metadata-item">
+                    <span class="metadata-label">Last Modified</span>
+                    <span class="metadata-value">2025-02-08T21:15:15.635167</span>
+                </div>
+            </div>
+
+            <div class="file-purpose">
+                <h1>core/action_manager.py</h1>
+                <p>The primary purpose of this code is to manage and execute actions in an ethical manner by evaluating them through an ethical framework before performing them.</p>
+            </div>
+        </div>
+
+        <!-- Dependencies section -->
+        <section class="file-dependencies">
+            <h2>Dependencies</h2>
+            <div class="dependencies-list">
+                <div class="dependency-item">
+                    <span class="dependency-name">typing</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">logging</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">core.ethical_framework.EthicalFramework</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">core.memory.Memory</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">core.llm_interface.LLMInterface</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">actions.action_registry.get_action_registry</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">inspect</span>
+                    <span class="dependency-type">external</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Dependency visualization -->
+        <section class="dependency-section">
+            <h2>Visualization</h2>
+            <div class="graph-wrapper">
+                <div id="dependencyGraph" class="dependency-graph"></div>
+            </div>
+        </section>
+
+        <!-- Code elements -->
+        <section class="code-elements">
+            <h2>Code Elements</h2>
+            <div class="element-group">
+                <h3>Class</h3>
+                
+                <div id="actionmanager" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>ActionManager</code>
+                            <span class="scope-badge">global</span>
+                        </div>
+                        <span class="line-number">Line 9</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Manages and executes registered actions with ethical evaluations.
+                        </div>
+
+                        <div class="element-documentation">
+                            A class responsible for handling the execution of actions after ensuring they pass ethical evaluations.
+                        </div>
+                    </div>
+                </div>
+                <div id="mockethicalframework" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>MockEthicalFramework</code>
+                            <span class="scope-badge">local</span>
+                        </div>
+                        <span class="line-number">Line 77</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Mock class for testing the ethical evaluation of actions.
+                        </div>
+
+                        <div class="element-documentation">
+                            A simple mock implementation of EthicalFramework used to simulate the behavior of real ethical evaluations.
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="element-group">
+                <h3>Method</h3>
+                
+                <div id="__init__" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>__init__</code>
+                            <span class="scope-badge">ActionManager</span>
+                        </div>
+                        <span class="line-number">Line 10</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Initializes the ActionManager with an ethical framework, memory, and LLM interface.
+                        </div>
+
+                        <div class="element-documentation">
+                            Constructor that sets up dependencies and retrieves the action registry.
+                        </div>
+                    </div>
+                </div>
+                <div id="execute_action" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>execute_action</code>
+                            <span class="scope-badge">ActionManager</span>
+                        </div>
+                        <span class="line-number">Line 17</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Executes a registered action after ethical evaluation.
+                        </div>
+
+                        <div class="element-documentation">
+                            Attempts to execute an action if it is found to be ethical. Handles execution errors and records the action in memory.
+                        </div>
+                    </div>
+                </div>
+                <div id="get_available_actions" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>get_available_actions</code>
+                            <span class="scope-badge">ActionManager</span>
+                        </div>
+                        <span class="line-number">Line 50</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Retrieves all registered actions with their descriptions and parameters.
+                        </div>
+
+                        <div class="element-documentation">
+                            Returns a dictionary containing information about available actions, including their docstring description and parameters.
+                        </div>
+                    </div>
+                </div>
+                <div id="_get_function_parameters" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>_get_function_parameters</code>
+                            <span class="scope-badge">ActionManager</span>
+                        </div>
+                        <span class="line-number">Line 59</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Extracts parameter names and annotations from a given function.
+                        </div>
+
+                        <div class="element-documentation">
+                            Uses the inspect module to retrieve and return the names and annotated types of parameters for a function.
+                        </div>
+                    </div>
+                </div>
+                <div id="get_action_ethical_summary" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>get_action_ethical_summary</code>
+                            <span class="scope-badge">ActionManager</span>
+                        </div>
+                        <span class="line-number">Line 67</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Provides an ethical summary of a particular action.
+                        </div>
+
+                        <div class="element-documentation">
+                            Checks if an action is ethical and provides an explanation, including its parameters.
+                        </div>
+                    </div>
+                </div>
+                <div id="evaluate_action" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>evaluate_action</code>
+                            <span class="scope-badge">MockEthicalFramework</span>
+                        </div>
+                        <span class="line-number">Line 78</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Mock method to evaluate if an action is ethical.
+                        </div>
+
+                        <div class="element-documentation">
+                            Determines if an action should be considered ethical based on hardcoded logic.
+                        </div>
+                    </div>
+                </div>
+                <div id="get_ethical_explanation" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>get_ethical_explanation</code>
+                            <span class="scope-badge">MockEthicalFramework</span>
+                        </div>
+                        <span class="line-number">Line 80</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Provides an explanation for the mock ethical evaluation.
+                        </div>
+
+                        <div class="element-documentation">
+                            Returns a reason why an action is ethical or unethical for testing purposes.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <footer class="site-footer">
+            <p>Powered by <a href="https://fluen.io" target="_blank">Fluen.io</a></p>
+        </footer>
+    </main>
+    <!-- Add D3.js before other scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+    <!-- Add default graph data in case the server doesn't provide it -->
+
+    <script src="../assets/script.js"></script>
+<script>window.lineageData = {"nodes": [{"id": "core/action_manager.py", "type": "current"}], "links": []};</script></body>
+</html>
