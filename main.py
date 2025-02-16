@@ -133,15 +133,25 @@ async def run_agent_and_api(agent: Agent, host: str = "0.0.0.0", port: int = 800
     )
     server = uvicorn.Server(config)
     
-    # Run both the agent and API server
+    # Create shutdown event
+    shutdown_event = asyncio.Event()
+    
+    async def run_until_shutdown():
+        try:
+            await asyncio.gather(
+                agent.run(),
+                server.serve()
+            )
+        except asyncio.CancelledError:
+            logger.info("\nShutting down Jiva...")
+            server.should_exit = True
+            # Give the server a moment to shutdown
+            await asyncio.sleep(0.5)
+    
     try:
-        await asyncio.gather(
-            agent.run(),
-            server.serve()
-        )
-    except Exception as e:
-        logging.error(f"Error running agent and API: {str(e)}")
-        raise
+        await run_until_shutdown()
+    except KeyboardInterrupt:
+        logger.info("\nShutdown complete")
 
 def main():
     print("Initializing Jiva Framework...")
