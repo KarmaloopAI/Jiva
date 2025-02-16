@@ -1,0 +1,60 @@
+evaluate_task: |
+  Task: {{ task_description }}
+
+  Ethical Principles:
+  {% for principle in principles %}
+  - {{ principle }}
+  {% endfor %}
+
+  Evaluate the given task against these ethical principles. Provide an overall ethical assessment.
+
+  Respond with a JSON object containing:
+  1. An 'overall_assessment' which is either 'ethical' or 'unethical'
+  2. A 'reasoning' field explaining the overall assessment
+
+evaluate_action: |
+  Action: {{ action }}
+  Parameters: {{ params }}
+
+  Ethical Principles:
+  {% for principle in principles %}
+  - {{ principle }}
+  {% endfor %}
+
+  Evaluate the given action and its parameters against these ethical principles. 
+  For each principle, determine if the action violates or aligns with it.
+  Then, provide an overall ethical assessment.
+
+  Respond with a JSON object containing:
+  1. An array of 'principle_evaluations', where each element is an object with 'principle' and 'evaluation' (either 'violates', 'aligns', or 'neutral')
+  2. An 'overall_assessment' which is either 'ethical' or 'unethical'
+  3. A 'reasoning' field explaining the overall assessment
+
+get_explanation: |
+  {{ task_or_action_type }}: {{ description }}
+
+  Ethical Principles:
+  {% for principle in principles %}
+  - {{ principle }}
+  {% endfor %}
+
+  Provide a detailed explanation of the ethical implications of this {{ task_or_action_type | lower }}.
+  Consider how it aligns with or potentially violates each of the ethical principles.
+  Conclude with an overall ethical assessment and recommendation.
+
+  Format your response as a well-structured paragraph.
+
+resolve_dilemma: |
+  Ethical Dilemma Scenario:
+  {{ scenario }}
+
+  Ethical Principles:
+  {% for principle in principles %}
+  - {{ principle }}
+  {% endfor %}
+
+  Analyze this ethical dilemma in the context of our ethical principles. 
+  Consider multiple perspectives and potential outcomes.
+  Provide a reasoned resolution to the dilemma, explaining how it best aligns with our ethical framework.
+
+  Format your response as a well-structured analysis with clear reasoning and a final recommendation.

@@ -13,26 +13,26 @@ class QdrantHandler:
         self.vector_size = vector_size
         self.collection_name = collection_name
         self.logger = logging.getLogger("Jiva.QdrantHandler")
-        self._ensure_collection_exists()
+        self.is_collection_ensured = False
 
-    def _ensure_collection_exists(self):
+    async def _ensure_collection_exists(self):
         try:
-            collections = self.client.get_collections().collections
+            collections = (await self.client.get_collections()).collections
             collection_exists = any(collection.name == self.collection_name for collection in collections)
             
             if not collection_exists:
-                self._create_collection()
+                await self._create_collection()
             else:
                 self.logger.info(f"Collection {self.collection_name} already exists")
                 # We won't try to verify the vector size here to avoid potential compatibility issues
         except Exception as e:
             self.logger.error(f"Error ensuring collection exists: {e}")
             # Instead of raising the exception, we'll attempt to create the collection
-            self._create_collection()
+            await self._create_collection()
 
-    def _create_collection(self):
+    async def _create_collection(self):
         try:
-            self.client.create_collection(
+            await self.client.create_collection(
                 collection_name=self.collection_name,
                 vectors_config=VectorParams(size=self.vector_size, distance=Distance.COSINE)
             )
@@ -42,6 +42,10 @@ class QdrantHandler:
             raise
 
     async def add_point(self, vector: List[float], payload: Dict[str, Any]) -> str:
+        if not self.is_collection_ensured:
+            await self._ensure_collection_exists()
+            self.is_collection_ensured = True
+
         try:
             if len(vector) != self.vector_size:
                 raise ValueError(f"Vector dimension mismatch. Expected {self.vector_size}, got {len(vector)}")
@@ -61,6 +65,10 @@ class QdrantHandler:
             return None
 
     async def search(self, query_vector: List[float], limit: int = 5) -> List[Dict[str, Any]]:
+        if not self.is_collection_ensured:
+            await self._ensure_collection_exists()
+            self.is_collection_ensured = True
+
         try:
             results = await self.client.search(
                 collection_name=self.collection_name,
