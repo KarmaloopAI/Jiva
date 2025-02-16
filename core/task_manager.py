@@ -11,6 +11,7 @@ from core.llm_interface import LLMInterface
 from core.ethical_framework import EthicalFramework
 from core.action_manager import ActionManager
 from core.memory import Memory
+from core.prompt_manager import PromptManager
 
 def parse_int_or_default(value, default=1):
     """
@@ -60,7 +61,7 @@ class Task:
 
 class TaskManager:
     def __init__(self, llm_interface: LLMInterface, ethical_framework: EthicalFramework, 
-                 action_manager: ActionManager, memory: Memory):
+                 action_manager: ActionManager, memory: Memory, prompt_manager: PromptManager):
         self.task_queue = PriorityQueue()
         self.completed_tasks: List[Task] = []
         self.all_tasks: Dict[str, Task] = {}
@@ -68,6 +69,7 @@ class TaskManager:
         self.ethical_framework = ethical_framework
         self.action_manager = action_manager
         self.memory = memory
+        self.prompt_manager = prompt_manager
         self.logger = logging.getLogger("Jiva.TaskManager")
 
     async def get_relevant_actions(self, goal: str, context: Dict[str, Any]) -> List[str]:
@@ -83,18 +85,12 @@ class TaskManager:
         
         actions_str = "\n\n".join(action_descriptions)
 
-        prompt = f"""
-        # Given the below goal and context, identify the relevant actions from the list of actions below that would be required to complete this task. Respond with comma separated action names with no spaces.
-        Please make sure action names you return match exactly with the action names provided in the list below. Your task is to pick the relevant ones.
-        # Goal
-        {goal}
-
-        # Context
-        {context}
-        
-        # Available actions and their parameters
-        {actions_str}
-        """
+        prompt = self.prompt_manager.get_prompt(
+            "tasks.get_relevant_actions",
+            goal=goal,
+            context=context,
+            actions_str=actions_str
+        )
 
         response = await self.llm_interface.generate(prompt)
         action_names = []
@@ -125,53 +121,12 @@ class TaskManager:
         
         actions_str = "\n\n".join(action_descriptions)
 
-        prompt = f"""
-        # Goal
-        {goal}
-
-        ## Your approach
-        You strive to achieve a given task in as few steps as possible
-
-        # Your Task
-        Generate a list of tasks to achieve the goal. Each task should have:
-        1. A description
-        2. An action name (from the available actions)
-        3. Parameters for the action (matching the required parameters)
-        4. A list of required inputs (task descriptions that this task depends on)
-
-        Include 'think' actions to process information or make decisions, and other actions to perform specific operations.
-        'think' actions will require static prompts, so design these tasks well to accomplish the goal.
-        Ensure that tasks are properly sequenced and that information flows correctly between tasks.
-        Use the required_inputs key to create a parameter name and value dependency between tasks. Once the action is called,
-        it will be invoked with parameter value obtained from a previous task.
-
-        The value of required_inputs should be a dictionary of parameter name (from the function) and the exact task description of a previous task.
-
-        If you do not have enough information to plan all of the tasks at once, you can create some initial tasks and temporarily end with a replan_tasks action.
-        Once information is gathered from previous tasks, a replan_tasks will prepare a fresh set of next tasks.
-
-        # Context
-        ## Understanding the context
-        The context below is a series of short term memory objects of which the last one is the most recent input
-        ## The context items
-        {context}
-        
-        # Available actions and their parameters
-        {actions_str}
-
-        Respond only with a JSON array of tasks and nothing else. Each task should be an object with the following structure:
-        {{
-            "description": "Task description",
-            "action": "action_name",
-            "parameters": {{
-                "param1": "static_value_1",
-                "param2": "{{{{value2}}}}"
-            }},
-            "required_inputs": {{"value2": "Exact Description of prerequisite task"}}
-        }}
-
-        Please ensure that the response adheres to the structure defined, and if there are any required_inputs, then they have been referenced with a placeholder like {{value}} in the parameters as shown in the example.
-        """
+        prompt = prompt = self.prompt_manager.get_prompt(
+            "tasks.generate_tasks",
+            goal=goal,
+            context=context,
+            actions_str=actions_str
+        )
         
         self.logger.debug(f"Generating tasks with prompt: {prompt}")
         response = await self.llm_interface.generate(prompt)
@@ -361,28 +316,13 @@ class TaskManager:
     async def handle_task_error(self, task: Task, error_message: str) -> None:
         """Handle task execution errors by generating new tasks or providing solutions."""
         self.logger.info(f"Handling error for task: {task.id}")
-        prompt = f"""
-        Task: {task.description}
-        Action: {task.action}
-        Parameters: {task.parameters}
-        Error: {error_message}
-
-        The task encountered an error. Suggest a solution or alternative approach to complete the task.
-        If the task needs to be broken down into smaller steps, provide those steps.
-        
-        Format your response as JSON with the following structure:
-        {{
-            "solution": "Brief description of the solution",
-            "new_tasks": [
-                {{
-                    "description": "Task description",
-                    "action": "action_name",
-                    "parameters": {{"param_name": "param_value"}},
-                    "required_inputs": {{}}
-                }}
-            ]
-        }}
-        """
+        prompt = self.prompt_manager.get_prompt(
+            "tasks.handle_task_error",
+            task_description=task.description,
+            action=task.action,
+            parameters=task.parameters,
+            error_message=error_message
+        )
         try:
             solution = await self.llm_interface.generate(prompt)
             parsed_solution = self.llm_interface.parse_json(solution)
@@ -430,12 +370,12 @@ class TaskManager:
             "previous_tasks": current_tasks
         }
 
-        replan_prompt = f"""
-        Replan tasks to achieve this goal: {task.goal}
-        You have partially executed some tasks to achieve this task and then requested replanning. The previous tasks and their results are available in context.
-        """
+        prompt = self.prompt_manager.get_prompt(
+            "tasks.replan_tasks",
+            goal=task.goal
+        )
 
-        new_tasks = await self.generate_tasks(replan_prompt, context)
+        new_tasks = await self.generate_tasks(prompt, context)
         return new_tasks
 
     async def handle_rerun_tasks(self, task: Task) -> List[Task]:

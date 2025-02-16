@@ -166,3 +166,5 @@ cython_debug/
 #.idea/
 .DS_Store
 config.json
+.fluen/cache/state.json
+fluen_config.yml

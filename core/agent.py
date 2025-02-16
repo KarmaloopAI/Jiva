@@ -9,6 +9,7 @@ from logging.handlers import RotatingFileHandler
 from typing import Any, Dict, List
 
 from core.memory import Memory
+from core.prompt_manager import PromptManager
 from core.time_experience import TimeExperience
 from core.task_manager import TaskManager
 from core.ethical_framework import EthicalFramework
@@ -28,12 +29,13 @@ class Agent:
         self.setup_logging()
         self.logger.info("Initializing Jiva Agent")
         
-        self.llm_interface = LLMInterface(config['llm'])
+        self.prompt_manager = PromptManager(prompts_config=config.get('prompts', { 'prompts_dir': 'prompts' }))
+        self.llm_interface = LLMInterface(config['llm'], prompt_manager=self.prompt_manager)
         self.memory = Memory(config['memory'], self.llm_interface)
         self.time_experience = TimeExperience()
-        self.ethical_framework = EthicalFramework(self.llm_interface, config=config['ethical_framework'])
+        self.ethical_framework = EthicalFramework(self.llm_interface, config=config['ethical_framework'], prompt_manager=self.prompt_manager)
         self.action_manager = ActionManager(self.ethical_framework, memory=self.memory, llm_interface=self.llm_interface)
-        self.task_manager = TaskManager(self.llm_interface, self.ethical_framework, self.action_manager, memory=self.memory)
+        self.task_manager = TaskManager(self.llm_interface, self.ethical_framework, self.action_manager, memory=self.memory, prompt_manager=self.prompt_manager)
         self.sensor_manager = SensorManager(config['sensors'])
         
         self.sleep_config = config.get('sleep_cycle', {

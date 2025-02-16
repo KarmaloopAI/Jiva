@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>docker-compose.yml | Jiva Documentation</title>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500&family=Ubuntu+Mono&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="site-header">
+        <div class="header-left">
+            <div class="logo">
+                <img src="../assets/logo-placeholder.png" alt="Fluen" width="32" height="32">
+                <a href="../index.html" class="logo-text">Fluen Documentation</a>
+            </div>
+        </div>
+        
+        <div class="header-center">
+            <div class="search-container">
+                <input type="search" class="search-input" placeholder="Search documentation... (Press '/' to focus)">
+                <div class="search-results"></div>
+            </div>
+        </div>
+        
+        <div class="header-right">
+            <button id="themeToggle" class="theme-toggle" aria-label="Toggle theme">
+                <svg class="sun-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <circle cx="12" cy="12" r="4"></circle>
+                    <path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path>
+                </svg>
+                <svg class="moon-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="display: none;">
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                </svg>
+            </button>
+        </div>
+    </header>
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <h1><a href="../index.html">Jiva</a></h1>
+            <p>Python Project</p>
+        </div>
+
+        <div class="sidebar-content">
+            <nav class="file-navigation">
+                <div class="nav-section">
+                    <h3>Variable</h3>
+                    <ul>
+                        <li>
+                            <a href="#version">
+                                version
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#services">
+                                services
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#ports">
+                                ports
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#volumes">
+                                volumes
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#environment">
+                                environment
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#depends_on">
+                                depends_on
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#stdin_open">
+                                stdin_open
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#tty">
+                                tty
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#command">
+                                command
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#volumes.qdrant_storage">
+                                volumes.qdrant_storage
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#volumes.ollama_models">
+                                volumes.ollama_models
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+                <div class="nav-section">
+                    <h3>Service</h3>
+                    <ul>
+                        <li>
+                            <a href="#jiva">
+                                jiva
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#qdrant">
+                                qdrant
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#ollama">
+                                ollama
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </nav>
+        </div>
+    </aside>
+
+    <!-- Main content -->
+    <main class="main-content">
+        <!-- File header -->
+        <div class="file-header">
+            <div class="breadcrumbs">
+                <a href="../index.html">Jiva</a>
+                <span class="separator">/</span>
+                <span class="current">docker-compose.yml</span>
+            </div>
+
+            <div class="file-metadata">
+                <div class="metadata-item">
+                    <span class="metadata-label">Language</span>
+                    <span class="metadata-value">Unknown</span>
+                </div>
+                <div class="metadata-item">
+                    <span class="metadata-label">Last Modified</span>
+                    <span class="metadata-value">2025-02-08T21:13:58.302137</span>
+                </div>
+            </div>
+
+            <div class="file-purpose">
+                <h1>docker-compose.yml</h1>
+                <p>This Docker Compose file sets up a multi-container application environment with three services: jiva, qdrant, and ollama. It specifies configurations such as ports, volumes, and dependencies for these services.</p>
+            </div>
+        </div>
+
+        <!-- Dependencies section -->
+        <section class="file-dependencies">
+            <h2>Dependencies</h2>
+            <div class="dependencies-list">
+                <div class="dependency-item">
+                    <span class="dependency-name">Docker</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">Docker Compose</span>
+                    <span class="dependency-type">external</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Dependency visualization -->
+        <section class="dependency-section">
+            <h2>Visualization</h2>
+            <div class="graph-wrapper">
+                <div id="dependencyGraph" class="dependency-graph"></div>
+            </div>
+        </section>
+
+        <!-- Code elements -->
+        <section class="code-elements">
+            <h2>Code Elements</h2>
+            <div class="element-group">
+                <h3>Variable</h3>
+                
+                <div id="version" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>version</code>
+                            <span class="scope-badge">global</span>
+                        </div>
+                        <span class="line-number">Line 1</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Specifies the version of Docker Compose syntax being used.
+                        </div>
+
+                        <div class="element-documentation">
+                            The 'version' key defines which version of the Docker Compose file syntax is used.
+                        </div>
+                    </div>
+                </div>
+                <div id="services" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>services</code>
+                            <span class="scope-badge">global</span>
+                        </div>
+                        <span class="line-number">Line 3</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Defines the services to be managed by Docker Compose.
+                        </div>
+
+                        <div class="element-documentation">
+                            The 'services' key is a dictionary where each key is the name of a service and its value is a definition of how that service should run.
+                        </div>
+                    </div>
+                </div>
+                <div id="ports" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>ports</code>
+                            <span class="scope-badge">within jiva</span>
+                        </div>
+                        <span class="line-number">Line 6</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Maps network ports inside a Docker container to ports on the host.
+                        </div>
+
+                        <div class="element-documentation">
+                            The 'ports' key specifies a mapping from host machine ports to container ports for network connectivity.
+                        </div>
+                    </div>
+                </div>
+                <div id="volumes" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>volumes</code>
+                            <span class="scope-badge">within jiva</span>
+                        </div>
+                        <span class="line-number">Line 8</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Defines directory or file mounts from the host to the container.
+                        </div>
+
+                        <div class="element-documentation">
+                            Volumes are used for persisting data and sharing files between host and containers.
+                        </div>
+                    </div>
+                </div>
+                <div id="environment" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>environment</code>
+                            <span class="scope-badge">within jiva</span>
+                        </div>
+                        <span class="line-number">Line 11</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Sets environment variables in the Docker container.
+                        </div>
+
+                        <div class="element-documentation">
+                            The 'environment' section allows setting environment variables that the application running in the container can access.
+                        </div>
+                    </div>
+                </div>
+                <div id="depends_on" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>depends_on</code>
+                            <span class="scope-badge">within jiva</span>
+                        </div>
+                        <span class="line-number">Line 15</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Specifies dependencies between services.
+                        </div>
+
+                        <div class="element-documentation">
+                            The 'depends_on' key indicates that 'jiva' should start after 'qdrant' and 'ollama' are healthy and running.
+                        </div>
+                    </div>
+                </div>
+                <div id="stdin_open" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>stdin_open</code>
+                            <span class="scope-badge">within jiva</span>
+                        </div>
+                        <span class="line-number">Line 18</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Keeps the standard input (stdin) open for interaction.
+                        </div>
+
+                        <div class="element-documentation">
+                            The 'stdin_open' key allows for interactive processes such as a console or a shell inside the container.
+                        </div>
+                    </div>
+                </div>
+                <div id="tty" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>tty</code>
+                            <span class="scope-badge">within jiva</span>
+                        </div>
+                        <span class="line-number">Line 19</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Allocates a pseudo-TTY for the container.
+                        </div>
+
+                        <div class="element-documentation">
+                            The 'tty' key enables a text interface for the container, which is useful for running terminal-based applications.
+                        </div>
+                    </div>
+                </div>
+                <div id="command" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>command</code>
+                            <span class="scope-badge">within jiva</span>
+                        </div>
+                        <span class="line-number">Line 20</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Overrides the default command executed by the container.
+                        </div>
+
+                        <div class="element-documentation">
+                            The 'command' value runs a shell command sequence to ensure a configuration file exists and then starts a Python application.
+                        </div>
+                    </div>
+                </div>
+                <div id="volumes.qdrant_storage" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>volumes.qdrant_storage</code>
+                            <span class="scope-badge">global</span>
+                        </div>
+                        <span class="line-number">Line 43</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Defines a Docker volume for persisting Qdrant data.
+                        </div>
+
+                        <div class="element-documentation">
+                            The 'volumes.qdrant_storage' section specifies a named volume for storing data of the Qdrant service.
+                        </div>
+                    </div>
+                </div>
+                <div id="volumes.ollama_models" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>volumes.ollama_models</code>
+                            <span class="scope-badge">global</span>
+                        </div>
+                        <span class="line-number">Line 44</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Defines a Docker volume for storing Ollama models.
+                        </div>
+
+                        <div class="element-documentation">
+                            The 'volumes.ollama_models' section specifies a named volume for storing model data of the Ollama service.
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="element-group">
+                <h3>Service</h3>
+                
+                <div id="jiva" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>jiva</code>
+                            <span class="scope-badge">within services</span>
+                        </div>
+                        <span class="line-number">Line 4</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Defines the &#39;jiva&#39; microservice setup and configuration.
+                        </div>
+
+                        <div class="element-documentation">
+                            The 'jiva' service is built from the current directory, exposes port 8000, mounts local directories to the container, sets environment variables, and depends on the other two services.
+                        </div>
+                    </div>
+                </div>
+                <div id="qdrant" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>qdrant</code>
+                            <span class="scope-badge">within services</span>
+                        </div>
+                        <span class="line-number">Line 30</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Service configuration for the Qdrant vector database.
+                        </div>
+
+                        <div class="element-documentation">
+                            The 'qdrant' service configuration specifies the image to run, port mapping, and volume usage.
+                        </div>
+                    </div>
+                </div>
+                <div id="ollama" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>ollama</code>
+                            <span class="scope-badge">within services</span>
+                        </div>
+                        <span class="line-number">Line 36</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Service configuration for the Ollama application.
+                        </div>
+
+                        <div class="element-documentation">
+                            The 'ollama' service configuration specifies the image to run, port mapping, and volume usage.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <footer class="site-footer">
+            <p>Powered by <a href="https://fluen.io" target="_blank">Fluen.io</a></p>
+        </footer>
+    </main>
+    <!-- Add D3.js before other scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+    <!-- Add default graph data in case the server doesn't provide it -->
+
+    <script src="../assets/script.js"></script>
+<script>window.lineageData = {"nodes": [{"id": "docker-compose.yml", "type": "current"}], "links": []};</script></body>
+</html>

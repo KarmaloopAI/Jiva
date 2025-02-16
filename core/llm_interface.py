@@ -6,6 +6,7 @@ import re
 from typing import Any, Dict, List, Union
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
+from core.prompt_manager import PromptManager
 from llm_providers.base_provider import BaseLLMProvider
 from llm_providers.ollama_provider import OllamaProvider
 from llm_providers.openai_provider import OpenAIProvider
@@ -16,9 +17,10 @@ class JSONParseError(Exception):
     pass
 
 class LLMInterface:
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], prompt_manager: PromptManager):
         self.config = config
         self.provider = self._get_provider()
+        self.prompt_manager = prompt_manager
         self.logger = logging.getLogger("Jiva.LLMInterface")
 
     def _get_provider(self) -> BaseLLMProvider:
@@ -199,25 +201,12 @@ class LLMInterface:
 
     async def process(self, input_data: Any) -> Dict[str, Any]:
         """Process input data and return structured information."""
-        prompt = f"""
-        Input: {input_data}
-
-        Analyze the above input, break it down into action_items to fulfil the overall goal of the input.
-        Carefully analyse the input to ensure you have factored it in its entirety.
-        Provide a summary and other relevant details structured into the JSON object below.
-        Format your response as a JSON object with the following structure:
-        {{
-            "summary": "A brief summary of the input",
-            "key_points": ["List of key points"],
-            "entities": ["List of important entities mentioned"],
-            "sentiment": "Overall sentiment (positive, negative, or neutral)",
-            "action_items": ["List of suggested actions based on the input"]
-        }}
-        
-        Ensure the response is valid JSON without any additional formatting or code block markers.
-        """
-        
         try:
+            prompt = self.prompt_manager.get_prompt(
+                "llm.process_input",
+                input_data=input_data
+            )
+            
             response = await self.generate(prompt)
             return self.parse_json(response)
         except Exception as e:

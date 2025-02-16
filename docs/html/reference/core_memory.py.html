@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>core/memory.py | Jiva Documentation</title>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500&family=Ubuntu+Mono&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="site-header">
+        <div class="header-left">
+            <div class="logo">
+                <img src="../assets/logo-placeholder.png" alt="Fluen" width="32" height="32">
+                <a href="../index.html" class="logo-text">Fluen Documentation</a>
+            </div>
+        </div>
+        
+        <div class="header-center">
+            <div class="search-container">
+                <input type="search" class="search-input" placeholder="Search documentation... (Press '/' to focus)">
+                <div class="search-results"></div>
+            </div>
+        </div>
+        
+        <div class="header-right">
+            <button id="themeToggle" class="theme-toggle" aria-label="Toggle theme">
+                <svg class="sun-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <circle cx="12" cy="12" r="4"></circle>
+                    <path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path>
+                </svg>
+                <svg class="moon-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="display: none;">
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                </svg>
+            </button>
+        </div>
+    </header>
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <h1><a href="../index.html">Jiva</a></h1>
+            <p>Python Project</p>
+        </div>
+
+        <div class="sidebar-content">
+            <nav class="file-navigation">
+                <div class="nav-section">
+                    <h3>Class</h3>
+                    <ul>
+                        <li>
+                            <a href="#datetimeencoder">
+                                DateTimeEncoder
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+                <div class="nav-section">
+                    <h3>Method</h3>
+                    <ul>
+                        <li>
+                            <a href="#__init__">
+                                __init__
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#add_to_short_term">
+                                add_to_short_term
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#get_short_term_memory">
+                                get_short_term_memory
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#get_recent_short_term_memory">
+                                get_recent_short_term_memory
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#forget">
+                                forget
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#update_long_term_memory">
+                                update_long_term_memory
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#get_task_result">
+                                get_task_result
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+                <div class="nav-section">
+                    <h3>Async Method</h3>
+                    <ul>
+                        <li>
+                            <a href="#_transfer_to_long_term">
+                                _transfer_to_long_term
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#consolidate">
+                                consolidate
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#query_long_term_memory">
+                                query_long_term_memory
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#prepare_fine_tuning_dataset">
+                                prepare_fine_tuning_dataset
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#get_context_for_task">
+                                get_context_for_task
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </nav>
+        </div>
+    </aside>
+
+    <!-- Main content -->
+    <main class="main-content">
+        <!-- File header -->
+        <div class="file-header">
+            <div class="breadcrumbs">
+                <a href="../index.html">Jiva</a>
+                <span class="separator">/</span>
+                <span class="current">core/memory.py</span>
+            </div>
+
+            <div class="file-metadata">
+                <div class="metadata-item">
+                    <span class="metadata-label">Language</span>
+                    <span class="metadata-value">Python</span>
+                </div>
+                <div class="metadata-item">
+                    <span class="metadata-label">Last Modified</span>
+                    <span class="metadata-value">2025-02-08T21:06:01.090350</span>
+                </div>
+            </div>
+
+            <div class="file-purpose">
+                <h1>core/memory.py</h1>
+                <p>The code is designed to manage short-term and long-term memory for a system, storing data temporarily in short-term memory and transferring it to long-term storage when necessary. It uses semantic embeddings to manage and query memory with a connection to an external vector database (Qdrant).</p>
+            </div>
+        </div>
+
+        <!-- Dependencies section -->
+        <section class="file-dependencies">
+            <h2>Dependencies</h2>
+            <div class="dependencies-list">
+                <div class="dependency-item">
+                    <span class="dependency-name">typing</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">datetime</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">json</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">logging</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">core.llm_interface.LLMInterface</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">utils.qdrant_handler.QdrantHandler</span>
+                    <span class="dependency-type">external</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Dependency visualization -->
+        <section class="dependency-section">
+            <h2>Visualization</h2>
+            <div class="graph-wrapper">
+                <div id="dependencyGraph" class="dependency-graph"></div>
+            </div>
+        </section>
+
+        <!-- Code elements -->
+        <section class="code-elements">
+            <h2>Code Elements</h2>
+            <div class="element-group">
+                <h3>Class</h3>
+                
+                <div id="datetimeencoder" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>DateTimeEncoder</code>
+                            <span class="scope-badge">global</span>
+                        </div>
+                        <span class="line-number">Line 12</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Custom JSON encoder to handle datetime objects.
+                        </div>
+
+                        <div class="element-documentation">
+                            Overrides the default method to convert datetime objects into ISO format strings.
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="element-group">
+                <h3>Method</h3>
+                
+                <div id="__init__" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>__init__</code>
+                            <span class="scope-badge">Memory</span>
+                        </div>
+                        <span class="line-number">Line 19</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Initializes the Memory object with configurations and interfaces.
+                        </div>
+
+                        <div class="element-documentation">
+                            Sets up configuration values, short-term memory, logger, and sets up connection to Qdrant via QdrantHandler.
+                        </div>
+                    </div>
+                </div>
+                <div id="add_to_short_term" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>add_to_short_term</code>
+                            <span class="scope-badge">Memory</span>
+                        </div>
+                        <span class="line-number">Line 33</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Adds a memory item into short-term memory.
+                        </div>
+
+                        <div class="element-documentation">
+                            Constructs a memory item with a timestamp and limited to a maximum size. Transfers oldest items to long-term storage when exceeding this size.
+                        </div>
+                    </div>
+                </div>
+                <div id="get_short_term_memory" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>get_short_term_memory</code>
+                            <span class="scope-badge">Memory</span>
+                        </div>
+                        <span class="line-number">Line 66</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Retrieves all short-term memory items.
+                        </div>
+
+                        <div class="element-documentation">
+                            Returns the list of all items stored in short-term memory.
+                        </div>
+                    </div>
+                </div>
+                <div id="get_recent_short_term_memory" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>get_recent_short_term_memory</code>
+                            <span class="scope-badge">Memory</span>
+                        </div>
+                        <span class="line-number">Line 71</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Retrieves the most recent &#39;n&#39; items from short-term memory.
+                        </div>
+
+                        <div class="element-documentation">
+                            Fetches and returns up to 'n' most recent items from short-term memory.
+                        </div>
+                    </div>
+                </div>
+                <div id="forget" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>forget</code>
+                            <span class="scope-badge">Memory</span>
+                        </div>
+                        <span class="line-number">Line 104</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Placeholder for deleting old or irrelevant memories from long-term storage.
+                        </div>
+
+                        <div class="element-documentation">
+                            Intended to remove memories based on some criteria which need to be defined for the specific application.
+                        </div>
+                    </div>
+                </div>
+                <div id="update_long_term_memory" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>update_long_term_memory</code>
+                            <span class="scope-badge">Memory</span>
+                        </div>
+                        <span class="line-number">Line 110</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Updates information in long-term memory.
+                        </div>
+
+                        <div class="element-documentation">
+                            Uses point IDs to find and update specific memories in the long-term storage.
+                        </div>
+                    </div>
+                </div>
+                <div id="get_task_result" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>get_task_result</code>
+                            <span class="scope-badge">Memory</span>
+                        </div>
+                        <span class="line-number">Line 122</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Finds the most recent result of a task given its description.
+                        </div>
+
+                        <div class="element-documentation">
+                            Searches short-term memory first and then long-term memory for tasks matching the description and returns the result.
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="element-group">
+                <h3>Async Method</h3>
+                
+                <div id="_transfer_to_long_term" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>_transfer_to_long_term</code>
+                            <span class="scope-badge">Memory</span>
+                        </div>
+                        <span class="line-number">Line 46</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Transfers a memory item from short-term to long-term storage using embeddings.
+                        </div>
+
+                        <div class="element-documentation">
+                            Serializes memory item to JSON, gets its embedding, checks vector size, and adds it to Qdrant.
+                        </div>
+                    </div>
+                </div>
+                <div id="consolidate" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>consolidate</code>
+                            <span class="scope-badge">Memory</span>
+                        </div>
+                        <span class="line-number">Line 76</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Transfers all short-term memory items to long-term storage.
+                        </div>
+
+                        <div class="element-documentation">
+                            Iterates over short-term memory items, transferring each to long-term storage and then clears short-term memory.
+                        </div>
+                    </div>
+                </div>
+                <div id="query_long_term_memory" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>query_long_term_memory</code>
+                            <span class="scope-badge">Memory</span>
+                        </div>
+                        <span class="line-number">Line 84</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Queries long-term memory based on a textual query.
+                        </div>
+
+                        <div class="element-documentation">
+                            Uses semantic embeddings to find and return most similar memory items from long-term storage in Qdrant.
+                        </div>
+                    </div>
+                </div>
+                <div id="prepare_fine_tuning_dataset" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>prepare_fine_tuning_dataset</code>
+                            <span class="scope-badge">Memory</span>
+                        </div>
+                        <span class="line-number">Line 95</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Prepares a dataset for model fine-tuning by collecting recent memories.
+                        </div>
+
+                        <div class="element-documentation">
+                            Combines short-term and long-term memories to create a dataset for fine-tuning purposes.
+                        </div>
+                    </div>
+                </div>
+                <div id="get_context_for_task" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>get_context_for_task</code>
+                            <span class="scope-badge">Memory</span>
+                        </div>
+                        <span class="line-number">Line 146</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Provides context for a given task description from both short-term and long-term memory.
+                        </div>
+
+                        <div class="element-documentation">
+                            Retrieves relevant short-term and long-term memory items to provide a contextualized view.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <footer class="site-footer">
+            <p>Powered by <a href="https://fluen.io" target="_blank">Fluen.io</a></p>
+        </footer>
+    </main>
+    <!-- Add D3.js before other scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+    <!-- Add default graph data in case the server doesn't provide it -->
+
+    <script src="../assets/script.js"></script>
+<script>window.lineageData = {"nodes": [{"id": "core/memory.py", "type": "current"}], "links": []};</script></body>
+</html>

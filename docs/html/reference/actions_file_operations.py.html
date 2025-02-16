@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>actions/file_operations.py | Jiva Documentation</title>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500&family=Ubuntu+Mono&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="site-header">
+        <div class="header-left">
+            <div class="logo">
+                <img src="../assets/logo-placeholder.png" alt="Fluen" width="32" height="32">
+                <a href="../index.html" class="logo-text">Fluen Documentation</a>
+            </div>
+        </div>
+        
+        <div class="header-center">
+            <div class="search-container">
+                <input type="search" class="search-input" placeholder="Search documentation... (Press '/' to focus)">
+                <div class="search-results"></div>
+            </div>
+        </div>
+        
+        <div class="header-right">
+            <button id="themeToggle" class="theme-toggle" aria-label="Toggle theme">
+                <svg class="sun-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <circle cx="12" cy="12" r="4"></circle>
+                    <path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path>
+                </svg>
+                <svg class="moon-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="display: none;">
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                </svg>
+            </button>
+        </div>
+    </header>
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <h1><a href="../index.html">Jiva</a></h1>
+            <p>Python Project</p>
+        </div>
+
+        <div class="sidebar-content">
+            <nav class="file-navigation">
+                <div class="nav-section">
+                    <h3>Function</h3>
+                    <ul>
+                        <li>
+                            <a href="#expand_user_path">
+                                expand_user_path
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#ensure_directory_exists">
+                                ensure_directory_exists
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#read_file">
+                                read_file
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#write_file">
+                                write_file
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#append_file">
+                                append_file
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#delete_file">
+                                delete_file
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#list_directory">
+                                list_directory
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#create_directory">
+                                create_directory
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#read_json">
+                                read_json
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#write_json">
+                                write_json
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#read_csv">
+                                read_csv
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#write_csv">
+                                write_csv
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#main">
+                                main
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+                <div class="nav-section">
+                    <h3>Variable</h3>
+                    <ul>
+                        <li>
+                            <a href="#logger">
+                                logger
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </nav>
+        </div>
+    </aside>
+
+    <!-- Main content -->
+    <main class="main-content">
+        <!-- File header -->
+        <div class="file-header">
+            <div class="breadcrumbs">
+                <a href="../index.html">Jiva</a>
+                <span class="separator">/</span>
+                <span class="current">actions/file_operations.py</span>
+            </div>
+
+            <div class="file-metadata">
+                <div class="metadata-item">
+                    <span class="metadata-label">Language</span>
+                    <span class="metadata-value">Python</span>
+                </div>
+                <div class="metadata-item">
+                    <span class="metadata-label">Last Modified</span>
+                    <span class="metadata-value">2025-02-08T21:05:16.748118</span>
+                </div>
+            </div>
+
+            <div class="file-purpose">
+                <h1>actions/file_operations.py</h1>
+                <p>The code provides various asynchronous file operations, including reading, writing, appending, and deleting files and directories, as well as handling JSON and CSV file formats.</p>
+            </div>
+        </div>
+
+        <!-- Dependencies section -->
+        <section class="file-dependencies">
+            <h2>Dependencies</h2>
+            <div class="dependencies-list">
+                <div class="dependency-item">
+                    <span class="dependency-name">asyncio</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">os</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">json</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">csv</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">typing</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">logging</span>
+                    <span class="dependency-type">external</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Dependency visualization -->
+        <section class="dependency-section">
+            <h2>Visualization</h2>
+            <div class="graph-wrapper">
+                <div id="dependencyGraph" class="dependency-graph"></div>
+            </div>
+        </section>
+
+        <!-- Code elements -->
+        <section class="code-elements">
+            <h2>Code Elements</h2>
+            <div class="element-group">
+                <h3>Function</h3>
+                
+                <div id="expand_user_path" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>expand_user_path</code>
+                            <span class="scope-badge">global</span>
+                        </div>
+                        <span class="line-number">Line 8</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Expands a user&#39;s home directory symbol to a full path.
+                        </div>
+
+                        <div class="element-documentation">
+                            Expand a user's home directory symbol (e.g., '~/') to a full path, or return the original path if it's a simple filename.
+                        </div>
+                    </div>
+                </div>
+                <div id="ensure_directory_exists" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>ensure_directory_exists</code>
+                            <span class="scope-badge">global</span>
+                        </div>
+                        <span class="line-number">Line 18</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Ensures that the directory for a given file path exists, creating it if necessary.
+                        </div>
+
+                        <div class="element-documentation">
+                            Ensure that the directory for the given file path exists. Creates directories if they do not exist.
+                        </div>
+                    </div>
+                </div>
+                <div id="read_file" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>read_file</code>
+                            <span class="scope-badge">global</span>
+                        </div>
+                        <span class="line-number">Line 27</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Asynchronously reads and returns the content of a file.
+                        </div>
+
+                        <div class="element-documentation">
+                            Read and return the contents of a file.
+                        </div>
+                    </div>
+                </div>
+                <div id="write_file" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>write_file</code>
+                            <span class="scope-badge">global</span>
+                        </div>
+                        <span class="line-number">Line 46</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Asynchronously writes content to a file, creating the file if it does not exist.
+                        </div>
+
+                        <div class="element-documentation">
+                            Write the given content to a file. Creates the file if it does not exist.
+                        </div>
+                    </div>
+                </div>
+                <div id="append_file" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>append_file</code>
+                            <span class="scope-badge">global</span>
+                        </div>
+                        <span class="line-number">Line 68</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Asynchronously appends content to an existing file.
+                        </div>
+
+                        <div class="element-documentation">
+                            Append the given content to the end of a file if the file already exists.
+                        </div>
+                    </div>
+                </div>
+                <div id="delete_file" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>delete_file</code>
+                            <span class="scope-badge">global</span>
+                        </div>
+                        <span class="line-number">Line 87</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Asynchronously deletes a specified file.
+                        </div>
+
+                        <div class="element-documentation">
+                            Delete the specified file.
+                        </div>
+                    </div>
+                </div>
+                <div id="list_directory" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>list_directory</code>
+                            <span class="scope-badge">global</span>
+                        </div>
+                        <span class="line-number">Line 104</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Asynchronously lists all contents of a specified directory.
+                        </div>
+
+                        <div class="element-documentation">
+                            List all contents of the specified directory.
+                        </div>
+                    </div>
+                </div>
+                <div id="create_directory" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>create_directory</code>
+                            <span class="scope-badge">global</span>
+                        </div>
+                        <span class="line-number">Line 125</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Asynchronously creates a new directory at the specified path.
+                        </div>
+
+                        <div class="element-documentation">
+                            Create a new directory at the specified path.
+                        </div>
+                    </div>
+                </div>
+                <div id="read_json" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>read_json</code>
+                            <span class="scope-badge">global</span>
+                        </div>
+                        <span class="line-number">Line 143</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Asynchronously reads a JSON file and returns its contents as a dictionary.
+                        </div>
+
+                        <div class="element-documentation">
+                            Read a JSON file and return its contents as a dictionary.
+                        </div>
+                    </div>
+                </div>
+                <div id="write_json" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>write_json</code>
+                            <span class="scope-badge">global</span>
+                        </div>
+                        <span class="line-number">Line 167</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Asynchronously writes a dictionary to a JSON file.
+                        </div>
+
+                        <div class="element-documentation">
+                            Write the given data to a JSON file.
+                        </div>
+                    </div>
+                </div>
+                <div id="read_csv" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>read_csv</code>
+                            <span class="scope-badge">global</span>
+                        </div>
+                        <span class="line-number">Line 189</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Asynchronously reads a CSV file and returns its contents as a list of dictionaries.
+                        </div>
+
+                        <div class="element-documentation">
+                            Read a CSV file and return its contents as a list of dictionaries.
+                        </div>
+                    </div>
+                </div>
+                <div id="write_csv" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>write_csv</code>
+                            <span class="scope-badge">global</span>
+                        </div>
+                        <span class="line-number">Line 217</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Asynchronously writes a list of dictionaries to a CSV file.
+                        </div>
+
+                        <div class="element-documentation">
+                            Write a list of dictionaries to a CSV file.
+                        </div>
+                    </div>
+                </div>
+                <div id="main" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>main</code>
+                            <span class="scope-badge">global</span>
+                        </div>
+                        <span class="line-number">Line 240</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Main entry point for testing the asynchronous functions.
+                        </div>
+
+                        <div class="element-documentation">
+                            Test the functions by creating directories, reading, writing, and deleting files.
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="element-group">
+                <h3>Variable</h3>
+                
+                <div id="logger" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>logger</code>
+                            <span class="scope-badge">global</span>
+                        </div>
+                        <span class="line-number">Line 6</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Used to log messages for each operation within the functions.
+                        </div>
+
+                        <div class="element-documentation">
+                            Configured logger instance used for logging information, warnings, and errors.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <footer class="site-footer">
+            <p>Powered by <a href="https://fluen.io" target="_blank">Fluen.io</a></p>
+        </footer>
+    </main>
+    <!-- Add D3.js before other scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+    <!-- Add default graph data in case the server doesn't provide it -->
+
+    <script src="../assets/script.js"></script>
+<script>window.lineageData = {"nodes": [{"id": "actions/file_operations.py", "type": "current"}], "links": []};</script></body>
+</html>

@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>utils/qdrant_handler.py | Jiva Documentation</title>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500&family=Ubuntu+Mono&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="site-header">
+        <div class="header-left">
+            <div class="logo">
+                <img src="../assets/logo-placeholder.png" alt="Fluen" width="32" height="32">
+                <a href="../index.html" class="logo-text">Fluen Documentation</a>
+            </div>
+        </div>
+        
+        <div class="header-center">
+            <div class="search-container">
+                <input type="search" class="search-input" placeholder="Search documentation... (Press '/' to focus)">
+                <div class="search-results"></div>
+            </div>
+        </div>
+        
+        <div class="header-right">
+            <button id="themeToggle" class="theme-toggle" aria-label="Toggle theme">
+                <svg class="sun-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <circle cx="12" cy="12" r="4"></circle>
+                    <path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path>
+                </svg>
+                <svg class="moon-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="display: none;">
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                </svg>
+            </button>
+        </div>
+    </header>
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <h1><a href="../index.html">Jiva</a></h1>
+            <p>Python Project</p>
+        </div>
+
+        <div class="sidebar-content">
+            <nav class="file-navigation">
+                <div class="nav-section">
+                    <h3>Class</h3>
+                    <ul>
+                        <li>
+                            <a href="#qdranthandler">
+                                QdrantHandler
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+                <div class="nav-section">
+                    <h3>Method</h3>
+                    <ul>
+                        <li>
+                            <a href="#qdranthandler.__init__">
+                                QdrantHandler.__init__
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#qdranthandler._ensure_collection_exists">
+                                QdrantHandler._ensure_collection_exists
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#qdranthandler._create_collection">
+                                QdrantHandler._create_collection
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#qdranthandler.add_point">
+                                QdrantHandler.add_point
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#qdranthandler.search">
+                                QdrantHandler.search
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#qdranthandler.update_point">
+                                QdrantHandler.update_point
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#qdranthandler.delete_point">
+                                QdrantHandler.delete_point
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#qdranthandler.get_point">
+                                QdrantHandler.get_point
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#qdranthandler.delete_collection">
+                                QdrantHandler.delete_collection
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </nav>
+        </div>
+    </aside>
+
+    <!-- Main content -->
+    <main class="main-content">
+        <!-- File header -->
+        <div class="file-header">
+            <div class="breadcrumbs">
+                <a href="../index.html">Jiva</a>
+                <span class="separator">/</span>
+                <span class="current">utils/qdrant_handler.py</span>
+            </div>
+
+            <div class="file-metadata">
+                <div class="metadata-item">
+                    <span class="metadata-label">Language</span>
+                    <span class="metadata-value">Python</span>
+                </div>
+                <div class="metadata-item">
+                    <span class="metadata-label">Last Modified</span>
+                    <span class="metadata-value">2025-02-08T21:09:48.580619</span>
+                </div>
+            </div>
+
+            <div class="file-purpose">
+                <h1>utils/qdrant_handler.py</h1>
+                <p>The code provides an interface to interact with a Qdrant database, handling operations such as creating collections, adding points, searching, updating, and deleting points in a vector database.</p>
+            </div>
+        </div>
+
+        <!-- Dependencies section -->
+        <section class="file-dependencies">
+            <h2>Dependencies</h2>
+            <div class="dependencies-list">
+                <div class="dependency-item">
+                    <span class="dependency-name">typing.List</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">typing.Dict</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">typing.Any</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">qdrant_client.AsyncQdrantClient</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">qdrant_client.http.models.Distance</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">qdrant_client.http.models.VectorParams</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">qdrant_client.http.models.PointStruct</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">qdrant_client.http.models.UpdateStatus</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">qdrant_client.http.exceptions.ResponseHandlingException</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">qdrant_client.http.exceptions.UnexpectedResponse</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">logging</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">uuid</span>
+                    <span class="dependency-type">external</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Dependency visualization -->
+        <section class="dependency-section">
+            <h2>Visualization</h2>
+            <div class="graph-wrapper">
+                <div id="dependencyGraph" class="dependency-graph"></div>
+            </div>
+        </section>
+
+        <!-- Code elements -->
+        <section class="code-elements">
+            <h2>Code Elements</h2>
+            <div class="element-group">
+                <h3>Class</h3>
+                
+                <div id="qdranthandler" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>QdrantHandler</code>
+                            <span class="scope-badge">module</span>
+                        </div>
+                        <span class="line-number">Line 9</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Main handler class for Qdrant operations.
+                        </div>
+
+                        <div class="element-documentation">
+                            This class encapsulates methods for handling collection and point operations with a Qdrant vector database. It includes collection creation, point insertion, search, update, and deletion functionalities.
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="element-group">
+                <h3>Method</h3>
+                
+                <div id="qdranthandler.__init__" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>QdrantHandler.__init__</code>
+                            <span class="scope-badge">QdrantHandler</span>
+                        </div>
+                        <span class="line-number">Line 10</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Initializes the QdrantHandler instance.
+                        </div>
+
+                        <div class="element-documentation">
+                            Sets up the Qdrant client, validates collection existence, and initializes logging. Takes host, port, collection_name, and vector_size as parameters.
+                        </div>
+                    </div>
+                </div>
+                <div id="qdranthandler._ensure_collection_exists" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>QdrantHandler._ensure_collection_exists</code>
+                            <span class="scope-badge">QdrantHandler</span>
+                        </div>
+                        <span class="line-number">Line 16</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Ensures that the specified collection exists in the database.
+                        </div>
+
+                        <div class="element-documentation">
+                            Checks if the collection exists and creates it if not. Handles exceptions and logs errors.
+                        </div>
+                    </div>
+                </div>
+                <div id="qdranthandler._create_collection" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>QdrantHandler._create_collection</code>
+                            <span class="scope-badge">QdrantHandler</span>
+                        </div>
+                        <span class="line-number">Line 29</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Creates a new collection with the specified configuration.
+                        </div>
+
+                        <div class="element-documentation">
+                            Utilizes the Qdrant client to create a collection, specifying vector size and distance metric. Logs the creation status.
+                        </div>
+                    </div>
+                </div>
+                <div id="qdranthandler.add_point" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>QdrantHandler.add_point</code>
+                            <span class="scope-badge">QdrantHandler</span>
+                        </div>
+                        <span class="line-number">Line 38</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Adds a point to the Qdrant collection asynchronously.
+                        </div>
+
+                        <div class="element-documentation">
+                            Inserts a point described by a vector and payload to the collection using a unique ID. Returns the point ID or None if an error occurs.
+                        </div>
+                    </div>
+                </div>
+                <div id="qdranthandler.search" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>QdrantHandler.search</code>
+                            <span class="scope-badge">QdrantHandler</span>
+                        </div>
+                        <span class="line-number">Line 57</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Searches for similar points in the collection based on a query vector.
+                        </div>
+
+                        <div class="element-documentation">
+                            Executes a search query against the collection with the option to limit results, returning a list of matching points with their IDs, payloads, and scores.
+                        </div>
+                    </div>
+                </div>
+                <div id="qdranthandler.update_point" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>QdrantHandler.update_point</code>
+                            <span class="scope-badge">QdrantHandler</span>
+                        </div>
+                        <span class="line-number">Line 70</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Updates an existing point&#39;s vector and/or payload.
+                        </div>
+
+                        <div class="element-documentation">
+                            Replaces an existing point's data in the collection using its ID. Returns the update status.
+                        </div>
+                    </div>
+                </div>
+                <div id="qdranthandler.delete_point" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>QdrantHandler.delete_point</code>
+                            <span class="scope-badge">QdrantHandler</span>
+                        </div>
+                        <span class="line-number">Line 75</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Deletes a specific point from the collection.
+                        </div>
+
+                        <div class="element-documentation">
+                            Removes the point with the specified ID from the collection. Returns the update status.
+                        </div>
+                    </div>
+                </div>
+                <div id="qdranthandler.get_point" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>QdrantHandler.get_point</code>
+                            <span class="scope-badge">QdrantHandler</span>
+                        </div>
+                        <span class="line-number">Line 81</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Retrieves a specific point from the collection by ID.
+                        </div>
+
+                        <div class="element-documentation">
+                            Fetches and returns the point's data, including the ID and payload, if it exists in the collection. Returns None if not found.
+                        </div>
+                    </div>
+                </div>
+                <div id="qdranthandler.delete_collection" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>QdrantHandler.delete_collection</code>
+                            <span class="scope-badge">QdrantHandler</span>
+                        </div>
+                        <span class="line-number">Line 89</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Deletes the entire collection from the Qdrant database.
+                        </div>
+
+                        <div class="element-documentation">
+                            Removes the specified collection, logging the event. Handles errors and logs them.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <footer class="site-footer">
+            <p>Powered by <a href="https://fluen.io" target="_blank">Fluen.io</a></p>
+        </footer>
+    </main>
+    <!-- Add D3.js before other scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+    <!-- Add default graph data in case the server doesn't provide it -->
+
+    <script src="../assets/script.js"></script>
+<script>window.lineageData = {"nodes": [{"id": "utils/qdrant_handler.py", "type": "current"}], "links": []};</script></body>
+</html>

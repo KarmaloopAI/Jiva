@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>core/agent.py | Jiva Documentation</title>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500&family=Ubuntu+Mono&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="site-header">
+        <div class="header-left">
+            <div class="logo">
+                <img src="../assets/logo-placeholder.png" alt="Fluen" width="32" height="32">
+                <a href="../index.html" class="logo-text">Fluen Documentation</a>
+            </div>
+        </div>
+        
+        <div class="header-center">
+            <div class="search-container">
+                <input type="search" class="search-input" placeholder="Search documentation... (Press '/' to focus)">
+                <div class="search-results"></div>
+            </div>
+        </div>
+        
+        <div class="header-right">
+            <button id="themeToggle" class="theme-toggle" aria-label="Toggle theme">
+                <svg class="sun-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <circle cx="12" cy="12" r="4"></circle>
+                    <path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path>
+                </svg>
+                <svg class="moon-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="display: none;">
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                </svg>
+            </button>
+        </div>
+    </header>
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <h1><a href="../index.html">Jiva</a></h1>
+            <p>Python Project</p>
+        </div>
+
+        <div class="sidebar-content">
+            <nav class="file-navigation">
+                <div class="nav-section">
+                    <h3>Class</h3>
+                    <ul>
+                        <li>
+                            <a href="#datetimeencoder">
+                                DateTimeEncoder
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#agent">
+                                Agent
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+                <div class="nav-section">
+                    <h3>Method</h3>
+                    <ul>
+                        <li>
+                            <a href="#__init__">
+                                __init__
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#run">
+                                run
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#create_time_memory">
+                                create_time_memory
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#should_consolidate_memories">
+                                should_consolidate_memories
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#process_input">
+                                process_input
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#is_goal_setting">
+                                is_goal_setting
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#set_new_goal">
+                                set_new_goal
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#get_context">
+                                get_context
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#execute_next_task">
+                                execute_next_task
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#handle_task_error">
+                                handle_task_error
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#parse_action_plan">
+                                parse_action_plan
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#process_task_result">
+                                process_task_result
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#check_and_handle_sleep">
+                                check_and_handle_sleep
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#sleep">
+                                sleep
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#wake_up">
+                                wake_up
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#setup_logging">
+                                setup_logging
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </nav>
+        </div>
+    </aside>
+
+    <!-- Main content -->
+    <main class="main-content">
+        <!-- File header -->
+        <div class="file-header">
+            <div class="breadcrumbs">
+                <a href="../index.html">Jiva</a>
+                <span class="separator">/</span>
+                <span class="current">core/agent.py</span>
+            </div>
+
+            <div class="file-metadata">
+                <div class="metadata-item">
+                    <span class="metadata-label">Language</span>
+                    <span class="metadata-value">Python</span>
+                </div>
+                <div class="metadata-item">
+                    <span class="metadata-label">Last Modified</span>
+                    <span class="metadata-value">2025-02-08T21:07:50.658660</span>
+                </div>
+            </div>
+
+            <div class="file-purpose">
+                <h1>core/agent.py</h1>
+                <p>The code implements a sophisticated autonomous agent system named &#39;Jiva&#39; designed to interact with its environment through sensory inputs, perform tasks, manage its own memory, and follow ethical guidelines. It utilizes a long-lived loop to continuously process inputs, set and execute tasks, handle errors, and manage its sleep and memory consolidation cycles.</p>
+            </div>
+        </div>
+
+        <!-- Dependencies section -->
+        <section class="file-dependencies">
+            <h2>Dependencies</h2>
+            <div class="dependencies-list">
+                <div class="dependency-item">
+                    <span class="dependency-name">asyncio</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">datetime</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">os</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">json</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">logging</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">RotatingFileHandler</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">Memory</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">TimeExperience</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">TaskManager</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">EthicalFramework</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">LLMInterface</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">SensorManager</span>
+                    <span class="dependency-type">external</span>
+                </div>
+                <div class="dependency-item">
+                    <span class="dependency-name">ActionManager</span>
+                    <span class="dependency-type">external</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Dependency visualization -->
+        <section class="dependency-section">
+            <h2>Visualization</h2>
+            <div class="graph-wrapper">
+                <div id="dependencyGraph" class="dependency-graph"></div>
+            </div>
+        </section>
+
+        <!-- Code elements -->
+        <section class="code-elements">
+            <h2>Code Elements</h2>
+            <div class="element-group">
+                <h3>Class</h3>
+                
+                <div id="datetimeencoder" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>DateTimeEncoder</code>
+                            <span class="scope-badge">core/agent.py</span>
+                        </div>
+                        <span class="line-number">Line 19</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Custom JSON encoder to handle datetime and timedelta objects.
+                        </div>
+
+                        <div class="element-documentation">
+                            Extends the functionality of json.JSONEncoder to convert datetime and timedelta objects to ISO format for JSON serialization.
+                        </div>
+                    </div>
+                </div>
+                <div id="agent" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>Agent</code>
+                            <span class="scope-badge">core/agent.py</span>
+                        </div>
+                        <span class="line-number">Line 25</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Defines the behavior and functionalities of the Jiva agent, including initialization and operational loop management.
+                        </div>
+
+                        <div class="element-documentation">
+                            Main class for the agent. It manages configurations, sensors, memory, tasks, and more. Handles lifecycle operations including a main loop for operation, processing input, task execution, and memory management.
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="element-group">
+                <h3>Method</h3>
+                
+                <div id="__init__" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>__init__</code>
+                            <span class="scope-badge">Agent</span>
+                        </div>
+                        <span class="line-number">Line 26</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Initializes an instance of the Agent class with the provided configuration.
+                        </div>
+
+                        <div class="element-documentation">
+                            Sets up logging, initializes components and configurations such as LLM interface, memory, managers for tasks, sensors, and actions. Also configures the agent's sleep cycle settings, and prepares variables for runtime.
+                        </div>
+                    </div>
+                </div>
+                <div id="run" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>run</code>
+                            <span class="scope-badge">Agent</span>
+                        </div>
+                        <span class="line-number">Line 53</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Main execution loop for the agent.
+                        </div>
+
+                        <div class="element-documentation">
+                            An async method running indefinitely, it checks for and processes sensory inputs, executes tasks, manages sleep cycles, and handles memory consolidation, with error handling mechanisms.
+                        </div>
+                    </div>
+                </div>
+                <div id="create_time_memory" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>create_time_memory</code>
+                            <span class="scope-badge">Agent</span>
+                        </div>
+                        <span class="line-number">Line 131</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Creates a time-based memory entry.
+                        </div>
+
+                        <div class="element-documentation">
+                            Adds a new time-based memory into the agent's short-term memory to reflect the current timestamp and description of this time experience.
+                        </div>
+                    </div>
+                </div>
+                <div id="should_consolidate_memories" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>should_consolidate_memories</code>
+                            <span class="scope-badge">Agent</span>
+                        </div>
+                        <span class="line-number">Line 139</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Determines if memory consolidation should be executed.
+                        </div>
+
+                        <div class="element-documentation">
+                            Checks if the threshold for memory consolidation has been reached and if there are no pending tasks, indicating readiness for memory consolidation.
+                        </div>
+                    </div>
+                </div>
+                <div id="process_input" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>process_input</code>
+                            <span class="scope-badge">Agent</span>
+                        </div>
+                        <span class="line-number">Line 143</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Processes sensory input data.
+                        </div>
+
+                        <div class="element-documentation">
+                            Asynchronously processes input data, interacts with the LLM interface to process content, updates memory, sets new goals if identified, and possibly generates new tasks.
+                        </div>
+                    </div>
+                </div>
+                <div id="is_goal_setting" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>is_goal_setting</code>
+                            <span class="scope-badge">Agent</span>
+                        </div>
+                        <span class="line-number">Line 173</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Determines if processed input is establishing a new goal.
+                        </div>
+
+                        <div class="element-documentation">
+                            Interacts with the LLM to analyze specific input and decide whether it sets a new goal for the agent based on the current context.
+                        </div>
+                    </div>
+                </div>
+                <div id="set_new_goal" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>set_new_goal</code>
+                            <span class="scope-badge">Agent</span>
+                        </div>
+                        <span class="line-number">Line 182</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Sets a new goal for the agent based on the processed input.
+                        </div>
+
+                        <div class="element-documentation">
+                            Uses LLM to generate a concise goal statement from input, updates current goal, and creates tasks relating to this new goal.
+                        </div>
+                    </div>
+                </div>
+                <div id="get_context" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>get_context</code>
+                            <span class="scope-badge">Agent</span>
+                        </div>
+                        <span class="line-number">Line 198</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Retrieves the current context of the agent.
+                        </div>
+
+                        <div class="element-documentation">
+                            Gathers the current state of the agent including recent memories, current time, and current goal, formatted in a dictionary for contextual operations.
+                        </div>
+                    </div>
+                </div>
+                <div id="execute_next_task" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>execute_next_task</code>
+                            <span class="scope-badge">Agent</span>
+                        </div>
+                        <span class="line-number">Line 209</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Executes the next pending task from the queue.
+                        </div>
+
+                        <div class="element-documentation">
+                            Asynchronously gets the next task from the task manager, executes it, and processes the result or handles errors if encountered.
+                        </div>
+                    </div>
+                </div>
+                <div id="handle_task_error" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>handle_task_error</code>
+                            <span class="scope-badge">Agent</span>
+                        </div>
+                        <span class="line-number">Line 224</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Handles errors encountered during task execution.
+                        </div>
+
+                        <div class="element-documentation">
+                            Uses the LLM interface to generate solutions or alternative approaches to resolve task errors and may introduce new tasks based on these solutions.
+                        </div>
+                    </div>
+                </div>
+                <div id="parse_action_plan" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>parse_action_plan</code>
+                            <span class="scope-badge">Agent</span>
+                        </div>
+                        <span class="line-number">Line 241</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Parses an action plan into actionable elements.
+                        </div>
+
+                        <div class="element-documentation">
+                            Utilizes the LLM to convert a high-level action plan into an action name and corresponding parameters, formatted as a JSON object.
+                        </div>
+                    </div>
+                </div>
+                <div id="process_task_result" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>process_task_result</code>
+                            <span class="scope-badge">Agent</span>
+                        </div>
+                        <span class="line-number">Line 248</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Processes the results of a completed task.
+                        </div>
+
+                        <div class="element-documentation">
+                            Records task results into memory, marks task completion, and evaluates the need for generating follow-up tasks based on results.
+                        </div>
+                    </div>
+                </div>
+                <div id="check_and_handle_sleep" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>check_and_handle_sleep</code>
+                            <span class="scope-badge">Agent</span>
+                        </div>
+                        <span class="line-number">Line 273</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Manages the agent&#39;s sleep and wake cycles.
+                        </div>
+
+                        <div class="element-documentation">
+                            Checks the conditions for sleep or wake states based on configurations and current time metrics, adjusting the agent state accordingly.
+                        </div>
+                    </div>
+                </div>
+                <div id="sleep" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>sleep</code>
+                            <span class="scope-badge">Agent</span>
+                        </div>
+                        <span class="line-number">Line 299</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Puts the agent into a sleep state.
+                        </div>
+
+                        <div class="element-documentation">
+                            Switches the agent to a non-active state, triggering memory consolidation and preparing datasets for potential fine-tuning of models.
+                        </div>
+                    </div>
+                </div>
+                <div id="wake_up" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>wake_up</code>
+                            <span class="scope-badge">Agent</span>
+                        </div>
+                        <span class="line-number">Line 314</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Wakes the agent from its sleep state.
+                        </div>
+
+                        <div class="element-documentation">
+                            Sets the agent to active, updating its experience with current time settings.
+                        </div>
+                    </div>
+                </div>
+                <div id="setup_logging" class="element-card">
+                    <div class="element-header">
+                        <div class="element-name">
+                            <code>setup_logging</code>
+                            <span class="scope-badge">Agent</span>
+                        </div>
+                        <span class="line-number">Line 317</span>
+                    </div>
+
+                    <div class="element-content">
+                        <div class="element-purpose">
+                            Configures logging mechanisms for the agent.
+                        </div>
+
+                        <div class="element-documentation">
+                            Initializes logging to both console and rotating files to keep detailed operational logs, supporting debugging and monitoring.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <footer class="site-footer">
+            <p>Powered by <a href="https://fluen.io" target="_blank">Fluen.io</a></p>
+        </footer>
+    </main>
+    <!-- Add D3.js before other scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+    <!-- Add default graph data in case the server doesn't provide it -->
+
+    <script src="../assets/script.js"></script>
+<script>window.lineageData = {"nodes": [{"id": "core/agent.py", "type": "current"}], "links": []};</script></body>
+</html>

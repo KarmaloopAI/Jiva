@@ -3,10 +3,12 @@
 from typing import List, Dict, Any, Union
 import logging
 from core.llm_interface import LLMInterface
+from core.prompt_manager import PromptManager
 
 class EthicalFramework:
-    def __init__(self, llm_interface: LLMInterface, config: Dict[str, Any]):
+    def __init__(self, llm_interface: LLMInterface, config: Dict[str, Any], prompt_manager: PromptManager):
         self.llm_interface = llm_interface
+        self.prompt_manager = prompt_manager
         self.logger = logging.getLogger("Jiva.EthicalFramework")
         
         self.ethical_principles = config.get('principles', [
@@ -41,18 +43,11 @@ class EthicalFramework:
             return True
 
         # For more complex tasks, use the existing evaluation logic
-        prompt = f"""
-        Task: {task_description}
-
-        Ethical Principles:
-        {', '.join(self.ethical_principles)}
-
-        Evaluate the given task against these ethical principles. Provide an overall ethical assessment.
-
-        Respond with a JSON object containing:
-        1. An 'overall_assessment' which is either 'ethical' or 'unethical'
-        2. A 'reasoning' field explaining the overall assessment
-        """
+        prompt = self.prompt_manager.get_prompt(
+            "ethical.evaluate_task",
+            task_description=task_description,
+            principles=self.ethical_principles
+        )
 
         response = self.llm_interface.generate(prompt)
         self.logger.debug(f"LLM response: {response}")
@@ -72,21 +67,12 @@ class EthicalFramework:
             self.logger.info("Ethical Framework is disabled. Action approved without evaluation.")
             return True
 
-        prompt = f"""
-        Action: {action}
-        Parameters: {params}
-
-        Ethical Principles:
-        {', '.join(self.ethical_principles)}
-
-        Evaluate the given action and its parameters against these ethical principles. For each principle, determine if the action violates or aligns with it.
-        Then, provide an overall ethical assessment.
-
-        Respond with a JSON object containing:
-        1. An array of 'principle_evaluations', where each element is an object with 'principle' and 'evaluation' (either 'violates', 'aligns', or 'neutral')
-        2. An 'overall_assessment' which is either 'ethical' or 'unethical'
-        3. A 'reasoning' field explaining the overall assessment
-        """
+        prompt = self.prompt_manager.get_prompt(
+            "ethical.evaluate_action",
+            action=action,
+            params=params,
+            principles=self.ethical_principles
+        )
 
         response = await self.llm_interface.generate(prompt)
         try:
@@ -100,18 +86,12 @@ class EthicalFramework:
         if not self.enabled:
             return "Ethical Framework is disabled. No ethical evaluation performed."
 
-        prompt = f"""
-        {'Task' if is_task else 'Action'}: {task_or_action}
-
-        Ethical Principles:
-        {', '.join(self.ethical_principles)}
-
-        Provide a detailed explanation of the ethical implications of this {'task' if is_task else 'action'}.
-        Consider how it aligns with or potentially violates each of the ethical principles.
-        Conclude with an overall ethical assessment and recommendation.
-
-        Format your response as a well-structured paragraph.
-        """
+        prompt = self.prompt_manager.get_prompt(
+            "ethical.get_explanation",
+            task_or_action_type="Task" if is_task else "Action",
+            description=task_or_action,
+            principles=self.ethical_principles
+        )
 
         return await self.llm_interface.generate(prompt)
 
@@ -125,19 +105,11 @@ class EthicalFramework:
         if not self.enabled:
             return "Ethical Framework is disabled. No ethical dilemma resolution performed."
 
-        prompt = f"""
-        Ethical Dilemma Scenario:
-        {scenario}
-
-        Ethical Principles:
-        {', '.join(self.ethical_principles)}
-
-        Analyze this ethical dilemma in the context of our ethical principles. 
-        Consider multiple perspectives and potential outcomes.
-        Provide a reasoned resolution to the dilemma, explaining how it best aligns with our ethical framework.
-
-        Format your response as a well-structured analysis with clear reasoning and a final recommendation.
-        """
+        prompt = self.prompt_manager.get_prompt(
+            "ethical.resolve_dilemma",
+            scenario=scenario,
+            principles=self.ethical_principles
+        )
 
         return await self.llm_interface.generate(prompt)
 
