@@ -1,5 +1,6 @@
 # task_manager.py
 
+import os
 import re
 from typing import List, Dict, Any, Optional
 from queue import PriorityQueue
@@ -12,6 +13,7 @@ from core.ethical_framework import EthicalFramework
 from core.action_manager import ActionManager
 from core.memory import Memory
 from core.prompt_manager import PromptManager
+from core.task_recovery import TaskAttempt, TaskRecoveryManager
 
 def parse_int_or_default(value, default=1):
     """
@@ -25,7 +27,8 @@ def parse_int_or_default(value, default=1):
 class Task:
     def __init__(self, description: str, action: str, parameters: Dict[str, Any], 
                  priority: int = 1, deadline: Optional[datetime] = None, 
-                 parent_id: Optional[str] = None, required_inputs: Dict[str, Any] = None, goal: str = None):
+                 parent_id: Optional[str] = None, required_inputs: Dict[str, Any] = None, goal: str = None,
+                 max_attempts: int = 3):
         self.id = str(uuid.uuid4())
         self.description = description
         self.action = action
@@ -35,7 +38,7 @@ class Task:
         self.deadline = deadline
         self.created_at = datetime.now()
         self.completed_at = None
-        self.status = "pending"
+        self.status = "pending"  # pending, completed, failed, redirected, decomposed
         self.result = None
         self.parent_id = parent_id
         self.subtasks: List[str] = []
@@ -43,6 +46,12 @@ class Task:
         self.required_inputs = required_inputs or {}
         self.output = None
         self.goal = goal
+        
+        # Recovery-related fields
+        self.max_attempts = max_attempts
+        self.current_attempt = 0
+        self.attempts: List[TaskAttempt] = []
+        self.recovery_attempted = False
 
     def __lt__(self, other):
         if not isinstance(other, Task):
@@ -55,9 +64,50 @@ class Task:
         if not isinstance(other, Task):
             return NotImplemented
         return self.id == other.id
+        
+    def create_attempt(self) -> TaskAttempt:
+        """Create a new attempt for this task."""
+        self.current_attempt += 1
+        attempt = TaskAttempt(self.parameters, self.current_attempt)
+        self.attempts.append(attempt)
+        return attempt
+        
+    def get_latest_attempt(self) -> Optional[TaskAttempt]:
+        """Get the most recent attempt, if any."""
+        if self.attempts:
+            return self.attempts[-1]
+        return None
+        
+    def can_retry(self) -> bool:
+        """Check if the task can be retried."""
+        return self.current_attempt < self.max_attempts
+        
+    def get_attempt_history(self) -> List[Dict[str, Any]]:
+        """Get the history of attempts for this task."""
+        return [attempt.to_dict() for attempt in self.attempts]
+        
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert task to a dictionary representation."""
+        return {
+            "id": self.id,
+            "description": self.description,
+            "action": self.action,
+            "parameters": self.parameters,
+            "priority": self.priority,
+            "status": self.status,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "parent_id": self.parent_id,
+            "subtasks": self.subtasks,
+            "goal": self.goal,
+            "current_attempt": self.current_attempt,
+            "max_attempts": self.max_attempts,
+            "attempts": self.get_attempt_history(),
+            "recovery_attempted": self.recovery_attempted
+        }
 
     def __repr__(self):
-        return f"Task(id={self.id}, description='{self.description}', priority={self.priority}, status='{self.status}')"
+        return f"Task(id={self.id}, description='{self.description}', action='{self.action}', status='{self.status}', attempts={self.current_attempt}/{self.max_attempts})"
 
 class TaskManager:
     def __init__(self, llm_interface: LLMInterface, ethical_framework: EthicalFramework, 
@@ -71,6 +121,9 @@ class TaskManager:
         self.memory = memory
         self.prompt_manager = prompt_manager
         self.logger = logging.getLogger("Jiva.TaskManager")
+
+        # Initialize the recovery manager
+        self.recovery_manager = TaskRecoveryManager(llm_interface, prompt_manager)
 
     async def get_relevant_actions(self, goal: str, context: Dict[str, Any]) -> List[str]:
         # Get available actions with their descriptions and parameters
@@ -192,23 +245,48 @@ class TaskManager:
         self.logger.info(f"Requeued {requeued_count} pending tasks")
         return pending_tasks
 
-    def add_task(self, description: str, action: str, parameters: Dict[str, Any], 
-                 priority: int = 1, deadline: Optional[datetime] = None, 
-                 parent_id: Optional[str] = None, required_inputs: Dict[str, Any] = None) -> Optional[str]:
-        if self.ethical_framework.evaluate_task(description):
-            task = Task(description, action, parameters, priority, deadline, parent_id, required_inputs)
-            self.task_queue.put(task)
-            self.all_tasks[task.id] = task
-            if parent_id and parent_id in self.all_tasks:
-                self.all_tasks[parent_id].subtasks.append(task.id)
+    async def add_task(self, description: str, action: str, parameters: Dict[str, Any], 
+                priority: int = 1, deadline: Optional[datetime] = None, 
+                parent_id: Optional[str] = None, required_inputs: Dict[str, Any] = None) -> Optional[str]:
+        """
+        Add a new task to the task queue.
+        
+        Args:
+            description: Description of the task
+            action: Name of the action to execute
+            parameters: Parameters for the action
+            priority: Task priority (higher number = higher priority)
+            deadline: Optional deadline for task completion
+            parent_id: Optional ID of parent task
+            required_inputs: Dictionary mapping parameter names to task descriptions for inputs
             
-            task.ethical_evaluation = {
-                "explanation": self.ethical_framework.get_ethical_explanation(description),
-                "is_ethical": True
-            }
-            return task.id
-        else:
+        Returns:
+            str: The ID of the created task, or None if creation failed
+        """
+        # Check if the action is ethical
+        is_ethical = await self.ethical_framework.evaluate_task(description)
+        if not is_ethical:
+            self.logger.warning(f"Task rejected as unethical: {description}")
             return None
+            
+        # Create a new task
+        task = Task(description, action, parameters, priority, deadline, parent_id, required_inputs)
+        self.task_queue.put(task)
+        self.all_tasks[task.id] = task
+        
+        # Add as subtask to parent if applicable
+        if parent_id and parent_id in self.all_tasks:
+            self.all_tasks[parent_id].subtasks.append(task.id)
+        
+        # Store ethical evaluation
+        ethical_explanation = await self.ethical_framework.get_ethical_explanation(description)
+        task.ethical_evaluation = {
+            "explanation": ethical_explanation,
+            "is_ethical": True
+        }
+        
+        self.logger.info(f"Added task: {task.id} - {description}")
+        return task.id
 
     def get_next_task(self) -> Optional[Task]:
         if not self.task_queue.empty():
@@ -259,8 +337,12 @@ class TaskManager:
         return None
 
     async def execute_task(self, task: Task) -> Any:
-        self.logger.info(f"Executing task: {task.description}")
+        self.logger.info(f"Executing task: {task.description} (attempt {task.current_attempt + 1}/{task.max_attempts})")
+        
         try:
+            # Create a new attempt
+            attempt = task.create_attempt()
+            
             # Ensure parameters is always a dict
             if isinstance(task.parameters, str):
                 task.parameters = {"prompt": task.parameters}
@@ -271,48 +353,228 @@ class TaskManager:
             for param, required_task_desc in (task.required_inputs or {}).items():
                 input_task_result = self.get_input_task_result(required_task_desc)
                 if input_task_result is not None:
+                    # Handle special cases for different action types
+                    if isinstance(input_task_result, dict):
+                        # For generate_python_code action, extract code
+                        if 'code' in input_task_result:
+                            input_task_result = input_task_result['code']
+                        # For execute_python_code action, extract stdout
+                        elif 'stdout' in input_task_result:
+                            input_task_result = input_task_result.get('stdout', '')
+                    
                     # Replace the placeholder in all parameters
                     for key, value in task.parameters.items():
                         if isinstance(value, str) and f'{{{{{param}}}}}' in str(value):
                             task.parameters[key] = str(value).replace(f'{{{{{param}}}}}', str(input_task_result))
                 else:
                     self.logger.warning(f"Could not find result for required input: {required_task_desc}")
+            
+            # Store the resolved parameters in the attempt
+            attempt.parameters = task.parameters.copy()
 
-            # Check if any parameters still contain unresolved placeholders
-            for key, value in task.parameters.items():
-                if isinstance(value, str) and '{{' in value and '}}' in value:
-                    self.logger.warning(f"Parameter '{key}' contains unresolved placeholder: {value}")
-
+            # Special handling for code execution
+            if task.action == "execute_python_code" and "file_path" in task.parameters:
+                # Check if the file exists and has correct Python code
+                await self._prepare_python_file_for_execution(task.parameters["file_path"])
+            
             # Execute the task
             if task.action == 'replan_tasks':
                 new_tasks = await self.replan_tasks(task)
-                result = str(new_tasks)
+                result = {"success": True, "message": f"Replanned with {len(new_tasks)} new tasks", "new_tasks": [t.id for t in new_tasks]}
             elif task.action == 'rerun_tasks':
                 new_tasks = await self.handle_rerun_tasks(task)
-                result = str(new_tasks)
+                result = {"success": True, "message": f"Rerunning {len(new_tasks)} tasks", "new_tasks": [t.id for t in new_tasks]}
             else:
                 result = await self.action_manager.execute_action(task.action, task.parameters)
             
-            self.logger.info(f"Task executed successfully: {result}")
+            # Record the result in the attempt
+            success = isinstance(result, dict) and result.get('success', False)
+            if not isinstance(result, dict):
+                # Convert string results to a standard format
+                if isinstance(result, str):
+                    if result.startswith("Error"):
+                        success = False
+                        result = {"success": False, "error": result}
+                    else:
+                        success = True
+                        result = {"success": True, "result": result}
+                else:
+                    # For other types, wrap in a standard format
+                    success = True
+                    result = {"success": True, "result": result}
             
-            # Store the result
-            task.result = result
-            task.output = result
-            self.complete_task(task.id, result)
+            attempt.complete(result, success)
+            
+            if success:
+                self.logger.info(f"Task executed successfully: {task.id}")
+                
+                # Store the result
+                task.result = result
+                task.output = result
+                self.complete_task(task.id, result)
 
-            # Store in memory
-            self.memory.add_to_short_term({
-                "task_id": task.id,
-                "description": task.description,
-                "result": result
-            })
+                # Store in memory
+                self.memory.add_to_short_term({
+                    "task_id": task.id,
+                    "description": task.description,
+                    "result": result,
+                    "attempts": task.current_attempt
+                })
 
-            return result
+                return result
+            else:
+                # Task failed - attempt recovery
+                error_message = result.get('error', str(result))
+                self.logger.warning(f"Task execution failed: {error_message}")
+                
+                if task.can_retry():
+                    # Analyze the failure and get a recovery plan
+                    recovery_plan = await self.recovery_manager.analyze_failure(task, error_message)
+                    
+                    # Apply the recovery strategy
+                    recovery_applied, new_tasks = await self.recovery_manager.apply_recovery_strategy(
+                        task, recovery_plan, self
+                    )
+                    
+                    task.recovery_attempted = True
+                    
+                    if recovery_applied:
+                        if recovery_plan.get('strategy') == 'RETRY':
+                            # The task will be retried with updated parameters
+                            self.logger.info(f"Task {task.id} will be retried with updated parameters")
+                            
+                            # Put the task back in the queue for retry
+                            self.task_queue.put(task)
+                            
+                            # Return info about the retry
+                            return {
+                                "success": False, 
+                                "error": error_message,
+                                "recovery": {
+                                    "strategy": "RETRY",
+                                    "attempt": task.current_attempt,
+                                    "max_attempts": task.max_attempts
+                                }
+                            }
+                        else:
+                            # For other strategies, the original task won't be retried
+                            self.logger.info(f"Task {task.id} recovery applied: {recovery_plan.get('strategy')} with {len(new_tasks)} new tasks")
+                            
+                            # Store the result with recovery info
+                            task.result = {
+                                "success": False,
+                                "error": error_message,
+                                "recovery": {
+                                    "strategy": recovery_plan.get('strategy'),
+                                    "reason": recovery_plan.get('reason'),
+                                    "new_tasks": [t.id for t in new_tasks] if new_tasks else []
+                                }
+                            }
+                            
+                            return task.result
+                    else:
+                        # Recovery couldn't be applied, mark as failed
+                        self.logger.warning(f"Recovery could not be applied for task {task.id}")
+                        
+                        task.status = "failed"
+                        task.result = {
+                            "success": False,
+                            "error": error_message,
+                            "recovery_failed": True
+                        }
+                        
+                        return task.result
+                else:
+                    # No more retry attempts, mark as failed
+                    self.logger.warning(f"Task {task.id} failed after {task.current_attempt} attempts")
+                    
+                    task.status = "failed"
+                    task.result = {
+                        "success": False,
+                        "error": error_message,
+                        "max_attempts_reached": True
+                    }
+                    
+                    return task.result
+                
         except Exception as e:
             self.logger.error(f"Error executing task: {str(e)}", exc_info=True)
-            await self.handle_task_error(task, str(e))
-            return f"Error executing task: {str(e)}"
-
+            
+            # If an attempt was created, record the failure
+            if task.attempts and task.attempts[-1].end_time is None:
+                task.attempts[-1].complete(
+                    {"success": False, "error": f"Exception: {str(e)}"}, 
+                    False
+                )
+            
+            # Always return a structured error result
+            return {
+                "success": False,
+                "error": f"Exception executing task: {str(e)}"
+            }
+            
+    async def _prepare_python_file_for_execution(self, file_path: str) -> bool:
+        """
+        Prepare a Python file for execution by checking its format and fixing if necessary.
+        
+        Args:
+            file_path: Path to the Python file
+            
+        Returns:
+            bool: True if file is ready for execution, False otherwise
+        """
+        if not os.path.exists(file_path):
+            self.logger.warning(f"Python file does not exist: {file_path}")
+            return False
+        
+        try:
+            # Read the file content
+            with open(file_path, 'r') as f:
+                content = f.read()
+            
+            # Check if the content is a serialized dictionary (which would indicate an error)
+            if content.strip().startswith('{') and ('code' in content or 'success' in content):
+                # Try to extract the actual Python code
+                code = None
+                
+                # If it looks like a JSON object with a 'code' field
+                import re
+                import json
+                
+                # First try direct JSON parsing
+                try:
+                    data = json.loads(content)
+                    if isinstance(data, dict) and 'code' in data:
+                        code = data['code']
+                except json.JSONDecodeError:
+                    # If that fails, try regex
+                    code_match = re.search(r"'code':\s*'([^']+)'", content)
+                    if code_match:
+                        code = code_match.group(1).replace('\\n', '\n').replace('\\t', '\t')
+                
+                if code:
+                    # Write the extracted code back to the file
+                    with open(file_path, 'w') as f:
+                        f.write(code)
+                    self.logger.info(f"Fixed malformed Python file: {file_path}")
+                    return True
+                else:
+                    self.logger.error(f"Could not extract Python code from: {file_path}")
+                    return False
+            
+            # Check if it's valid Python syntax
+            try:
+                import ast
+                ast.parse(content)
+                return True
+            except SyntaxError:
+                self.logger.warning(f"Python file contains syntax errors: {file_path}")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"Error preparing Python file: {str(e)}")
+            return False
+    
     async def handle_task_error(self, task: Task, error_message: str) -> None:
         """Handle task execution errors by generating new tasks or providing solutions."""
         self.logger.info(f"Handling error for task: {task.id}")
@@ -450,16 +712,59 @@ class TaskManager:
     def get_input_task_result(self, task_description: str) -> Any:
         """
         Find the result of a task based on its exact description.
+        
+        Args:
+            task_description (str): The description of the task to find
+            
+        Returns:
+            Any: The result of the task, or None if not found
         """
-        for task in reversed(self.all_tasks.values()):  # Start from the most recent task
+        # First, try to find an exact match
+        for task in reversed(list(self.all_tasks.values())):  # Start from the most recent task
             if task.description.strip() == task_description.strip():
-                return task.result
+                return self._extract_useful_result(task.result)
         
-        for task in reversed(self.all_tasks.values()):  # Start from the most recent task
+        # If no exact match, try to find a partial match
+        for task in reversed(list(self.all_tasks.values())):
             if task_description.strip() in task.description.strip():
-                return task.result
+                return self._extract_useful_result(task.result)
         
+        self.logger.warning(f"Could not find task result for: {task_description}")
         return None
+
+    def _extract_useful_result(self, result: Any) -> Any:
+        """
+        Extract the most useful part of a task result.
+        
+        Args:
+            result: The raw task result
+            
+        Returns:
+            Any: The extracted useful part of the result
+        """
+        if result is None:
+            return None
+            
+        # If the result is a dictionary, try to extract useful parts
+        if isinstance(result, dict):
+            # For code generation
+            if 'code' in result:
+                return result['code']
+            
+            # For successful execution
+            if result.get('success', False) and 'stdout' in result:
+                return result['stdout']
+                
+            # For result value
+            if 'result' in result:
+                return result['result']
+                
+            # For error messages
+            if 'error' in result:
+                return f"Error: {result['error']}"
+        
+        # Return the raw result if no special handling needed
+        return result
 
     def has_pending_tasks(self) -> bool:
         """Check for any pending tasks and ensure they're in the queue."""

@@ -11,8 +11,8 @@ from actions.file_operations import (
     read_json, write_json,
     read_csv, write_csv
 )
+import actions.python_coder as py
 import actions.memory_retrieval as mem
-# from actions.think import think, replan_tasks
 import actions.think as think
 
 import actions.web_interface as wi
@@ -30,6 +30,7 @@ def get_action_registry(llm_interface: LLMInterface, memory: Memory) -> Dict[str
     """
     wi.set_llm_interface(llm=llm_interface)
     think.set_llm_interface(llm=llm_interface)
+    py.set_llm_interface(llm=llm_interface)
     mem.set_memory(memory_instance=memory)
 
     actions = {
@@ -44,6 +45,13 @@ def get_action_registry(llm_interface: LLMInterface, memory: Memory) -> Dict[str
         "write_json": write_json,
         "read_csv": read_csv,
         "write_csv": write_csv,
+        
+        # Python coding actions
+        "generate_python_code": py.generate_python_code,
+        "write_python_code": py.write_python_code,
+        "execute_python_code": py.execute_python_code,
+        "analyze_python_code": py.analyze_python_code,
+        "test_python_function": py.test_python_function,
         
         # Memory operations
         # "retrieve_recent_memory": lambda n: retrieve_recent_memory(memory, n),

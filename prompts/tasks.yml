@@ -89,4 +89,39 @@ replan_tasks: |
   
   You have partially executed some tasks to achieve this task and then requested replanning. The previous tasks and their results are available in context.
 
-  
+recovery_analysis: |
+  # Task Recovery Analysis
+
+  ## Original Task
+  Action: {{ task.action }}
+  Description: {{ task.description }}
+  Parameters: {{ task.parameters | tojson(indent=2) }}
+
+  ## Error Information
+  Error: {{ error }}
+
+  ## Previous Attempts
+  {{ attempts_context }}
+
+  ## Your Task
+  1. Analyze why this task failed
+  2. Recommend ONE of these recovery strategies:
+     a) RETRY - Use same approach with modified parameters
+     b) ALTERNATIVE - Use a different action to achieve the same goal
+     c) DECOMPOSE - Break this into multiple smaller tasks
+     d) ABANDON - Task cannot be completed, explain why
+
+  3. Based on your recommended strategy, provide:
+     - For RETRY: Updated parameters (full parameter object, not just changes)
+     - For ALTERNATIVE: New action and parameters
+     - For DECOMPOSE: List of subtasks with actions and parameters
+     - For ABANDON: Clear explanation why task is impossible
+
+  Format your response as a JSON object with the following structure:
+  {
+      "strategy": "RETRY|ALTERNATIVE|DECOMPOSE|ABANDON",
+      "reason": "Explanation of your analysis and recommendation",
+      "parameters": {}, // For RETRY: Updated parameters
+      "action": "", // For ALTERNATIVE: New action
+      "subtasks": [] // For DECOMPOSE: Array of subtask objects
+  }
