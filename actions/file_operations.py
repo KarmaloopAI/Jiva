@@ -55,28 +55,63 @@ async def read_file(file_path: str) -> str:
         logger.error(f"Error reading file {full_path}: {str(e)}")
         return f"Error reading file: {str(e)}"
 
-async def write_file(file_path: str, content: str) -> str:
+async def write_file(file_path: str, content: Any) -> Dict[str, Any]:
     """
-    Write the given content to a file. Creates the file if it does not exist. Does not need an append operation if the content is provided
-    in the parameters.
-
+    Write content to a file. Handles structured data appropriately.
+    
     Args:
         file_path (str): The path to the file where the content will be written.
-        content (str): The content to write to the file.
-
+        content (Any): The content to write to the file.
+        
     Returns:
-        str: A success message or an error message if the file could not be written.
+        Dict[str, Any]: A result indicating success or failure with details
     """
     try:
+        # Process the content based on its type
+        processed_content = ""
+        
+        if isinstance(content, dict):
+            # Handle dictionary result from other actions
+            if 'code' in content:
+                # For code generation results
+                processed_content = content['code']
+            elif 'stdout' in content:
+                # For execution results
+                processed_content = content['stdout']
+            elif 'result' in content:
+                # For general results
+                processed_content = str(content['result'])
+            elif 'error' in content:
+                # For error results
+                processed_content = f"Error: {content['error']}"
+            else:
+                # For other dictionaries, use JSON
+                processed_content = json.dumps(content, indent=2)
+        else:
+            # For non-dictionary content
+            processed_content = str(content)
+        
+        # Create the full path and ensure directory exists
         full_path = os.path.abspath(expand_user_path(file_path))
         ensure_directory_exists(full_path)
+        
+        # Write the content
         with open(full_path, 'w') as file:
-            file.write(content)
+            file.write(processed_content)
+        
         logger.info(f"File written successfully: {full_path}")
-        return f"File written successfully: {full_path}"
-    except IOError as e:
-        logger.error(f"Error writing to file {full_path}: {str(e)}")
-        return f"Error writing to file: {str(e)}"
+        return {
+            "success": True,
+            "message": f"File written successfully: {full_path}",
+            "file_path": full_path,
+            "content_length": len(processed_content)
+        }
+    except Exception as e:
+        logger.error(f"Error writing to file {file_path}: {str(e)}")
+        return {
+            "success": False,
+            "error": f"Error writing to file: {str(e)}"
+        }
 
 async def append_file(file_path: str, content: str) -> str:
     """

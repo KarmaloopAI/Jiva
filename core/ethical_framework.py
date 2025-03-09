@@ -24,7 +24,16 @@ class EthicalFramework:
         self.enabled = enabled
         self.logger.info(f"Ethical Framework {'enabled' if enabled else 'disabled'}")
 
-    def evaluate_task(self, task: Union[str, Dict[str, Any]]) -> bool:
+    async def evaluate_task(self, task: Union[str, Dict[str, Any]]) -> bool:
+        """
+        Evaluate whether a task complies with the ethical framework.
+        
+        Args:
+            task: The task description or task object to evaluate
+            
+        Returns:
+            bool: True if the task is considered ethical, False otherwise
+        """
         if not self.enabled:
             self.logger.info("Ethical Framework is disabled. Task approved without evaluation.")
             return True
@@ -49,13 +58,17 @@ class EthicalFramework:
             principles=self.ethical_principles
         )
 
-        response = self.llm_interface.generate(prompt)
+        if not prompt:
+            self.logger.warning(f"Could not find ethical.evaluate_task prompt template. Approving task by default.")
+            return True
+
+        response = await self.llm_interface.generate(prompt)
         self.logger.debug(f"LLM response: {response}")
 
         try:
             evaluation = self.llm_interface.parse_json(response)
             self.logger.debug(f"Parsed evaluation: {evaluation}")
-            is_ethical = evaluation['overall_assessment'] == 'ethical'
+            is_ethical = evaluation.get('overall_assessment', '').lower() == 'ethical'
             self.logger.info(f"Task ethical assessment: {'Ethical' if is_ethical else 'Unethical'}")
             return is_ethical
         except Exception as e:
@@ -83,6 +96,16 @@ class EthicalFramework:
             return False
 
     async def get_ethical_explanation(self, task_or_action: str, is_task: bool = True) -> str:
+        """
+        Get an ethical explanation for a task or action.
+        
+        Args:
+            task_or_action (str): The task or action description
+            is_task (bool): Whether this is a task (True) or action (False)
+            
+        Returns:
+            str: An explanation of the ethical assessment
+        """
         if not self.enabled:
             return "Ethical Framework is disabled. No ethical evaluation performed."
 
@@ -92,8 +115,15 @@ class EthicalFramework:
             description=task_or_action,
             principles=self.ethical_principles
         )
+        
+        if not prompt:
+            return "Ethical explanation not available (prompt template not found)."
 
-        return await self.llm_interface.generate(prompt)
+        try:
+            return await self.llm_interface.generate(prompt)
+        except Exception as e:
+            self.logger.error(f"Error generating ethical explanation: {e}")
+            return f"Could not generate ethical explanation due to an error: {str(e)}"
 
     def update_ethical_principles(self, new_principles: List[str]):
         """
