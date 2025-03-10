@@ -52,6 +52,7 @@ def get_action_registry(llm_interface: LLMInterface, memory: Memory) -> Dict[str
         "execute_python_code": py.execute_python_code,
         "analyze_python_code": py.analyze_python_code,
         "test_python_function": py.test_python_function,
+        "execute_inline_python_code": py.execute_inline_python_code,
         
         # Memory operations
         # "retrieve_recent_memory": lambda n: retrieve_recent_memory(memory, n),

@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jiva Agent Interface</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <div class="app-container">
+        <header>
+            <div class="logo">
+                <h1>Jiva</h1>
+                <span class="subtitle">AI Agent</span>
+            </div>
+            <div class="status-indicator">
+                <span id="status-dot"></span>
+                <span id="status-text">Checking status...</span>
+            </div>
+        </header>
+
+        <nav>
+            <ul>
+                <li><a href="#" class="nav-link active" data-view="agent">Agent</a></li>
+                <li><a href="#" class="nav-link" data-view="tasks">Tasks</a></li>
+                <li><a href="#" class="nav-link" data-view="logs">Logs</a></li>
+            </ul>
+        </nav>
+
+        <main>
+            <!-- Agent View -->
+            <section id="agent-view" class="view active">
+                <div class="stats-container">
+                    <div class="stat-card">
+                        <h3>Total Tasks</h3>
+                        <p id="total-tasks">-</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Completed Tasks</h3>
+                        <p id="completed-tasks">-</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Pending Tasks</h3>
+                        <p id="pending-tasks">-</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Memory Size</h3>
+                        <p id="memory-size">-</p>
+                    </div>
+                </div>
+
+                <div class="goal-container">
+                    <h2>Current Goal</h2>
+                    <p id="current-goal">No active goal</p>
+                    
+                    <div class="new-goal-form">
+                        <h3>Set New Goal</h3>
+                        <textarea id="goal-input" placeholder="Enter a new goal for Jiva..."></textarea>
+                        <button id="submit-goal" class="primary-button">Submit Goal</button>
+                    </div>
+                </div>
+
+                <div class="last-result-container">
+                    <h2>Last Task Result</h2>
+                    <div id="last-result" class="result-box">No results yet</div>
+                </div>
+            </section>
+
+            <!-- Tasks View -->
+            <section id="tasks-view" class="view">
+                <div class="tasks-header">
+                    <h2>Tasks</h2>
+                    <div class="tasks-filter">
+                        <label for="goal-filter">Filter by Goal:</label>
+                        <select id="goal-filter">
+                            <option value="all">All Goals</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="tasks-list-container">
+                    <div id="tasks-list" class="tasks-list">
+                        <!-- Tasks will be populated here -->
+                        <p class="empty-state">No tasks available</p>
+                    </div>
+                    
+                    <div id="task-details" class="task-details">
+                        <h3>Task Details</h3>
+                        <p class="empty-state">Select a task to view details</p>
+                        <!-- Task details will be populated here -->
+                    </div>
+                </div>
+            </section>
+
+            <!-- Logs View -->
+            <section id="logs-view" class="view">
+                <div class="logs-header">
+                    <h2>Logs</h2>
+                    <div class="logs-controls">
+                        <div class="logs-filter">
+                            <label for="log-category">Category:</label>
+                            <select id="log-category">
+                                <option value="all">All</option>
+                                <option value="llm">LLM Ops</option>
+                                <option value="memory">Memory Ops</option>
+                                <option value="task">Task Ops</option>
+                                <option value="action">Action Ops</option>
+                                <option value="ethical">Ethical Framework</option>
+                                <option value="api">API</option>
+                                <option value="sensor">Sensors</option>
+                            </select>
+                        </div>
+                        <button id="refresh-logs" class="secondary-button">Refresh</button>
+                    </div>
+                </div>
+                
+                <div class="logs-container">
+                    <div id="logs-list" class="logs-list">
+                        <!-- Logs will be populated here -->
+                        <p class="empty-state">No logs available</p>
+                    </div>
+                </div>
+                
+                <div class="pagination">
+                    <button id="prev-page" class="pagination-button" disabled>Previous</button>
+                    <span id="page-info">Page 1</span>
+                    <button id="next-page" class="pagination-button" disabled>Next</button>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <p>Jiva Agent Interface | <span id="current-time"></span></p>
+        </footer>
+    </div>
+
+    <script src="js/main.js"></script>
+</body>
+</html>

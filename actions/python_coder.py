@@ -468,3 +468,50 @@ except Exception as e:
             
     except Exception as e:
         return {"error": f"Error testing Python function: {str(e)}"}
+    
+
+async def execute_inline_python_code(code: str, timeout: int = 10) -> Dict[str, Any]:
+    """
+    Execute Python code provided as a string and return the results.
+    
+    Args:
+        code (str): Python code to execute
+        timeout (int): Maximum execution time in seconds
+        
+    Returns:
+        Dict[str, Any]: The execution results including stdout, stderr, and return code
+    """
+    if not code or not isinstance(code, str):
+        return {
+            "success": False,
+            "error": "No code provided or invalid code type"
+        }
+    
+    # Extract code if it's a dictionary result from generate_python_code
+    if isinstance(code, dict) and 'code' in code:
+        code = code['code']
+    
+    # Create a temporary file to hold the code
+    import tempfile
+    import os
+    
+    try:
+        with tempfile.NamedTemporaryFile(suffix='.py', mode='w', delete=False) as temp_file:
+            temp_file_path = temp_file.name
+            temp_file.write(code)
+        
+        # Execute the temporary file
+        result = await execute_python_code(temp_file_path, [], timeout)
+        
+        # Clean up the temporary file
+        try:
+            os.unlink(temp_file_path)
+        except Exception as e:
+            logger.warning(f"Error cleaning up temporary file: {str(e)}")
+        
+        return result
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Error executing inline Python code: {str(e)}"
+        }
