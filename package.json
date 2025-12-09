@@ -22,7 +22,7 @@
     "gpt-oss",
     "cli"
   ],
-  "author": "",
+  "author": "Abi Chatterjee <abi@karmaloop.ai>",
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4",
