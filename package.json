@@ -1,5 +1,5 @@
 {
-  "name": "jiva",
+  "name": "jiva-core",
   "version": "0.1.0",
   "description": "Versatile autonomous agent powered by gpt-oss-120b with MCP support",
   "main": "dist/index.js",
