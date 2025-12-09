@@ -1,0 +1,46 @@
+{
+  "name": "jiva",
+  "version": "0.1.0",
+  "description": "Versatile autonomous agent powered by gpt-oss-120b with MCP support",
+  "main": "dist/index.js",
+  "bin": {
+    "jiva": "dist/interfaces/cli/index.js"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/interfaces/cli/index.ts",
+    "start": "node dist/interfaces/cli/index.js",
+    "type-check": "tsc --noEmit",
+    "fix-filesystem": "node fix-filesystem-config.js"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "autonomous",
+    "mcp",
+    "gpt-oss",
+    "cli"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "@modelcontextprotocol/server-filesystem": "^2025.11.25",
+    "chalk": "^5.3.0",
+    "commander": "^12.1.0",
+    "conf": "^13.0.1",
+    "inquirer": "^12.0.1",
+    "ora": "^8.1.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/inquirer": "^9.0.7",
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

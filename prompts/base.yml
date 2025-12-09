@@ -1,7 +1,0 @@
-# Base prompt templates that can be extended
-base_task: |
-    # Goal
-    {{ goal }}
-
-    # Context
-    {{ context }}
