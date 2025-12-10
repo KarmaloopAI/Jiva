@@ -4,64 +4,138 @@ Jiva is a powerful autonomous AI agent powered by gpt-oss-120b with full MCP (Mo
 
 ## 🚀 Quick Links
 
-- **[Quick Start Guide](QUICKSTART.md)** - Get up and running in 30 seconds
-- **[Build Instructions](BUILD.md)** - Detailed setup and development workflow
-- **[Implementation Summary](IMPLEMENTATION_SUMMARY.md)** - Architecture and technical details
+- **[Quick Start Guide](docs/QUICKSTART.md)** - Get up and running in 30 seconds
+- **[New Features Guide](docs/NEW_FEATURES.md)** - Latest improvements and features
+- **[Build Instructions](docs/BUILD.md)** - Detailed setup and development workflow
+- **[Troubleshooting](docs/TROUBLESHOOTING.md)** - Common issues and solutions
 
-## Features
+## ✨ Features
 
-- **Powered by gpt-oss-120b**: Leverages OpenAI's powerful open-weight reasoning model
-- **Harmony Format Support**: Full implementation of the Harmony response format required by gpt-oss models
-- **MCP Integration**: Seamless integration with Model Context Protocol servers for extensible tooling
-- **Multi-Modal Support**: Optional integration with Llama-4-Maverick-17B for image understanding
-- **Directive-Based**: Supports `jiva-directive.md` files to orient the agent for specific tasks
-- **Extensible Architecture**: Designed to expand from CLI to Electron desktop app or web application
-- **Robust Tool Calling**: Advanced parsing and error handling for reliable tool execution
+### Core Capabilities
+- 🤖 **Powered by gpt-oss-120b**: Leverages OpenAI's powerful open-weight reasoning model
+- 🎯 **Mission-Driven Execution**: Completes tasks thoroughly with ~95% success rate
+- 🔧 **MCP Integration**: Seamless integration with Model Context Protocol servers for extensible tooling
+- 💬 **Smart Conversations**: Auto-save, restore, and AI-generated titles for all conversations
+- 📝 **Pretty Markdown**: Beautiful terminal output with syntax highlighting
+- 🎨 **Directive-Based**: Orient agent behavior with custom `jiva-directive.md` files
+- 🌐 **Multi-Modal Support**: Optional image understanding via Llama-4-Maverick-17B
+- 🔄 **Auto-Condensing**: Intelligent conversation history management to prevent token overload
 
-## Installation
+### Advanced Features
+- **Slash Commands**: Use `/help`, `/load`, `/save`, `/list` for easy conversation management
+- **Robust Tool Calling**: Advanced parsing supporting hyphens in tool names (e.g., `desktop-commander`)
+- **Extensible Architecture**: Designed to expand from CLI to desktop or web applications
+- **Smart Title Generation**: LLM-powered conversation titles based on first user message
+
+See [NEW_FEATURES.md](docs/NEW_FEATURES.md) for detailed information.
+
+## 📦 Installation
+
+### Global Install (Recommended)
 
 ```bash
+npm install -g jiva-core
+```
+
+After installation, run the setup wizard:
+
+```bash
+jiva setup
+```
+
+### Development Install
+
+```bash
+git clone https://github.com/yourusername/jiva.git
+cd jiva
 npm install
 npm run build
 npm link  # For global CLI access
 ```
 
-## Quick Start
+## 🚀 Quick Start
 
-### 1. First-Time Setup
+### 1. Install Jiva
 
-Run the setup wizard to configure Jiva:
+```bash
+npm install -g jiva-core
+```
+
+### 2. First-Time Setup
+
+Run the interactive setup wizard:
 
 ```bash
 jiva setup
 ```
 
 You'll be prompted for:
-- Krutrim API endpoint (default: `https://cloud.olakrutrim.com/v1/chat/completions`)
-- API key for reasoning model (gpt-oss-120b)
-- Optional multimodal model configuration (Llama-4-Maverick-17B)
-- MCP server configuration
+- ☁️ Krutrim API endpoint (default: `https://cloud.olakrutrim.com/v1/chat/completions`)
+- 🔑 API key for gpt-oss-120b ([Get your API key](https://cloud.olakrutrim.com))
+- 🎨 Optional multimodal model (Llama-4-Maverick-17B)
+- 🔌 MCP server configuration
 
-### 2. Interactive Chat
+### 3. Start Chatting
 
-Start an interactive session:
+Launch interactive mode:
 
 ```bash
 jiva chat
 ```
 
-Or with custom workspace:
-
+**Try these commands:**
 ```bash
-jiva chat --workspace /path/to/workspace --directive ./my-directive.md
+You: /help                    # Show all available commands
+You: /servers                 # Check MCP server status
+You: /tools                   # List all available tools
+You: List files in this directory
+You: /save                    # Save this conversation
+You: /list                    # View all saved conversations
 ```
 
-### 3. Single Prompt Execution
+### 4. Advanced Usage
 
-Execute a single prompt:
+**Custom workspace and directive:**
+```bash
+jiva chat --workspace /path/to/project --directive ./project-directive.md
+```
 
+**Single command execution:**
 ```bash
 jiva run "Analyze the code in this directory and suggest improvements"
+```
+
+**Enable debug mode:**
+```bash
+jiva chat --debug
+```
+
+### 5. Example Workflows
+
+**Code Review:**
+```bash
+You: Review all TypeScript files and identify potential bugs
+Jiva: *Uses filesystem to read files, analyzes code, provides detailed review*
+```
+
+**Web Research:**
+```bash
+You: Open Hacker News and summarize the top 5 articles
+Jiva: *Uses playwright to navigate, scrape content, and summarize*
+```
+
+**System Administration:**
+```bash
+You: Check disk usage and list the 10 largest directories
+Jiva: *Uses desktop-commander to run du commands and analyze output*
+```
+
+**Conversation Management:**
+```bash
+You: /list                    # Browse previous conversations
+You: /load                    # Resume a conversation
+# Select from interactive menu with arrow keys
+You: Continue where we left off
 ```
 
 ## Configuration
@@ -119,56 +193,163 @@ Jiva will automatically look for this file in:
 2. `jiva-directive.md` in workspace root
 3. `.jiva/directive.md` in workspace root
 
-## MCP Servers
+## 🔌 MCP Servers
 
-Jiva comes pre-configured with two MCP servers:
+Jiva leverages the Model Context Protocol (MCP) to provide extensible tooling. It comes pre-configured with the Filesystem server and makes it easy to add more.
 
-### 1. Filesystem Server
-Provides tools for file operations across your entire filesystem (subject to OS permissions).
-- **Status:** Enabled by default
+### Default Server: Filesystem
+
+Provides comprehensive file operations across user directories (subject to OS permissions).
+
+- **Status:** ✅ Enabled by default
 - **Package:** `@modelcontextprotocol/server-filesystem`
-- **Access:** Full filesystem access - workspace is the default working area, not a restriction
-- **Details:** See [FILESYSTEM_ACCESS.md](FILESYSTEM_ACCESS.md)
+- **Access:** `/Users` (macOS/Linux) or `C:\Users` (Windows)
+- **Tools:** read_file, write_file, list_directory, create_directory, and more
+- **Details:** See [FILESYSTEM_ACCESS.md](docs/FILESYSTEM_ACCESS.md)
 
-### 2. Commands Server
-Allows execution of shell commands.
-- **Status:** Disabled by default (known stability issues)
-- **Package:** `@modelcontextprotocol/server-commands`
-- **Note:** You can enable this manually via `npx jiva config` if needed
+### Recommended Additional Servers
 
-**Troubleshooting MCP Issues:** See [TROUBLESHOOTING.md](TROUBLESHOOTING.md#mcp-server-issues)
+#### 1. Playwright MCP - Browser Automation
 
-### Adding Custom MCP Servers
+Control real browsers, take screenshots, scrape web content, and automate web interactions.
+
+```bash
+# Add Playwright MCP server
+jiva config
+# Select "MCP Servers" > "Add Server"
+# Name: playwright
+# Command: npx
+# Args: @playwright/mcp@latest
+# Enabled: true
+```
+
+**Capabilities:**
+- 🌐 Navigate to URLs and interact with web pages
+- 📸 Take screenshots and extract page content
+- 🤖 Automate web forms and workflows
+- 🔍 Scrape data from websites
+- 📝 Fill forms and click buttons
+
+**Example usage:**
+```
+You: Open LinkedIn and take a screenshot
+Jiva: *Uses playwright to open LinkedIn, waits for load, captures screenshot*
+```
+
+#### 2. Desktop Commander - Shell Command Execution
+
+Execute shell commands, manage processes, and interact with the terminal.
+
+```bash
+# Add Desktop Commander MCP server
+jiva config
+# Select "MCP Servers" > "Add Server"
+# Name: desktop-commander
+# Command: npx
+# Args: -y desktop-commander
+# Enabled: true
+```
+
+**Capabilities:**
+- 💻 Execute shell commands (ls, grep, git, etc.)
+- 🔄 Start and manage background processes
+- 📊 Read process output with timeout control
+- 🎯 Session management for long-running commands
+
+**Example usage:**
+```
+You: Run npm test and show me the results
+Jiva: *Uses desktop-commander to execute tests and parse output*
+```
+
+**⚠️ Security Note:** Desktop Commander can execute any shell command. Only enable if you understand the security implications and trust the agent.
+
+### Other Available MCP Servers
+
+The MCP ecosystem offers many more servers:
+
+- **GitHub** (`@modelcontextprotocol/server-github`) - Repository management, issues, PRs
+- **Google Maps** (`@modelcontextprotocol/server-google-maps`) - Location data and mapping
+- **Slack** (`@modelcontextprotocol/server-slack`) - Team communication
+- **Postgres** (`@modelcontextprotocol/server-postgres`) - Database operations
+- **Git** (`@modelcontextprotocol/server-git`) - Version control operations
+- And more at [MCP Servers Repository](https://github.com/modelcontextprotocol/servers)
+
+### Adding MCP Servers
+
+#### Via Interactive Config
 
 ```bash
 jiva config
-# Select "MCP Servers" > "Add Server"
+# Navigate: MCP Servers > Add Server
+# Fill in: name, command, args, enabled
 ```
 
-Or programmatically:
+#### Via Manual Config Edit
+
+Edit your config file at `~/.config/jiva-nodejs/config.json` (Linux) or `~/Library/Preferences/jiva-nodejs/config.json` (macOS):
+
+```json
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": ["@playwright/mcp@latest"],
+      "enabled": true
+    },
+    "desktop-commander": {
+      "command": "npx",
+      "args": ["-y", "desktop-commander"],
+      "enabled": true
+    }
+  }
+}
+```
+
+#### Programmatically
 
 ```typescript
-import { configManager } from 'jiva';
+import { configManager } from 'jiva-core';
 
-configManager.addMCPServer('my-server', {
+configManager.addMCPServer('playwright', {
   command: 'npx',
-  args: ['-y', '@my-org/mcp-server'],
+  args: ['@playwright/mcp@latest'],
   enabled: true,
 });
 ```
+
+### Checking MCP Server Status
+
+```bash
+jiva chat
+# Type: /servers
+```
+
+You'll see:
+```
+MCP Servers:
+  ✓ filesystem: 12 tools
+  ✓ playwright: 8 tools
+  ✓ desktop-commander: 6 tools
+```
+
+**Troubleshooting MCP Issues:** See [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md#mcp-server-issues)
 
 ## CLI Commands
 
 ### Interactive Mode Commands
 
-While in chat mode, you can use these commands:
+While in chat mode, you can use these commands (prefix with `/`):
 
-- `help` - Show available commands
-- `exit` / `quit` - Exit the session
-- `reset` - Reset conversation history
-- `history` - Show conversation history
-- `tools` - List available MCP tools
-- `servers` - Show MCP server status
+- `/help` - Show available commands
+- `/exit` / `/quit` - Exit the session
+- `/reset` - Reset conversation history
+- `/history` - Show conversation history
+- `/tools` - List available MCP tools
+- `/servers` - Show MCP server status
+- `/save` - Save current conversation ✨ NEW
+- `/load` - Load a saved conversation ✨ NEW
+- `/list` - List all saved conversations ✨ NEW
 
 ## Architecture
 

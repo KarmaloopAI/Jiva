@@ -50,12 +50,9 @@ async function main() {
         args: ['-y', '@modelcontextprotocol/server-filesystem', process.cwd()],
         enabled: true,
       },
-      // Commands server for shell commands
-      commands: {
-        command: 'npx',
-        args: ['-y', '@modelcontextprotocol/server-commands'],
-        enabled: true,
-      },
+      // You can add more MCP servers here
+      // For example: @playwright/mcp for browser automation
+      // See: https://github.com/modelcontextprotocol/servers
     });
 
     // 5. Initialize workspace

@@ -179,7 +179,8 @@ export function parseHarmonyResponse(response: string): ParsedHarmonyResponse {
 
     try {
       // Parse function call: function_name({"param": "value"})
-      const functionMatch = /^(\w+)\(([\s\S]*)\)$/.exec(toolCallContent);
+      // Support hyphens in tool names (e.g., desktop-commander__start_process)
+      const functionMatch = /^([\w-]+)\(([\s\S]*)\)$/.exec(toolCallContent);
 
       if (functionMatch) {
         const functionName = functionMatch[1];

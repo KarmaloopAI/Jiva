@@ -4,7 +4,7 @@
 
 set -e
 
-echo "🤖 Setting up Jiva..."
+echo "∞ Setting up Jiva..."
 echo ""
 
 # 1. Install dependencies

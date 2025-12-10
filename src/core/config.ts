@@ -137,14 +137,9 @@ export class ConfigManager {
       });
     }
 
-    // Add commands server if not exists (disabled by default - often causes issues)
-    if (!servers['commands']) {
-      this.addMCPServer('commands', {
-        command: 'npx',
-        args: ['-y', '@modelcontextprotocol/server-commands'],
-        enabled: false, // Disabled by default
-      });
-    }
+    // Note: @modelcontextprotocol/server-commands does not exist in npm registry
+    // The official MCP servers are: filesystem, github, google-maps, slack, etc.
+    // Users can add custom MCP servers via `jiva config`
   }
 
   /**

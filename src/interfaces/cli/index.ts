@@ -11,6 +11,7 @@ import { createKrutrimModel } from '../../models/krutrim.js';
 import { ModelOrchestrator } from '../../models/orchestrator.js';
 import { MCPServerManager } from '../../mcp/server-manager.js';
 import { WorkspaceManager } from '../../core/workspace.js';
+import { ConversationManager } from '../../core/conversation-manager.js';
 import { JivaAgent } from '../../core/agent.js';
 import { runSetupWizard, updateConfiguration } from './setup-wizard.js';
 import { startREPL } from './repl.js';
@@ -147,11 +148,16 @@ program
       });
       await workspace.initialize();
 
+      // Initialize conversation manager
+      const conversationManager = new ConversationManager();
+      await conversationManager.initialize();
+
       // Create agent
       const agent = new JivaAgent({
         orchestrator,
         mcpManager,
         workspace,
+        conversationManager,
         maxIterations: options.maxIterations || 10,
         temperature: options.temperature || 0.7,
       });
@@ -252,11 +258,16 @@ program
       });
       await workspace.initialize();
 
+      // Initialize conversation manager
+      const conversationManager = new ConversationManager();
+      await conversationManager.initialize();
+
       // Create agent
       const agent = new JivaAgent({
         orchestrator,
         mcpManager,
         workspace,
+        conversationManager,
         maxIterations: options.maxIterations || 10,
         temperature: options.temperature || 0.7,
       });
@@ -265,7 +276,11 @@ program
       logger.info('Executing prompt...');
       const response = await agent.chat(prompt);
 
-      console.log('\n' + response.content + '\n');
+      // Import and use markdown formatter
+      const { formatForCLI } = await import('../../utils/markdown.js');
+      const formattedContent = formatForCLI(response.content);
+
+      console.log('\n' + formattedContent + '\n');
 
       if (response.toolsUsed.length > 0) {
         logger.info(`Tools used: ${response.toolsUsed.join(', ')}`);

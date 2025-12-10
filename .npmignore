@@ -1,0 +1,55 @@
+# Source files (only ship dist/)
+src/
+*.ts
+!*.d.ts
+
+# Development files
+.vscode/
+.idea/
+*.log
+*.swp
+*.swo
+*~
+
+# Test files
+test/
+tests/
+*.test.js
+*.spec.js
+
+# Documentation (keep README.md)
+docs/
+examples/
+
+# Config files
+.eslintrc*
+.prettierrc*
+tsconfig.json
+.editorconfig
+.gitignore
+
+# Development dependencies
+node_modules/
+.npm/
+.cache/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.tsbuildinfo
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Local config examples
+.env
+.env.*
+config.json
+
+# Scripts
+fix-filesystem-config.js
+setup.sh

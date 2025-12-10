@@ -7,6 +7,7 @@ import chalk from 'chalk';
 import ora from 'ora';
 import { JivaAgent } from '../../core/agent.js';
 import { logger } from '../../utils/logger.js';
+import { formatForCLI } from '../../utils/markdown.js';
 
 export interface REPLOptions {
   agent: JivaAgent;
@@ -15,8 +16,8 @@ export interface REPLOptions {
 export async function startREPL(options: REPLOptions): Promise<void> {
   const { agent } = options;
 
-  console.log(chalk.bold.cyan('\n🤖 Jiva Agent - Interactive Mode\n'));
-  console.log(chalk.gray('Type your message and press Enter. Type "exit" to quit.\n'));
+  console.log(chalk.bold.cyan('\n∞ Jiva Agent - Interactive Mode\n'));
+  console.log(chalk.gray('Type your message and press Enter. Type /help for commands or /exit to quit.\n'));
 
   // Show workspace info
   const workspace = agent.getWorkspace();
@@ -53,35 +54,59 @@ export async function startREPL(options: REPLOptions): Promise<void> {
 
     const trimmedMessage = message.trim();
 
-    // Handle special commands
-    if (trimmedMessage.toLowerCase() === 'exit' || trimmedMessage.toLowerCase() === 'quit') {
-      console.log(chalk.gray('\nGoodbye!\n'));
-      break;
-    }
+    // Handle commands with / prefix
+    if (trimmedMessage.startsWith('/')) {
+      const command = trimmedMessage.substring(1).toLowerCase();
 
-    if (trimmedMessage.toLowerCase() === 'help') {
-      showHelp();
-      continue;
-    }
+      if (command === 'exit' || command === 'quit') {
+        console.log(chalk.gray('\nGoodbye!\n'));
+        break;
+      }
 
-    if (trimmedMessage.toLowerCase() === 'reset') {
-      agent.resetConversation();
-      console.log(chalk.yellow('\n✓ Conversation reset\n'));
-      continue;
-    }
+      if (command === 'help') {
+        showHelp();
+        continue;
+      }
 
-    if (trimmedMessage.toLowerCase() === 'history') {
-      showHistory(agent);
-      continue;
-    }
+      if (command === 'reset') {
+        agent.resetConversation();
+        console.log(chalk.yellow('\n✓ Conversation reset\n'));
+        continue;
+      }
 
-    if (trimmedMessage.toLowerCase() === 'tools') {
-      showTools(agent);
-      continue;
-    }
+      if (command === 'history') {
+        showHistory(agent);
+        continue;
+      }
 
-    if (trimmedMessage.toLowerCase() === 'servers') {
-      showServers(agent);
+      if (command === 'tools') {
+        showTools(agent);
+        continue;
+      }
+
+      if (command === 'servers') {
+        showServers(agent);
+        continue;
+      }
+
+      if (command === 'save') {
+        await handleSaveConversation(agent);
+        continue;
+      }
+
+      if (command === 'load') {
+        await handleLoadConversation(agent);
+        continue;
+      }
+
+      if (command === 'list') {
+        await handleListConversations(agent);
+        continue;
+      }
+
+      // Unknown command
+      console.log(chalk.red(`\n✗ Unknown command: /${command}`));
+      console.log(chalk.gray('Type /help for available commands\n'));
       continue;
     }
 
@@ -98,7 +123,10 @@ export async function startREPL(options: REPLOptions): Promise<void> {
       spinner.stop();
 
       console.log(chalk.bold.green('\nJiva:'));
-      console.log(response.content);
+
+      // Render markdown for prettier output
+      const formattedContent = formatForCLI(response.content);
+      console.log(formattedContent);
 
       if (response.toolsUsed.length > 0) {
         console.log(chalk.gray(`\n[Used tools: ${response.toolsUsed.join(', ')}]`));
@@ -115,12 +143,15 @@ export async function startREPL(options: REPLOptions): Promise<void> {
 
 function showHelp() {
   console.log(chalk.bold('\nAvailable Commands:'));
-  console.log('  exit, quit   - Exit the REPL');
-  console.log('  help         - Show this help message');
-  console.log('  reset        - Reset conversation history');
-  console.log('  history      - Show conversation history');
-  console.log('  tools        - Show available tools');
-  console.log('  servers      - Show MCP server status');
+  console.log('  /exit, /quit   - Exit the REPL');
+  console.log('  /help          - Show this help message');
+  console.log('  /reset         - Reset conversation history');
+  console.log('  /history       - Show conversation history');
+  console.log('  /tools         - Show available tools');
+  console.log('  /servers       - Show MCP server status');
+  console.log('  /save          - Save current conversation');
+  console.log('  /load          - Load a saved conversation');
+  console.log('  /list          - List all saved conversations');
   console.log('');
 }
 
@@ -179,4 +210,117 @@ function showServers(agent: JivaAgent) {
   }
 
   console.log('');
+}
+
+async function handleSaveConversation(agent: JivaAgent) {
+  const conversationManager = agent.getConversationManager();
+
+  if (!conversationManager) {
+    console.log(chalk.red('\n✗ Conversation manager not initialized'));
+    console.log('');
+    return;
+  }
+
+  try {
+    const id = await agent.saveConversation();
+    console.log(chalk.green(`\n✓ Conversation saved: ${id}`));
+    console.log('');
+  } catch (error) {
+    console.log(chalk.red('\n✗ Failed to save conversation:'), error instanceof Error ? error.message : String(error));
+    console.log('');
+  }
+}
+
+async function handleLoadConversation(agent: JivaAgent) {
+  const conversationManager = agent.getConversationManager();
+
+  if (!conversationManager) {
+    console.log(chalk.red('\n✗ Conversation manager not initialized'));
+    console.log('');
+    return;
+  }
+
+  try {
+    const conversations = await agent.listConversations();
+
+    if (conversations.length === 0) {
+      console.log(chalk.yellow('\nNo saved conversations found'));
+      console.log('');
+      return;
+    }
+
+    // Show list of conversations
+    console.log(chalk.bold('\nSaved Conversations:'));
+    conversations.forEach((conv, index) => {
+      const date = new Date(conv.updated).toLocaleString();
+      const title = conv.title || 'Untitled Conversation';
+      console.log(`  ${index + 1}. ${chalk.cyan(title)}`);
+      console.log(`     ${chalk.gray(date)} • ${chalk.gray(`${conv.messageCount} messages`)}`);
+    });
+    console.log('');
+
+    // Ask which one to load
+    const { selection } = await inquirer.prompt([
+      {
+        type: 'list',
+        name: 'selection',
+        message: 'Select conversation to load:',
+        choices: [
+          ...conversations.map((conv, index) => ({
+            name: `${index + 1}. ${conv.title || 'Untitled'} (${new Date(conv.updated).toLocaleString()})`,
+            value: conv.id,
+          })),
+          { name: 'Cancel', value: null },
+        ],
+      },
+    ]);
+
+    if (selection) {
+      await agent.loadConversation(selection);
+      console.log(chalk.green(`\n✓ Conversation loaded: ${selection}`));
+      console.log('');
+    }
+  } catch (error) {
+    console.log(chalk.red('\n✗ Failed to load conversation:'), error instanceof Error ? error.message : String(error));
+    console.log('');
+  }
+}
+
+async function handleListConversations(agent: JivaAgent) {
+  const conversationManager = agent.getConversationManager();
+
+  if (!conversationManager) {
+    console.log(chalk.red('\n✗ Conversation manager not initialized'));
+    console.log('');
+    return;
+  }
+
+  try {
+    const conversations = await agent.listConversations();
+
+    if (conversations.length === 0) {
+      console.log(chalk.yellow('\nNo saved conversations found'));
+      console.log('');
+      return;
+    }
+
+    console.log(chalk.bold(`\nSaved Conversations (${conversations.length}):`));
+
+    conversations.forEach((conv, index) => {
+      const date = new Date(conv.updated).toLocaleString();
+      const title = conv.title || 'Untitled Conversation';
+      console.log(`\n${index + 1}. ${chalk.cyan.bold(title)}`);
+      console.log(`   ${chalk.gray(conv.id)}`);
+      console.log(`   Updated: ${chalk.gray(date)}`);
+      console.log(`   Messages: ${chalk.gray(conv.messageCount.toString())}`);
+      if (conv.workspace) {
+        console.log(`   Workspace: ${chalk.gray(conv.workspace)}`);
+      }
+    });
+
+    console.log('');
+  } catch (error) {
+    console.log(chalk.red('\n✗ Failed to list conversations:'), error instanceof Error ? error.message : String(error));
+    console.log('');
+  }
 }

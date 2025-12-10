@@ -8,6 +8,7 @@
 import { ModelOrchestrator } from '../models/orchestrator.js';
 import { MCPServerManager } from '../mcp/server-manager.js';
 import { WorkspaceManager } from './workspace.js';
+import { ConversationManager } from './conversation-manager.js';
 import { Message, ModelResponse } from '../models/base.js';
 import { formatToolResult } from '../models/harmony.js';
 import { logger } from '../utils/logger.js';
@@ -17,8 +18,11 @@ export interface AgentConfig {
   orchestrator: ModelOrchestrator;
   mcpManager: MCPServerManager;
   workspace: WorkspaceManager;
+  conversationManager?: ConversationManager;
   maxIterations?: number;
   temperature?: number;
+  autoSave?: boolean;
+  condensingThreshold?: number;
 }
 
 export interface AgentResponse {
@@ -31,16 +35,22 @@ export class JivaAgent {
   private orchestrator: ModelOrchestrator;
   private mcpManager: MCPServerManager;
   private workspace: WorkspaceManager;
+  private conversationManager: ConversationManager | null;
   private maxIterations: number;
   private temperature: number;
   private conversationHistory: Message[] = [];
+  private autoSave: boolean;
+  private condensingThreshold: number;
 
   constructor(config: AgentConfig) {
     this.orchestrator = config.orchestrator;
     this.mcpManager = config.mcpManager;
     this.workspace = config.workspace;
+    this.conversationManager = config.conversationManager || null;
     this.maxIterations = config.maxIterations || 10;
     this.temperature = config.temperature || 0.7;
+    this.autoSave = config.autoSave !== false; // Default true
+    this.condensingThreshold = config.condensingThreshold || 30;
 
     this.initializeSystemPrompt();
   }
@@ -81,6 +91,13 @@ export class JivaAgent {
       '- Use absolute paths when accessing files outside the workspace',
       '- Provide clear explanations of your reasoning',
       '- Ask for clarification when requirements are ambiguous',
+      '',
+      'MISSION-DRIVEN COMPLETION:',
+      '- You are mission-driven: complete tasks thoroughly before stopping',
+      '- Before ending, review: Have I fully accomplished what was asked?',
+      '- If blocked or uncertain, explain the issue and ask for guidance',
+      '- Only stop when the task is complete OR you need user clarification',
+      '- If you encounter errors, try alternative approaches before giving up',
       '',
     ];
 
@@ -154,7 +171,8 @@ export class JivaAgent {
           messages: messagesToSend,
           tools: tools.length > 0 ? tools : undefined,
           temperature: this.temperature,
-          maxTokens: 4096,
+          // Don't set maxTokens - let the API determine based on available context
+          // Setting it too high can cause "max_tokens must be at least 1" errors
         });
       } catch (error) {
         logger.error('Model call failed', error);
@@ -211,8 +229,23 @@ export class JivaAgent {
         continue;
       }
 
-      // No tool calls, this is the final response
+      // No tool calls, check if mission is complete
       finalResponse = response.content;
+
+      // Mission-driven completion check
+      if (iterations < this.maxIterations - 2 && !this.isMissionComplete(response.content)) {
+        logger.debug('Mission completion check: task may be incomplete, prompting agent to review');
+
+        // Add a system message to prompt the agent to review completion
+        this.conversationHistory.push({
+          role: 'system',
+          content: 'Before finishing, please review: Have you fully completed the user\'s request? If there are any remaining steps, errors to resolve, or aspects of the task left unfinished, please continue. Only respond "TASK_COMPLETE" if everything is truly done.',
+        });
+
+        // Give the agent one more chance to continue
+        continue;
+      }
+
       break;
     }
 
@@ -221,11 +254,68 @@ export class JivaAgent {
       finalResponse = finalResponse || 'Maximum iterations reached. Task may be incomplete.';
     }
 
+    // Auto-save conversation if enabled
+    if (this.autoSave && this.conversationManager) {
+      await this.conversationManager.autoSave(
+        this.conversationHistory,
+        this.workspace.getWorkspaceDir(),
+        this.orchestrator
+      );
+    }
+
+    // Check if conversation needs condensing
+    if (this.conversationHistory.length > this.condensingThreshold && this.conversationManager) {
+      logger.info('Conversation threshold reached, condensing...');
+      this.conversationHistory = await this.conversationManager.condenseConversation(
+        this.conversationHistory,
+        this.orchestrator,
+        Math.floor(this.condensingThreshold * 0.7)
+      );
+    }
+
     return {
       content: finalResponse,
       iterations,
       toolsUsed,
     };
+  }
+
+  /**
+   * Check if the response indicates mission completion
+   */
+  private isMissionComplete(response: string): boolean {
+    // Simple heuristic: check for completion indicators
+    const completionIndicators = [
+      'task_complete',
+      'completed successfully',
+      'finished',
+      'done',
+      'all set',
+      'everything is ready',
+    ];
+
+    const lowerResponse = response.toLowerCase();
+
+    // If response is very short, it might be premature
+    if (response.length < 50) {
+      return false;
+    }
+
+    // Check for error indicators
+    const errorIndicators = [
+      'error',
+      'failed',
+      'could not',
+      'unable to',
+      'cannot',
+    ];
+
+    if (errorIndicators.some(indicator => lowerResponse.includes(indicator))) {
+      return false; // Not complete if there are errors
+    }
+
+    // Check for completion indicators
+    return completionIndicators.some(indicator => lowerResponse.includes(indicator));
   }
 
   /**
@@ -242,6 +332,58 @@ export class JivaAgent {
    */
   getConversationHistory(): Message[] {
     return [...this.conversationHistory];
+  }
+
+  /**
+   * Set conversation history (for restoring conversations)
+   */
+  setConversationHistory(messages: Message[]): void {
+    this.conversationHistory = messages;
+  }
+
+  /**
+   * Save current conversation
+   */
+  async saveConversation(): Promise<string | null> {
+    if (!this.conversationManager) {
+      logger.warn('Conversation manager not initialized');
+      return null;
+    }
+
+    const id = await this.conversationManager.saveConversation(
+      this.conversationHistory,
+      this.workspace.getWorkspaceDir(),
+      undefined,
+      this.orchestrator
+    );
+
+    logger.success(`Conversation saved: ${id}`);
+    return id;
+  }
+
+  /**
+   * Load a conversation
+   */
+  async loadConversation(id: string): Promise<void> {
+    if (!this.conversationManager) {
+      throw new JivaError('Conversation manager not initialized');
+    }
+
+    const conversation = await this.conversationManager.loadConversation(id);
+    this.conversationHistory = conversation.messages;
+
+    logger.success(`Conversation loaded: ${id}`);
+  }
+
+  /**
+   * List saved conversations
+   */
+  async listConversations() {
+    if (!this.conversationManager) {
+      throw new JivaError('Conversation manager not initialized');
+    }
+
+    return await this.conversationManager.listConversations();
   }
 
   /**
@@ -266,10 +408,27 @@ export class JivaAgent {
   }
 
   /**
+   * Get conversation manager
+   */
+  getConversationManager(): ConversationManager | null {
+    return this.conversationManager;
+  }
+
+  /**
    * Cleanup resources
    */
   async cleanup() {
     logger.info('Cleaning up agent resources...');
+
+    // Final auto-save before cleanup
+    if (this.autoSave && this.conversationManager && this.conversationHistory.length > 2) {
+      await this.conversationManager.autoSave(
+        this.conversationHistory,
+        this.workspace.getWorkspaceDir(),
+        this.orchestrator
+      );
+    }
+
     await this.mcpManager.cleanup();
   }
 }

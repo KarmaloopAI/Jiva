@@ -8,7 +8,7 @@ import { logger } from '../../utils/logger.js';
 import chalk from 'chalk';
 
 export async function runSetupWizard(): Promise<void> {
-  console.log(chalk.bold.cyan('\n🤖 Welcome to Jiva Setup Wizard\n'));
+  console.log(chalk.bold.cyan('\n∞ Welcome to Jiva Setup Wizard\n'));
   console.log('This wizard will help you configure Jiva for the first time.\n');
 
   // Reasoning Model Configuration
