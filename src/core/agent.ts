@@ -41,6 +41,7 @@ export class JivaAgent {
   private conversationHistory: Message[] = [];
   private autoSave: boolean;
   private condensingThreshold: number;
+  private baseDeveloperMessage: string = ''; // Store base developer content without directive
 
   constructor(config: AgentConfig) {
     this.orchestrator = config.orchestrator;
@@ -75,6 +76,7 @@ export class JivaAgent {
     });
 
     // Developer message - tool usage instructions and constraints
+    // Note: directive is added dynamically via getSystemMessages()
     const developerParts: string[] = [
       'CRITICAL INSTRUCTIONS:',
       '',
@@ -101,35 +103,82 @@ export class JivaAgent {
       '',
     ];
 
-    const directivePrompt = this.workspace.getDirectivePrompt();
-    if (directivePrompt) {
-      developerParts.push(directivePrompt);
-      developerParts.push('');
-    }
+    // Store base developer message WITHOUT directive
+    this.baseDeveloperMessage = developerParts.join('\n');
 
+    // Add to history (without directive initially)
     this.conversationHistory.push({
       role: 'developer',
-      content: developerParts.join('\n'),
+      content: this.baseDeveloperMessage,
     });
   }
 
   /**
+   * Get system messages with fresh directive content
+   * This ensures the directive is always up-to-date, even if the file changes
+   */
+  private getSystemMessages(): Message[] {
+    const systemMessage = this.conversationHistory[0];
+
+    // Get fresh directive
+    const directivePrompt = this.workspace.getDirectivePrompt();
+
+    // Build developer message with fresh directive
+    let developerContent = this.baseDeveloperMessage;
+    if (directivePrompt) {
+      developerContent = `${this.baseDeveloperMessage}\n${directivePrompt}\n`;
+      logger.debug('✓ Directive included in system messages');
+    }
+    // No warning needed - directives are optional for general use
+
+    return [
+      systemMessage,
+      {
+        role: 'developer',
+        content: developerContent,
+      },
+    ];
+  }
+
+  /**
    * Trim conversation history to prevent WAF blocking and reduce token usage
-   * Keeps system + developer messages + last N message pairs
+   * Keeps system + developer messages (with fresh directive) + last N message pairs
    */
   private trimConversationHistory(maxMessages: number = 10): Message[] {
-    // Always keep system and developer messages (first 2 messages)
-    const systemMessage = this.conversationHistory[0]; // system
-    const developerMessage = this.conversationHistory[1]; // developer
+    // Get fresh system messages with current directive
+    const systemMessages = this.getSystemMessages();
 
     if (this.conversationHistory.length <= maxMessages + 2) {
-      return this.conversationHistory;
+      // Return system messages + conversation (excluding old system/developer)
+      return [...systemMessages, ...this.conversationHistory.slice(2)];
     }
 
     // Keep only the last N messages (after system and developer)
     const recentMessages = this.conversationHistory.slice(-maxMessages);
 
-    return [systemMessage, developerMessage, ...recentMessages];
+    return [...systemMessages, ...recentMessages];
+  }
+
+  /**
+   * Detect if message is a simple greeting/conversation vs a task request
+   */
+  private isSimpleConversation(message: string): boolean {
+    const greetings = ['hello', 'hi', 'hey', 'howdy', 'greetings', 'good morning', 'good afternoon', 'good evening'];
+    const casual = ['how are you', 'how\'s it going', 'what\'s up', 'sup', 'thanks', 'thank you', 'bye', 'goodbye'];
+    const lowerMessage = message.toLowerCase().trim();
+
+    // Check if message is very short and matches greeting patterns
+    if (message.length < 50) {
+      const matches = [...greetings, ...casual].some(pattern =>
+        lowerMessage === pattern ||
+        lowerMessage.startsWith(pattern + ' ') ||
+        lowerMessage.startsWith(pattern + '?') ||
+        lowerMessage.startsWith(pattern + '!')
+      );
+      if (matches) return true;
+    }
+
+    return false;
   }
 
   /**
@@ -148,6 +197,10 @@ export class JivaAgent {
     let iterations = 0;
     let finalResponse = '';
 
+    // Detect if this is simple conversation vs a task
+    const isSimple = this.isSimpleConversation(userMessage);
+    const hasDirective = !!this.workspace.getDirectivePrompt();
+
     // Agent loop: iterate until completion or max iterations
     while (iterations < this.maxIterations) {
       iterations++;
@@ -163,11 +216,10 @@ export class JivaAgent {
         logger.debug(`Trimmed conversation: ${this.conversationHistory.length} → ${messagesToSend.length} messages`);
       }
 
-      // Call model
+      // Call model - let orchestrator determine which model to use
       let response: ModelResponse;
       try {
         response = await this.orchestrator.chat({
-          model: 'gpt-oss-120b',
           messages: messagesToSend,
           tools: tools.length > 0 ? tools : undefined,
           temperature: this.temperature,
@@ -232,8 +284,8 @@ export class JivaAgent {
       // No tool calls, check if mission is complete
       finalResponse = response.content;
 
-      // Mission-driven completion check
-      if (iterations < this.maxIterations - 2 && !this.isMissionComplete(response.content)) {
+      // Mission-driven completion check (skip for simple conversations)
+      if (!isSimple && iterations < this.maxIterations - 2 && !this.isMissionComplete(response.content)) {
         logger.debug('Mission completion check: task may be incomplete, prompting agent to review');
 
         // Add a system message to prompt the agent to review completion
@@ -246,6 +298,7 @@ export class JivaAgent {
         continue;
       }
 
+      // For simple conversations, stop after first response
       break;
     }
 

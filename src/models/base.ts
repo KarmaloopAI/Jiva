@@ -48,7 +48,7 @@ export interface Tool {
 }
 
 export interface ChatCompletionOptions {
-  model: string;
+  model?: string; // Optional - uses configured model if not specified
   messages: Message[];
   tools?: Tool[];
   temperature?: number;

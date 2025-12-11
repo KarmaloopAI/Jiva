@@ -138,48 +138,19 @@ export class WorkspaceManager {
 
   /**
    * Get directive content formatted for system prompt
+   * Returns the raw directive content as-is to preserve user's formatting
    */
   getDirectivePrompt(): string | undefined {
     if (!this.directive) {
       return undefined;
     }
 
-    const parts: string[] = [
-      '# Jiva Directive',
-      '',
-      'You are operating with the following directive:',
-      '',
-    ];
+    // Return the raw content verbatim - users should control their directive format
+    return `# Jiva Directive
 
-    if (this.directive.parsed.purpose) {
-      parts.push('## Purpose');
-      parts.push(this.directive.parsed.purpose);
-      parts.push('');
-    }
+You are operating with the following directive:
 
-    if (this.directive.parsed.tasks && this.directive.parsed.tasks.length > 0) {
-      parts.push('## Tasks');
-      this.directive.parsed.tasks.forEach(task => {
-        parts.push(`- ${task}`);
-      });
-      parts.push('');
-    }
-
-    if (this.directive.parsed.constraints && this.directive.parsed.constraints.length > 0) {
-      parts.push('## Constraints');
-      this.directive.parsed.constraints.forEach(constraint => {
-        parts.push(`- ${constraint}`);
-      });
-      parts.push('');
-    }
-
-    if (this.directive.parsed.context) {
-      parts.push('## Context');
-      parts.push(this.directive.parsed.context);
-      parts.push('');
-    }
-
-    return parts.join('\n');
+${this.directive.raw}`;
   }
 
   /**

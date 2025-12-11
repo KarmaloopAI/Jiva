@@ -97,6 +97,7 @@ program
         apiKey: reasoningModelConfig.apiKey,
         model: reasoningModelConfig.defaultModel,
         type: 'reasoning',
+        useHarmonyFormat: reasoningModelConfig.useHarmonyFormat,
       });
 
       let multimodalModel;
@@ -109,6 +110,33 @@ program
           type: 'multimodal',
         });
       }
+
+      // Test model connectivity before proceeding
+      console.log(chalk.gray('Testing model connectivity...\n'));
+
+      const reasoningTest = await reasoningModel.testConnectivity();
+      if (!reasoningTest.success) {
+        console.log(chalk.red('✗ Reasoning model connection failed'));
+        console.log(chalk.gray(`  Endpoint: ${reasoningModelConfig.endpoint}`));
+        console.log(chalk.gray(`  Model: ${reasoningModelConfig.defaultModel}`));
+        console.log(chalk.red(`  Error: ${reasoningTest.error}\n`));
+        console.log(chalk.yellow('Please check your configuration with:'), chalk.cyan('jiva config\n'));
+        process.exit(1);
+      }
+      console.log(chalk.green(`✓ Reasoning model connected (${reasoningTest.latency}ms)`));
+
+      if (multimodalModel) {
+        const multimodalTest = await multimodalModel.testConnectivity();
+        if (!multimodalTest.success) {
+          console.log(chalk.yellow('⚠ Multimodal model connection failed (continuing without vision support)'));
+          console.log(chalk.gray(`  Error: ${multimodalTest.error}`));
+          multimodalModel = undefined; // Disable multimodal
+        } else {
+          console.log(chalk.green(`✓ Multimodal model connected (${multimodalTest.latency}ms)`));
+        }
+      }
+
+      console.log(''); // Empty line for spacing
 
       // Create orchestrator
       const orchestrator = new ModelOrchestrator({
@@ -207,6 +235,7 @@ program
         apiKey: reasoningModelConfig.apiKey,
         model: reasoningModelConfig.defaultModel,
         type: 'reasoning',
+        useHarmonyFormat: reasoningModelConfig.useHarmonyFormat,
       });
 
       let multimodalModel;
@@ -219,6 +248,33 @@ program
           type: 'multimodal',
         });
       }
+
+      // Test model connectivity before proceeding
+      console.log(chalk.gray('Testing model connectivity...\n'));
+
+      const reasoningTest = await reasoningModel.testConnectivity();
+      if (!reasoningTest.success) {
+        console.log(chalk.red('✗ Reasoning model connection failed'));
+        console.log(chalk.gray(`  Endpoint: ${reasoningModelConfig.endpoint}`));
+        console.log(chalk.gray(`  Model: ${reasoningModelConfig.defaultModel}`));
+        console.log(chalk.red(`  Error: ${reasoningTest.error}\n`));
+        console.log(chalk.yellow('Please check your configuration with:'), chalk.cyan('jiva config\n'));
+        process.exit(1);
+      }
+      console.log(chalk.green(`✓ Reasoning model connected (${reasoningTest.latency}ms)`));
+
+      if (multimodalModel) {
+        const multimodalTest = await multimodalModel.testConnectivity();
+        if (!multimodalTest.success) {
+          console.log(chalk.yellow('⚠ Multimodal model connection failed (continuing without vision support)'));
+          console.log(chalk.gray(`  Error: ${multimodalTest.error}`));
+          multimodalModel = undefined; // Disable multimodal
+        } else {
+          console.log(chalk.green(`✓ Multimodal model connected (${multimodalTest.latency}ms)`));
+        }
+      }
+
+      console.log(''); // Empty line for spacing
 
       // Create orchestrator
       const orchestrator = new ModelOrchestrator({

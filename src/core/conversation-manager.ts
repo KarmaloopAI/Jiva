@@ -205,7 +205,11 @@ export class ConversationManager {
    * Condense conversation history using the model
    *
    * This reduces token usage while preserving important context.
-   * Strategy: Keep system/developer messages, condense middle messages, keep recent messages.
+   * Strategy: Keep system/developer messages (WITHOUT directive - agent will add fresh directive),
+   * condense middle messages, keep recent messages.
+   *
+   * Note: The directive is NOT included in condensed history because the agent
+   * will always fetch and prepend the latest directive dynamically.
    */
   async condenseConversation(
     messages: Message[],
@@ -218,7 +222,8 @@ export class ConversationManager {
 
     logger.info(`Condensing conversation: ${messages.length} → ${targetMessageCount} messages`);
 
-    // Keep system and developer messages (first 2)
+    // Keep system and developer messages (first 2) - these are the base messages WITHOUT directive
+    // The agent will dynamically add the directive when constructing messages for the API
     const systemMessage = messages[0];
     const developerMessage = messages[1];
 
@@ -254,7 +259,6 @@ Conversation to summarize:
 ${conversationText}`;
 
       const response = await orchestrator.chat({
-        model: 'gpt-oss-120b',
         messages: [
           { role: 'user', content: summaryPrompt }
         ],
@@ -269,6 +273,7 @@ ${conversationText}`;
       };
 
       // Return: system + developer + condensed summary + recent messages
+      // Note: directive is NOT included here - agent adds it dynamically
       const result = [
         systemMessage,
         developerMessage,
@@ -298,25 +303,26 @@ ${conversationText}`;
     orchestrator: ModelOrchestrator
   ): Promise<string> {
     try {
-      // Get first few user messages to understand the conversation topic
-      const userMessages = messages
-        .filter(msg => msg.role === 'user')
-        .map(msg => typeof msg.content === 'string' ? msg.content : '[multimodal content]')
-        .slice(0, 3) // First 3 user messages
-        .join('\n');
+      // Get first user message
+      const firstUserMsg = messages.find(msg => msg.role === 'user');
+      if (!firstUserMsg || typeof firstUserMsg.content !== 'string') {
+        return 'Untitled Conversation';
+      }
 
-      const titlePrompt = `Generate a concise, descriptive title (3-6 words) for this conversation. The title should capture the main topic or task. Do not use quotes or punctuation at the end.
+      const userMessage = firstUserMsg.content;
 
-Conversation:
-${userMessages}
+      // For very short messages (greetings, etc.), use them directly as title
+      if (userMessage.length <= 40) {
+        return this.capitalizeFirst(userMessage.trim());
+      }
 
-Title:`;
+      // For longer messages, try to generate a title
+      const titlePrompt = `Create a short 3-5 word title for this message. Just output the title, nothing else:\n\n${userMessage.substring(0, 200)}`;
 
       const response = await orchestrator.chat({
-        model: 'gpt-oss-120b',
         messages: [{ role: 'user', content: titlePrompt }],
         temperature: 0.3,
-        maxTokens: 50,
+        maxTokens: 20,
       });
 
       // Clean up the title
@@ -330,11 +336,32 @@ Title:`;
         title = title.substring(0, 57) + '...';
       }
 
+      // If title generation failed or produced garbage, use first message
+      if (!title || title.length < 3 || title.toLowerCase().includes('untitled')) {
+        title = userMessage.substring(0, 40).trim();
+        if (userMessage.length > 40) title += '...';
+      }
+
       return title || 'Untitled Conversation';
     } catch (error) {
       logger.error('Failed to generate title', error);
+      // Fallback: use first user message
+      const firstUserMsg = messages.find(msg => msg.role === 'user');
+      if (firstUserMsg && typeof firstUserMsg.content === 'string') {
+        let fallback = firstUserMsg.content.substring(0, 40).trim();
+        if (firstUserMsg.content.length > 40) fallback += '...';
+        return fallback;
+      }
       return 'Untitled Conversation';
     }
+  }
+
+  /**
+   * Capitalize first letter of string
+   */
+  private capitalizeFirst(str: string): string {
+    if (!str) return str;
+    return str.charAt(0).toUpperCase() + str.slice(1);
   }
 
   /**
@@ -359,7 +386,6 @@ ${userMessages}
 Summary:`;
 
       const response = await orchestrator.chat({
-        model: 'gpt-oss-120b',
         messages: [{ role: 'user', content: summaryPrompt }],
         temperature: 0.3,
         maxTokens: 100,

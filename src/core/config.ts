@@ -16,6 +16,7 @@ const ModelConfigSchema = z.object({
   apiKey: z.string(),
   type: z.enum(['reasoning', 'multimodal']),
   defaultModel: z.string(),
+  useHarmonyFormat: z.boolean().optional(),
 });
 
 const JivaConfigSchema = z.object({

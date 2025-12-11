@@ -43,9 +43,10 @@ jiva setup
 ```
 
 You'll be prompted for:
-- Krutrim API endpoint (default provided)
+- API endpoint (Krutrim, Groq, OpenAI, or any OpenAI-compatible provider)
 - Your API key
-- Model names
+- Model name (e.g., `gpt-oss-120b`, `openai/gpt-oss-20b`, etc.)
+- Tool format (Harmony for Krutrim, Standard for Groq/OpenAI - auto-detected)
 - Optional multimodal model
 
 ### Start Using

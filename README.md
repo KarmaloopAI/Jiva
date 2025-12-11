@@ -5,6 +5,7 @@ Jiva is a powerful autonomous AI agent powered by gpt-oss-120b with full MCP (Mo
 ## 🚀 Quick Links
 
 - **[Quick Start Guide](docs/QUICKSTART.md)** - Get up and running in 30 seconds
+- **[Configuration Guide](docs/CONFIGURATION.md)** - Detailed configuration and provider setup
 - **[New Features Guide](docs/NEW_FEATURES.md)** - Latest improvements and features
 - **[Build Instructions](docs/BUILD.md)** - Detailed setup and development workflow
 - **[Troubleshooting](docs/TROUBLESHOOTING.md)** - Common issues and solutions
@@ -13,6 +14,7 @@ Jiva is a powerful autonomous AI agent powered by gpt-oss-120b with full MCP (Mo
 
 ### Core Capabilities
 - 🤖 **Powered by gpt-oss-120b**: Leverages OpenAI's powerful open-weight reasoning model
+- 🔌 **Provider Agnostic**: Works with Krutrim, Groq, OpenAI, Ollama, and any OpenAI-compatible API
 - 🎯 **Mission-Driven Execution**: Completes tasks thoroughly with ~95% success rate
 - 🔧 **MCP Integration**: Seamless integration with Model Context Protocol servers for extensible tooling
 - 💬 **Smart Conversations**: Auto-save, restore, and AI-generated titles for all conversations
@@ -23,6 +25,7 @@ Jiva is a powerful autonomous AI agent powered by gpt-oss-120b with full MCP (Mo
 
 ### Advanced Features
 - **Slash Commands**: Use `/help`, `/load`, `/save`, `/list` for easy conversation management
+- **Smart Tool Format Detection**: Auto-detects Harmony vs Standard OpenAI tool calling format
 - **Robust Tool Calling**: Advanced parsing supporting hyphens in tool names (e.g., `desktop-commander`)
 - **Extensible Architecture**: Designed to expand from CLI to desktop or web applications
 - **Smart Title Generation**: LLM-powered conversation titles based on first user message

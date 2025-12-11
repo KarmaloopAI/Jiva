@@ -64,7 +64,6 @@ export class ModelOrchestrator {
 
       try {
         const response = await this.multimodalModel.chat({
-          model: options.model || 'Llama-4-Maverick-17B-128E-Instruct',
           messages: [msg],
           temperature: options.temperature,
         });

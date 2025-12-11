@@ -20,6 +20,7 @@ export interface KrutrimConfig {
   apiKey: string;
   model: string;
   type: 'reasoning' | 'multimodal';
+  useHarmonyFormat?: boolean; // Use Harmony format for tools (Krutrim-specific), defaults to false
 }
 
 export class KrutrimModel implements IModel {
@@ -41,13 +42,13 @@ export class KrutrimModel implements IModel {
   async chat(options: ChatCompletionOptions): Promise<ModelResponse> {
     const isReasoningModel = this.config.type === 'reasoning';
 
-    // Retry logic for WAF/rate limiting issues
-    const maxRetries = 2;
+    // Retry logic for transient errors (WAF/rate limiting/server errors)
+    const maxRetries = 3;
     let lastError: Error | null = null;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       if (attempt > 0) {
-        const waitTime = Math.pow(2, attempt) * 1000; // Exponential backoff
+        const waitTime = Math.pow(2, attempt) * 1000; // Exponential backoff: 2s, 4s, 8s
         logger.warn(`Retrying after ${waitTime}ms (attempt ${attempt + 1}/${maxRetries + 1})...`);
         await new Promise(resolve => setTimeout(resolve, waitTime));
       }
@@ -57,13 +58,30 @@ export class KrutrimModel implements IModel {
       } catch (error) {
         lastError = error as Error;
 
-        // Only retry on 403 (WAF) or 429 (rate limit) errors
+        // Retry on transient errors: 403 (WAF), 429 (rate limit), 500/502/503/504 (server errors)
         if (error instanceof ModelError) {
-          const is403or429 = error.message.includes('(403)') || error.message.includes('(429)');
-          if (!is403or429 || attempt === maxRetries) {
+          const shouldRetry =
+            error.message.includes('(403)') ||  // WAF blocking
+            error.message.includes('(429)') ||  // Rate limiting
+            error.message.includes('(500)') ||  // Internal server error
+            error.message.includes('(502)') ||  // Bad gateway
+            error.message.includes('(503)') ||  // Service unavailable
+            error.message.includes('(504)');    // Gateway timeout
+
+          if (!shouldRetry || attempt === maxRetries) {
             throw error;
           }
-          logger.warn(`Got ${error.message.includes('(403)' ) ? '403 Access Denied' : '429 Rate Limited'}, will retry...`);
+
+          // Log the error type for debugging
+          let errorType = 'Unknown error';
+          if (error.message.includes('(403)')) errorType = '403 Access Denied (WAF)';
+          else if (error.message.includes('(429)')) errorType = '429 Rate Limited';
+          else if (error.message.includes('(500)')) errorType = '500 Internal Server Error';
+          else if (error.message.includes('(502)')) errorType = '502 Bad Gateway';
+          else if (error.message.includes('(503)')) errorType = '503 Service Unavailable';
+          else if (error.message.includes('(504)')) errorType = '504 Gateway Timeout';
+
+          logger.warn(`Got ${errorType}, will retry...`);
         } else {
           throw error;
         }
@@ -77,24 +95,31 @@ export class KrutrimModel implements IModel {
     try {
       let messages: any[];
       let tools: HarmonyToolDefinition[] | undefined;
+      const useHarmony = this.config.useHarmonyFormat ?? false;
 
       if (isReasoningModel && options.tools && options.tools.length > 0) {
-        // Convert to Harmony format for gpt-oss-120b
-        tools = options.tools.map(t => ({
-          name: t.name,
-          description: t.description,
-          parameters: t.parameters,
-        }));
+        if (useHarmony) {
+          // Convert to Harmony format (Krutrim-specific)
+          // Tools are embedded in the developer message
+          tools = options.tools.map(t => ({
+            name: t.name,
+            description: t.description,
+            parameters: t.parameters,
+          }));
 
-        messages = formatMessagesForHarmony(
-          options.messages as HarmonyMessage[],
-          tools
-        );
+          messages = formatMessagesForHarmony(
+            options.messages as HarmonyMessage[],
+            tools
+          );
+        } else {
+          // Standard OpenAI format - tools sent separately
+          messages = options.messages;
+        }
       } else {
         messages = options.messages;
       }
 
-      // Krutrim API only supports standard OpenAI roles: system, user, assistant, tool
+      // All OpenAI-compatible APIs support standard roles: system, user, assistant, tool
       // Convert 'developer' role to 'system' for API compatibility
       const apiMessages = messages.map((msg: any) => {
         if (msg.role === 'developer') {
@@ -113,10 +138,23 @@ export class KrutrimModel implements IModel {
         requestBody.max_tokens = options.maxTokens;
       }
 
-      // Note: We don't send tools in OpenAI format to Krutrim
-      // Tools are embedded in the developer message via Harmony format
+      // Send tools in standard OpenAI format if not using Harmony
+      if (!useHarmony && isReasoningModel && options.tools && options.tools.length > 0) {
+        requestBody.tools = options.tools.map(t => ({
+          type: 'function',
+          function: {
+            name: t.name,
+            description: t.description,
+            parameters: t.parameters,
+          },
+        }));
+        requestBody.tool_choice = 'auto';
+      }
 
-      logger.debug('Krutrim API Request:', JSON.stringify(requestBody, null, 2));
+      // Log full request for debugging
+      logger.debug('API Request:', JSON.stringify(requestBody, null, 2));
+      logger.debug('Request size:', JSON.stringify(requestBody).length, 'bytes');
+      logger.debug('Message count:', requestBody.messages.length);
 
       const response = await fetch(this.config.endpoint, {
         method: 'POST',
@@ -134,14 +172,29 @@ export class KrutrimModel implements IModel {
         logger.error(`API Error Response (${response.status}):`, errorText);
         logger.debug('Request that failed:', JSON.stringify(requestBody, null, 2));
 
+        // Write failing request to file for debugging
+        if (response.status === 403) {
+          try {
+            const fs = await import('fs');
+            const debugPath = '/tmp/jiva_failed_request.json';
+            await fs.promises.writeFile(
+              debugPath,
+              JSON.stringify(requestBody, null, 2)
+            );
+            logger.warn(`Failing request saved to: ${debugPath}`);
+          } catch (e) {
+            // Ignore file write errors
+          }
+        }
+
         throw new ModelError(
-          `Krutrim API error (${response.status}): ${errorText}`,
+          `API error (${response.status}): ${errorText}`,
           this.config.model
         );
       }
 
       const data: any = await response.json();
-      logger.debug('Krutrim API Response:', JSON.stringify(data, null, 2));
+      logger.debug('API Response:', JSON.stringify(data, null, 2));
 
       if (!data.choices || data.choices.length === 0) {
         throw new ModelError('No choices in response', this.config.model);
@@ -150,9 +203,9 @@ export class KrutrimModel implements IModel {
       const choice = data.choices[0];
       const messageContent = choice.message?.content || '';
 
-      // Parse response based on model type
-      if (isReasoningModel && options.tools && options.tools.length > 0) {
-        // Parse Harmony format response
+      // Parse response based on format used
+      if (useHarmony && isReasoningModel && options.tools && options.tools.length > 0) {
+        // Parse Harmony format response (Krutrim-specific)
         const parsed = parseHarmonyResponse(messageContent);
 
         return {
@@ -169,9 +222,13 @@ export class KrutrimModel implements IModel {
           },
         };
       } else {
-        // Standard response
+        // Standard OpenAI format response
+        // Check for tool calls in standard format
+        const toolCalls = choice.message?.tool_calls;
+
         return {
           content: messageContent,
+          toolCalls: toolCalls && toolCalls.length > 0 ? toolCalls : undefined,
           usage: data.usage ? {
             promptTokens: data.usage.prompt_tokens || 0,
             completionTokens: data.usage.completion_tokens || 0,
@@ -186,7 +243,7 @@ export class KrutrimModel implements IModel {
       }
 
       throw new ModelError(
-        `Failed to communicate with Krutrim API: ${error instanceof Error ? error.message : String(error)}`,
+        `Failed to communicate with API: ${error instanceof Error ? error.message : String(error)}`,
         this.config.model
       );
     }
@@ -225,6 +282,38 @@ export class KrutrimModel implements IModel {
     });
 
     return response.content;
+  }
+
+  /**
+   * Test connectivity to the API endpoint
+   * Returns true if connection is successful, throws error otherwise
+   */
+  async testConnectivity(): Promise<{ success: boolean; error?: string; latency?: number }> {
+    const startTime = Date.now();
+
+    try {
+      logger.debug(`Testing connectivity to ${this.config.endpoint}...`);
+
+      // Simple test request with minimal tokens
+      const testResponse = await this.chat({
+        messages: [{ role: 'user', content: 'test' }],
+        temperature: 0,
+        maxTokens: 5,
+      });
+
+      const latency = Date.now() - startTime;
+      logger.debug(`Connectivity test passed in ${latency}ms`);
+
+      return { success: true, latency };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error(`Connectivity test failed: ${errorMessage}`);
+
+      return {
+        success: false,
+        error: errorMessage,
+      };
+    }
   }
 }
 

@@ -44,12 +44,34 @@ export async function runSetupWizard(): Promise<void> {
     },
   ]);
 
+  // Detect if Harmony format should be used based on model name
+  const isKrutrimModel = reasoningAnswers.model.includes('gpt-oss-120b');
+  const defaultUseHarmony = isKrutrimModel;
+
+  console.log(chalk.gray('\nTool Format Configuration'));
+  console.log(chalk.gray('Different providers use different formats for tool calling.\n'));
+
+  const { useHarmonyFormat } = await inquirer.prompt([
+    {
+      type: 'confirm',
+      name: 'useHarmonyFormat',
+      message: 'Use Harmony format for tool calling?',
+      default: defaultUseHarmony,
+      when: () => {
+        // Show this prompt for all models, but provide smart default
+        console.log(chalk.gray(`  Recommended: ${defaultUseHarmony ? 'Yes' : 'No'} (${isKrutrimModel ? 'Krutrim uses Harmony format' : 'Standard OpenAI format'})`));
+        return true;
+      },
+    },
+  ]);
+
   configManager.setReasoningModel({
     name: 'reasoning',
     endpoint: reasoningAnswers.endpoint,
     apiKey: reasoningAnswers.apiKey,
     type: 'reasoning',
     defaultModel: reasoningAnswers.model,
+    useHarmonyFormat,
   });
 
   logger.success('Reasoning model configured');
@@ -206,12 +228,34 @@ async function updateReasoningModel() {
     },
   ]);
 
+  // Detect if Harmony format should be used based on model name
+  const isKrutrimModel = answers.model.includes('gpt-oss-120b');
+  const defaultUseHarmony = isKrutrimModel;
+
+  console.log(chalk.gray('\nTool Format Configuration'));
+  console.log(chalk.gray('Different providers use different formats for tool calling.\n'));
+
+  const { useHarmonyFormat } = await inquirer.prompt([
+    {
+      type: 'confirm',
+      name: 'useHarmonyFormat',
+      message: 'Use Harmony format for tool calling?',
+      default: current?.useHarmonyFormat ?? defaultUseHarmony,
+      when: () => {
+        // Show this prompt for all models, but provide smart default
+        console.log(chalk.gray(`  Recommended: ${defaultUseHarmony ? 'Yes' : 'No'} (${isKrutrimModel ? 'Krutrim uses Harmony format' : 'Standard OpenAI format'})`));
+        return true;
+      },
+    },
+  ]);
+
   configManager.setReasoningModel({
     name: 'reasoning',
     endpoint: answers.endpoint,
     apiKey: answers.apiKey,
     type: 'reasoning',
     defaultModel: answers.model,
+    useHarmonyFormat,
   });
 
   logger.success('Reasoning model updated');
