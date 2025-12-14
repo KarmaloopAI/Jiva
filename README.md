@@ -13,9 +13,9 @@ Jiva is a powerful autonomous AI agent powered by gpt-oss-120b with full MCP (Mo
 ## ✨ Features
 
 ### Core Capabilities
-- 🤖 **Powered by gpt-oss-120b**: Leverages OpenAI's powerful open-weight reasoning model
+- 🤖 **Dual-Agent Architecture**: Manager + Worker pattern for reliable task execution and planning
 - 🔌 **Provider Agnostic**: Works with Krutrim, Groq, OpenAI, Ollama, and any OpenAI-compatible API
-- 🎯 **Mission-Driven Execution**: Completes tasks thoroughly with ~95% success rate
+- 🎯 **Three-Phase Execution**: Planning → Execution → Synthesis for structured task completion
 - 🔧 **MCP Integration**: Seamless integration with Model Context Protocol servers for extensible tooling
 - 💬 **Smart Conversations**: Auto-save, restore, and AI-generated titles for all conversations
 - 📝 **Pretty Markdown**: Beautiful terminal output with syntax highlighting
@@ -23,12 +23,14 @@ Jiva is a powerful autonomous AI agent powered by gpt-oss-120b with full MCP (Mo
 - 🌐 **Multi-Modal Support**: Optional image understanding via Llama-4-Maverick-17B
 - 🔄 **Auto-Condensing**: Intelligent conversation history management to prevent token overload
 
-### Advanced Features
+### Advanced Features (v0.2.1)
+- **Dual-Agent System**: Separate Manager and Worker agents for better task focus and reliability
+- **Chain-of-Thought Logging**: Transparent reasoning at INFO level with clean ASCII formatting
+- **Robust Error Recovery**: Automatic retry with error feedback for API and tool failures
+- **Workspace-Aware Operations**: Smart path resolution for file operations
 - **Slash Commands**: Use `/help`, `/load`, `/save`, `/list` for easy conversation management
 - **Smart Tool Format Detection**: Auto-detects Harmony vs Standard OpenAI tool calling format
-- **Robust Tool Calling**: Advanced parsing supporting hyphens in tool names (e.g., `desktop-commander`)
 - **Extensible Architecture**: Designed to expand from CLI to desktop or web applications
-- **Smart Title Generation**: LLM-powered conversation titles based on first user message
 
 See [NEW_FEATURES.md](docs/NEW_FEATURES.md) for detailed information.
 
@@ -370,11 +372,15 @@ jiva/
 
 ### Key Components
 
-1. **JivaAgent**: Main orchestrator coordinating models, tools, and workspace
-2. **ModelOrchestrator**: Manages multi-model coordination (reasoning + multimodal)
-3. **MCPServerManager**: Handles MCP server lifecycle and tool discovery
-4. **WorkspaceManager**: Manages workspace directory and directive files
-5. **Harmony Format Handler**: Implements gpt-oss-120b's required response format
+1. **DualAgent**: Main orchestrator coordinating Manager and Worker agents (v0.2.1+)
+2. **ManagerAgent**: High-level planning, task breakdown, and result synthesis
+3. **WorkerAgent**: Focused tool execution and information gathering
+4. **ModelOrchestrator**: Manages multi-model coordination (reasoning + multimodal)
+5. **MCPServerManager**: Handles MCP server lifecycle and tool discovery
+6. **WorkspaceManager**: Manages workspace directory and directive files
+7. **Harmony Format Handler**: Implements gpt-oss-120b's required response format
+
+**Legacy:** JivaAgent (single-agent) remains available for compatibility
 
 ## Working with gpt-oss-120b
 
@@ -421,11 +427,12 @@ Jiva can also be used programmatically:
 
 ```typescript
 import {
-  JivaAgent,
+  DualAgent,
   createKrutrimModel,
   ModelOrchestrator,
   MCPServerManager,
   WorkspaceManager,
+  ConversationManager,
 } from 'jiva';
 
 // Create models
@@ -455,16 +462,24 @@ const workspace = new WorkspaceManager({
 });
 await workspace.initialize();
 
-// Create agent
-const agent = new JivaAgent({
+// Initialize conversation manager (optional)
+const conversationManager = new ConversationManager();
+await conversationManager.initialize();
+
+// Create dual-agent
+const agent = new DualAgent({
   orchestrator,
   mcpManager,
   workspace,
+  conversationManager,
+  maxSubtasks: 10,
 });
 
 // Use agent
 const response = await agent.chat('Hello, Jiva!');
 console.log(response.content);
+console.log(`Plan: ${response.plan?.subtasks.join(', ')}`);
+console.log(`Tools used: ${response.toolsUsed.join(', ')}`);
 
 // Cleanup
 await agent.cleanup();

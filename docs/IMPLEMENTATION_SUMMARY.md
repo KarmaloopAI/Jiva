@@ -2,11 +2,28 @@
 
 ## Overview
 
-Jiva is a production-ready autonomous AI agent built with TypeScript, powered by gpt-oss-120b with full support for MCP (Model Context Protocol) servers. The implementation addresses all the requirements and handles the known challenges with gpt-oss-120b's tool calling capabilities.
+Jiva is a production-ready autonomous AI agent built with TypeScript, powered by gpt-oss-120b with full support for MCP (Model Context Protocol) servers. **Version 0.2.1** introduces a complete architectural redesign with a dual-agent pattern (Manager + Worker) for improved reliability, transparency, and task completion.
 
 ## Key Achievements
 
-### 1. **Robust gpt-oss-120b Integration**
+### 1. **Dual-Agent Architecture (v0.2.1)**
+
+**Problem:** Single-agent systems struggle with complex tasks, lose context during execution, and have difficulty recovering from errors.
+
+**Our Solution:**
+- **Manager/Worker Pattern:** Separate planning from execution for better focus
+- **Three-Phase Execution:** Structured workflow (Planning → Execution → Synthesis)
+- **Automatic Error Recovery:** Worker retries failed operations with error feedback
+- **Chain-of-Thought Logging:** Transparent reasoning at INFO level with clean output
+- **Workspace Awareness:** Smart path resolution for file operations
+
+**Benefits:**
+- Manager maintains task context while Worker executes tools
+- Worker errors don't crash the system - automatic retry up to 5 attempts
+- Clear visibility into what each agent is thinking and doing
+- Better task completion rates through structured planning
+
+### 2. **Robust gpt-oss-120b Integration**
 
 After extensive research, we discovered that gpt-oss-120b has **documented reliability issues** with tool calling:
 - Tools are sometimes ignored
@@ -17,8 +34,9 @@ After extensive research, we discovered that gpt-oss-120b has **documented relia
 - Implemented full **Harmony Response Format** handling (required by gpt-oss-120b)
 - Built robust tool call parser with JSON auto-fixing
 - Multi-channel output support (analysis, commentary, final)
-- Comprehensive error handling and retry logic
+- Comprehensive error handling and retry logic (now at Worker level)
 - Detailed logging for debugging tool call issues
+- API-level error catching prevents system crashes
 
 ### 2. **Complete MCP Integration**
 
@@ -66,41 +84,65 @@ src/
 2. Build REST API around core agent
 3. Add WebSocket for streaming responses
 
-## Architecture Details
+## Architecture Details (v0.2.1)
 
-### Core Components
+### Dual-Agent System
 
-1. **JivaAgent** (`src/core/agent.ts`)
-   - Main orchestrator
-   - Manages conversation state
-   - Coordinates tool execution
-   - Implements agent loop with max iteration protection
+**New in v0.2.1:** Jiva now uses a two-agent architecture for better separation of concerns:
 
-2. **ModelOrchestrator** (`src/models/orchestrator.ts`)
+1. **DualAgent** (`src/core/dual-agent.ts`)
+   - Orchestrates Manager and Worker agents
+   - Implements three-phase execution: Planning → Execution → Synthesis
+   - Manages conversation history and auto-save
+   - Coordinates task breakdown and result aggregation
+
+2. **ManagerAgent** (`src/core/manager-agent.ts`)
+   - **Role:** High-level planning and coordination
+   - Creates execution plans by breaking down user requests
+   - Reviews Worker results and decides next actions
+   - Synthesizes final responses from all subtask results
+   - Does NOT execute tools directly
+
+3. **WorkerAgent** (`src/core/worker-agent.ts`)
+   - **Role:** Focused tool execution
+   - Executes specific subtasks assigned by Manager
+   - Uses MCP tools to gather information
+   - Limited to 5 iterations per subtask (prevents wandering)
+   - Includes automatic error recovery and retry logic
+   - Reports results back to Manager
+
+### Supporting Components
+
+4. **ModelOrchestrator** (`src/models/orchestrator.ts`)
    - Routes requests to appropriate model
    - Handles image preprocessing
    - Manages model-specific formatting
 
-3. **Harmony Format Handler** (`src/models/harmony.ts`)
+5. **Harmony Format Handler** (`src/models/harmony.ts`)
    - Formats tools in TypeScript-like syntax
    - Parses multi-channel responses
    - Extracts and validates tool calls
    - Handles malformed responses
 
-4. **MCPServerManager** (`src/mcp/server-manager.ts`)
+6. **MCPServerManager** (`src/mcp/server-manager.ts`)
    - Manages server lifecycle
    - Configuration-driven server initialization
    - Health monitoring
 
-5. **WorkspaceManager** (`src/core/workspace.ts`)
+7. **WorkspaceManager** (`src/core/workspace.ts`)
    - Workspace directory management
    - Directive file discovery and parsing
    - System prompt generation
+   - Smart path resolution for file operations
 
-6. **ConfigManager** (`src/core/config.ts`)
+8. **ConfigManager** (`src/core/config.ts`)
    - Persistent configuration with Conf
    - Schema validation with Zod
    - First-time setup detection
+
+### Legacy Component
+
+**JivaAgent** (`src/core/agent.ts`) - Single-agent implementation (legacy, still available for compatibility)
 
 ### CLI Interface
 
@@ -240,15 +282,16 @@ jiva chat --debug
 jiva config
 ```
 
-### Programmatic Usage
+### Programmatic Usage (v0.2.1)
 
 ```typescript
 import {
-  JivaAgent,
+  DualAgent,
   createKrutrimModel,
   ModelOrchestrator,
   MCPServerManager,
   WorkspaceManager,
+  ConversationManager,
 } from 'jiva';
 
 // Setup
@@ -275,15 +318,26 @@ const workspace = new WorkspaceManager({
 });
 await workspace.initialize();
 
-const agent = new JivaAgent({
+const conversationManager = new ConversationManager();
+await conversationManager.initialize();
+
+// Create dual-agent system
+const agent = new DualAgent({
   orchestrator,
   mcpManager,
   workspace,
+  conversationManager,
+  maxSubtasks: 10,
+  autoSave: true,
+  condensingThreshold: 30,
 });
 
 // Use
 const response = await agent.chat('What files are in this directory?');
 console.log(response.content);
+console.log('Plan:', response.plan?.subtasks);
+console.log('Tools used:', response.toolsUsed);
+console.log('Iterations:', response.iterations);
 
 // Cleanup
 await agent.cleanup();
