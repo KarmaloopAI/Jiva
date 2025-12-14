@@ -1,6 +1,6 @@
 {
   "name": "jiva-core",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Versatile autonomous AI agent powered by gpt-oss-120b with full MCP support. Mission-driven execution, smart conversations, and extensible tooling.",
   "main": "dist/index.js",
   "bin": {

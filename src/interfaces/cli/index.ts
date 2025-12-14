@@ -12,7 +12,7 @@ import { ModelOrchestrator } from '../../models/orchestrator.js';
 import { MCPServerManager } from '../../mcp/server-manager.js';
 import { WorkspaceManager } from '../../core/workspace.js';
 import { ConversationManager } from '../../core/conversation-manager.js';
-import { JivaAgent } from '../../core/agent.js';
+import { DualAgent } from '../../core/dual-agent.js';
 import { runSetupWizard, updateConfiguration } from './setup-wizard.js';
 import { startREPL } from './repl.js';
 import { logger, LogLevel } from '../../utils/logger.js';
@@ -180,14 +180,15 @@ program
       const conversationManager = new ConversationManager();
       await conversationManager.initialize();
 
-      // Create agent
-      const agent = new JivaAgent({
+      // Create agent (dual-agent architecture)
+      const agent = new DualAgent({
         orchestrator,
         mcpManager,
         workspace,
         conversationManager,
-        maxIterations: options.maxIterations || 10,
-        temperature: options.temperature || 0.7,
+        maxSubtasks: options.maxIterations || 10,
+        autoSave: true,
+        condensingThreshold: 30,
       });
 
       // Start REPL
@@ -318,14 +319,15 @@ program
       const conversationManager = new ConversationManager();
       await conversationManager.initialize();
 
-      // Create agent
-      const agent = new JivaAgent({
+      // Create agent (dual-agent architecture)
+      const agent = new DualAgent({
         orchestrator,
         mcpManager,
         workspace,
         conversationManager,
-        maxIterations: options.maxIterations || 10,
-        temperature: options.temperature || 0.7,
+        maxSubtasks: options.maxIterations || 10,
+        autoSave: true,
+        condensingThreshold: 30,
       });
 
       // Execute prompt

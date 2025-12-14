@@ -5,12 +5,12 @@
 import inquirer from 'inquirer';
 import chalk from 'chalk';
 import ora from 'ora';
-import { JivaAgent } from '../../core/agent.js';
+import { DualAgent } from '../../core/dual-agent.js';
 import { logger } from '../../utils/logger.js';
 import { formatForCLI } from '../../utils/markdown.js';
 
 export interface REPLOptions {
-  agent: JivaAgent;
+  agent: DualAgent;
 }
 
 export async function startREPL(options: REPLOptions): Promise<void> {
@@ -155,7 +155,7 @@ function showHelp() {
   console.log('');
 }
 
-function showHistory(agent: JivaAgent) {
+function showHistory(agent: DualAgent) {
   const history = agent.getConversationHistory();
 
   console.log(chalk.bold('\nConversation History:'));
@@ -177,7 +177,7 @@ function showHistory(agent: JivaAgent) {
   console.log('');
 }
 
-function showTools(agent: JivaAgent) {
+function showTools(agent: DualAgent) {
   const tools = agent.getMCPManager().getClient().getAllTools();
 
   console.log(chalk.bold(`\nAvailable Tools (${tools.length}):`));
@@ -193,7 +193,7 @@ function showTools(agent: JivaAgent) {
   console.log('');
 }
 
-function showServers(agent: JivaAgent) {
+function showServers(agent: DualAgent) {
   const serverStatus = agent.getMCPManager().getServerStatus();
 
   console.log(chalk.bold('\nMCP Servers:'));
@@ -212,7 +212,7 @@ function showServers(agent: JivaAgent) {
   console.log('');
 }
 
-async function handleSaveConversation(agent: JivaAgent) {
+async function handleSaveConversation(agent: DualAgent) {
   const conversationManager = agent.getConversationManager();
 
   if (!conversationManager) {
@@ -231,7 +231,7 @@ async function handleSaveConversation(agent: JivaAgent) {
   }
 }
 
-async function handleLoadConversation(agent: JivaAgent) {
+async function handleLoadConversation(agent: DualAgent) {
   const conversationManager = agent.getConversationManager();
 
   if (!conversationManager) {
@@ -286,7 +286,7 @@ async function handleLoadConversation(agent: JivaAgent) {
   }
 }
 
-async function handleListConversations(agent: JivaAgent) {
+async function handleListConversations(agent: DualAgent) {
   const conversationManager = agent.getConversationManager();
 
   if (!conversationManager) {
