@@ -11,9 +11,17 @@
 import { ModelOrchestrator } from '../models/orchestrator.js';
 import { MCPServerManager } from '../mcp/server-manager.js';
 import { WorkspaceManager } from './workspace.js';
-import { Message, ModelResponse } from '../models/base.js';
+import { Message, MessageContent, ModelResponse } from '../models/base.js';
 import { formatToolResult } from '../models/harmony.js';
 import { logger } from '../utils/logger.js';
+
+interface ToolResultWithImages {
+  text: string;
+  images?: Array<{
+    base64: string;
+    mimeType: string;
+  }>;
+}
 
 export interface WorkerSubtask {
   instruction: string;
@@ -97,6 +105,7 @@ Please complete this subtask and report your findings.`,
 
     let finalResult = '';
     let reasoning = '';
+    let pendingImages: Array<{ base64: string; mimeType: string }> = [];
 
     // Worker execution loop
     for (let iteration = 0; iteration < this.maxIterations; iteration++) {
@@ -152,7 +161,21 @@ Please complete this subtask and report your findings.`,
 
             toolsUsed.push(toolName);
 
-            const toolMessage = formatToolResult(toolCall.id, toolName, result);
+            // Check if tool returned images (multimodal support)
+            let toolResultText: string;
+            if (typeof result === 'object' && result !== null && 'images' in result) {
+              const typedResult = result as ToolResultWithImages;
+              toolResultText = typedResult.text;
+
+              if (typedResult.images && typedResult.images.length > 0) {
+                logger.info(`  [Worker] Tool returned ${typedResult.images.length} image(s), will attach to next model call`);
+                pendingImages.push(...typedResult.images);
+              }
+            } else {
+              toolResultText = typeof result === 'string' ? result : JSON.stringify(result);
+            }
+
+            const toolMessage = formatToolResult(toolCall.id, toolName, toolResultText);
             conversationHistory.push(toolMessage);
 
             logger.debug(`  ✓ [Worker] Tool ${toolName} completed`);
@@ -166,6 +189,31 @@ Please complete this subtask and report your findings.`,
               content: `Error: ${error instanceof Error ? error.message : String(error)}`,
             });
           }
+        }
+
+        // If images are pending, attach them to next model call
+        if (pendingImages.length > 0) {
+          logger.info(`  [Worker] Attaching ${pendingImages.length} image(s) to next model call for analysis`);
+
+          // Build message with images
+          const imageMessage: Message = {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: 'I have executed the tools. Please analyze the results (including any images) and continue with the task.',
+              },
+              ...pendingImages.map(img => ({
+                type: 'image_url' as const,
+                image_url: {
+                  url: `data:${img.mimeType};base64,${img.base64}`,
+                },
+              })),
+            ],
+          };
+
+          conversationHistory.push(imageMessage);
+          pendingImages = []; // Clear for next iteration
         }
 
         // Continue to process tool results

@@ -162,12 +162,29 @@ export class MCPClient {
 
       logger.debug(`Tool result from ${toolName}:`, result);
 
-      // Extract content from MCP response
+      // Extract content from MCP response (both text and images)
       if (result.content && Array.isArray(result.content)) {
         const textContent = result.content
           .filter((c: any) => c.type === 'text')
           .map((c: any) => c.text)
           .join('\n');
+
+        const imageContent = result.content
+          .filter((c: any) => c.type === 'image')
+          .map((c: any) => ({
+            base64: c.data,
+            mimeType: c.mimeType || 'image/png'
+          }));
+
+        // Return both text and images if images present
+        if (imageContent.length > 0) {
+          logger.debug(`  Tool returned ${imageContent.length} image(s)`);
+          return {
+            text: textContent,
+            images: imageContent
+          };
+        }
+
         return textContent || result;
       }
 

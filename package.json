@@ -1,6 +1,6 @@
 {
   "name": "jiva-core",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Versatile autonomous AI agent powered by gpt-oss-120b with full MCP support. Mission-driven execution, smart conversations, and extensible tooling.",
   "main": "dist/index.js",
   "bin": {
@@ -10,7 +10,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/interfaces/cli/index.ts",
-    "start": "node dist/interfaces/cli/index.js",
+    "start": "node --loader ts-node/esm src/interfaces/cli/index.ts",
     "type-check": "tsc --noEmit",
     "fix-filesystem": "node fix-filesystem-config.js",
     "prepublishOnly": "npm run build"
@@ -56,6 +56,7 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "ts-node": "^10.9.2",
     "@types/inquirer": "^9.0.7",
     "@types/marked-terminal": "^6.1.1",
     "@types/node": "^22.10.2",
@@ -63,6 +64,6 @@
     "typescript": "^5.7.2"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   }
 }
