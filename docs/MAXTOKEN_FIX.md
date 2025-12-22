@@ -1,6 +1,6 @@
 # MaxTokens Error Fix
 
-**Date:** December 9, 2024
+**Date:** December 9, 2025
 **Issue:** `max_tokens must be at least 1, got -9078`
 
 ## The Problem

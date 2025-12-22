@@ -14,6 +14,7 @@ import { WorkspaceManager } from './workspace.js';
 import { Message, MessageContent, ModelResponse } from '../models/base.js';
 import { formatToolResult } from '../models/harmony.js';
 import { logger } from '../utils/logger.js';
+import { orchestrationLogger } from '../utils/orchestration-logger.js';
 
 interface ToolResultWithImages {
   text: string;
@@ -21,6 +22,14 @@ interface ToolResultWithImages {
     base64: string;
     mimeType: string;
   }>;
+}
+
+interface WorkerContextMemory {
+  lastDirectoryPath?: string;
+  lastDirectoryListing?: string[];
+  lastDirectoryTime?: number;
+  recentFileReads: Map<string, { content: string; timestamp: number }>;
+  filesJustModified: Set<string>;
 }
 
 export interface WorkerSubtask {
@@ -39,12 +48,23 @@ export class WorkerAgent {
   private orchestrator: ModelOrchestrator;
   private mcpManager: MCPServerManager;
   private workspace: WorkspaceManager;
-  private maxIterations: number = 5; // Worker is focused, shouldn't need many iterations
+  private maxIterations: number;
+  private contextMemory: WorkerContextMemory;
 
-  constructor(orchestrator: ModelOrchestrator, mcpManager: MCPServerManager, workspace: WorkspaceManager) {
+  constructor(
+    orchestrator: ModelOrchestrator,
+    mcpManager: MCPServerManager,
+    workspace: WorkspaceManager,
+    maxIterations: number = 5
+  ) {
     this.orchestrator = orchestrator;
     this.mcpManager = mcpManager;
     this.workspace = workspace;
+    this.maxIterations = maxIterations;
+    this.contextMemory = {
+      recentFileReads: new Map(),
+      filesJustModified: new Set(),
+    };
   }
 
   /**
@@ -52,9 +72,17 @@ export class WorkerAgent {
    */
   async executeSubtask(subtask: WorkerSubtask): Promise<WorkerResult> {
     logger.info(`[Worker] Starting: "${subtask.instruction}"`);
+    orchestrationLogger.logWorkerStart(subtask.instruction, subtask.context || '');
+
+    // Reset context memory for new subtask
+    this.contextMemory = {
+      recentFileReads: new Map(),
+      filesJustModified: new Set(),
+    };
 
     const conversationHistory: Message[] = [];
     const toolsUsed: string[] = [];
+    let iterationCount = 0;
 
     // System prompt for Worker
     conversationHistory.push({
@@ -109,7 +137,9 @@ Please complete this subtask and report your findings.`,
 
     // Worker execution loop
     for (let iteration = 0; iteration < this.maxIterations; iteration++) {
+      iterationCount = iteration + 1;
       logger.debug(`  [Worker] Iteration ${iteration + 1}/${this.maxIterations}`);
+      orchestrationLogger.logWorkerIteration(iteration + 1, this.maxIterations);
 
       const tools = this.mcpManager.getClient().getAllTools();
       let response: ModelResponse;
@@ -157,17 +187,21 @@ Please complete this subtask and report your findings.`,
 
           try {
             const args = JSON.parse(toolCall.function.arguments);
+            orchestrationLogger.logWorkerToolCall(toolName, args);
+
             const result = await this.mcpManager.getClient().executeTool(toolName, args);
 
             toolsUsed.push(toolName);
 
             // Check if tool returned images (multimodal support)
             let toolResultText: string;
+            let hasImages = false;
             if (typeof result === 'object' && result !== null && 'images' in result) {
               const typedResult = result as ToolResultWithImages;
               toolResultText = typedResult.text;
 
               if (typedResult.images && typedResult.images.length > 0) {
+                hasImages = true;
                 logger.info(`  [Worker] Tool returned ${typedResult.images.length} image(s), will attach to next model call`);
                 pendingImages.push(...typedResult.images);
               }
@@ -175,12 +209,15 @@ Please complete this subtask and report your findings.`,
               toolResultText = typeof result === 'string' ? result : JSON.stringify(result);
             }
 
+            orchestrationLogger.logWorkerToolResult(toolName, true, hasImages);
+
             const toolMessage = formatToolResult(toolCall.id, toolName, toolResultText);
             conversationHistory.push(toolMessage);
 
             logger.debug(`  ✓ [Worker] Tool ${toolName} completed`);
           } catch (error) {
             logger.error(`  ✗ [Worker] Tool ${toolName} failed:`, error);
+            orchestrationLogger.logWorkerToolResult(toolName, false, false);
 
             conversationHistory.push({
               role: 'tool',
@@ -216,6 +253,22 @@ Please complete this subtask and report your findings.`,
           pendingImages = []; // Clear for next iteration
         }
 
+        // After processing tool calls, check if we should prompt for completion
+        // This helps Worker recognize when task is done instead of over-iterating
+        const shouldPromptCompletion = this.shouldPromptForCompletion(
+          subtask.instruction,
+          toolsUsed,
+          iteration
+        );
+
+        if (shouldPromptCompletion) {
+          logger.debug(`  [Worker] Prompting for task completion check`);
+          conversationHistory.push({
+            role: 'user',
+            content: `You have successfully executed the required tools. Please confirm if the subtask is now complete and provide a summary of what was accomplished. If complete, do not call any more tools - just respond with your summary.`,
+          });
+        }
+
         // Continue to process tool results
         continue;
       }
@@ -231,12 +284,37 @@ Please complete this subtask and report your findings.`,
     }
 
     if (!finalResult) {
-      finalResult = 'Subtask could not be completed within iteration limit.';
-      logger.warn(`[Worker] Max iterations reached`);
+      // Max iterations reached - but check if work was actually done successfully
+      const hasSuccessfulTools = toolsUsed.length > 0;
+      const hasToolFailures = conversationHistory.some(msg => {
+        if (msg.role === 'tool' && msg.content) {
+          const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+          return content.includes('Error:');
+        }
+        return false;
+      });
+
+      if (hasSuccessfulTools && !hasToolFailures) {
+        // Tools executed successfully, just model didn't stop naturally
+        finalResult = `Task work completed (${toolsUsed.length} operations performed). Max iterations reached but all tool operations succeeded.`;
+        logger.info(`[Worker] Max iterations reached, but ${toolsUsed.length} tools executed successfully`);
+      } else if (hasToolFailures) {
+        finalResult = 'Subtask encountered errors and could not be completed within iteration limit.';
+        logger.warn(`[Worker] Max iterations reached with tool failures`);
+      } else {
+        finalResult = 'Subtask could not be completed within iteration limit.';
+        logger.warn(`[Worker] Max iterations reached with no work done`);
+      }
     }
 
+    // Determine success: true if we got a result and it doesn't indicate failure
+    const success = !!finalResult &&
+                   !finalResult.includes('could not be completed') &&
+                   !finalResult.includes('encountered errors');
+    orchestrationLogger.logWorkerComplete(success, toolsUsed, iterationCount);
+
     return {
-      success: !!finalResult && !finalResult.includes('could not be completed'),
+      success,
       result: finalResult,
       toolsUsed,
       reasoning: reasoning || 'Task executed',
@@ -247,5 +325,49 @@ Please complete this subtask and report your findings.`,
     // Try to extract reasoning if Worker provides it
     const reasoningMatch = content.match(/(?:Reasoning|Analysis|Approach):?\s*([^\n]+)/i);
     return reasoningMatch ? reasoningMatch[1].trim() : '';
+  }
+
+  /**
+   * Determine if we should prompt Worker to check for completion
+   * This helps prevent over-iteration by asking Worker to confirm task is done
+   */
+  private shouldPromptForCompletion(
+    instruction: string,
+    toolsUsed: string[],
+    currentIteration: number
+  ): boolean {
+    // Don't prompt on first iteration - let Worker do initial work
+    if (currentIteration === 0) {
+      return false;
+    }
+
+    // Don't prompt too frequently - only every 2 iterations after first
+    if (currentIteration % 2 !== 0) {
+      return false;
+    }
+
+    // Check if this looks like a completion-oriented task
+    const completionIndicators = [
+      'create', 'write', 'generate', 'build', 'make',
+      'read', 'list', 'find', 'search', 'get',
+      'update', 'modify', 'edit', 'change',
+      'delete', 'remove',
+    ];
+
+    const instructionLower = instruction.toLowerCase();
+    const hasCompletionIndicator = completionIndicators.some(indicator =>
+      instructionLower.includes(indicator)
+    );
+
+    // Prompt if we've seen successful file/content operations
+    const hasFileOperations = toolsUsed.some(tool =>
+      tool.includes('write') ||
+      tool.includes('create') ||
+      tool.includes('edit') ||
+      tool.includes('read')
+    );
+
+    // Prompt if we have completion indicators and file operations
+    return hasCompletionIndicator && hasFileOperations && toolsUsed.length >= 2;
   }
 }

@@ -1,8 +1,10 @@
 # Jiva - Versatile Autonomous AI Agent
 
+[![npm version](https://img.shields.io/npm/v/jiva-core.svg)](https://www.npmjs.com/package/jiva-core) [![License](https://img.shields.io/github/license/KarmaloopAI/Jiva.svg)](LICENSE) [![GitHub stars](https://img.shields.io/github/stars/KarmaloopAI/Jiva.svg?style=social&label=Star)](https://github.com/KarmaloopAI/Jiva)
+
 Jiva is a powerful autonomous AI agent powered by gpt-oss-120b with full MCP (Model Context Protocol) support. It's designed to be highly goal-oriented, autonomous, and extensible for various use cases.
 
-## 🚀 Quick Links
+## Quick Links
 
 - **[Quick Start Guide](docs/QUICKSTART.md)** - Get up and running in 30 seconds
 - **[Configuration Guide](docs/CONFIGURATION.md)** - Detailed configuration and provider setup
@@ -10,18 +12,22 @@ Jiva is a powerful autonomous AI agent powered by gpt-oss-120b with full MCP (Mo
 - **[Build Instructions](docs/BUILD.md)** - Detailed setup and development workflow
 - **[Troubleshooting](docs/TROUBLESHOOTING.md)** - Common issues and solutions
 
-## ✨ Features
+## Demo
+
+![Demo](jiva-new-demo.gif)
+
+## Features
 
 ### Core Capabilities
-- 🤖 **Dual-Agent Architecture**: Manager + Worker pattern for reliable task execution and planning
-- 🔌 **Provider Agnostic**: Works with Krutrim, Groq, OpenAI, Ollama, and any OpenAI-compatible API
-- 🎯 **Three-Phase Execution**: Planning → Execution → Synthesis for structured task completion
-- 🔧 **MCP Integration**: Seamless integration with Model Context Protocol servers for extensible tooling
-- 💬 **Smart Conversations**: Auto-save, restore, and AI-generated titles for all conversations
-- 📝 **Pretty Markdown**: Beautiful terminal output with syntax highlighting
-- 🎨 **Directive-Based**: Orient agent behavior with custom `jiva-directive.md` files
-- 🌐 **Multi-Modal Support**: Optional image understanding via Llama-4-Maverick-17B
-- 🔄 **Auto-Condensing**: Intelligent conversation history management to prevent token overload
+- **Dual-Agent Architecture**: Manager + Worker pattern for reliable task execution and planning
+- **Provider Agnostic**: Works with Krutrim, Groq, OpenAI, Ollama, and any OpenAI-compatible API
+- **Three-Phase Execution**: Planning → Execution → Synthesis for structured task completion
+- **MCP Integration**: Seamless integration with Model Context Protocol servers for extensible tooling
+- **Smart Conversations**: Auto-save, restore, and AI-generated titles for all conversations
+- **Pretty Markdown**: Beautiful terminal output with syntax highlighting
+- **Directive-Based**: Orient agent behavior with custom `jiva-directive.md` files
+- **Multi-Modal Support**: Optional image understanding via Llama-4-Maverick-17B
+- **Auto-Condensing**: Intelligent conversation history management to prevent token overload
 
 ### Advanced Features (v0.2.1)
 - **Dual-Agent System**: Separate Manager and Worker agents for better task focus and reliability
@@ -34,7 +40,7 @@ Jiva is a powerful autonomous AI agent powered by gpt-oss-120b with full MCP (Mo
 
 See [NEW_FEATURES.md](docs/NEW_FEATURES.md) for detailed information.
 
-## 📦 Installation
+## Installation
 
 ### Global Install (Recommended)
 
@@ -51,14 +57,14 @@ jiva setup
 ### Development Install
 
 ```bash
-git clone https://github.com/yourusername/jiva.git
+git clone https://github.com/KarmaloopAI/Jiva.git
 cd jiva
 npm install
 npm run build
 npm link  # For global CLI access
 ```
 
-## 🚀 Quick Start
+## Quick Start
 
 ### 1. Install Jiva
 
@@ -75,10 +81,10 @@ jiva setup
 ```
 
 You'll be prompted for:
-- ☁️ Krutrim API endpoint (default: `https://cloud.olakrutrim.com/v1/chat/completions`)
-- 🔑 API key for gpt-oss-120b ([Get your API key](https://cloud.olakrutrim.com))
-- 🎨 Optional multimodal model (Llama-4-Maverick-17B)
-- 🔌 MCP server configuration
+- Krutrim API endpoint (default: `https://cloud.olakrutrim.com/v1/chat/completions`)
+- API key for gpt-oss-120b ([Get your API key](https://cloud.olakrutrim.com))
+- Optional multimodal model (Llama-4-Maverick-17B)
+- MCP server configuration
 
 ### 3. Start Chatting
 
@@ -198,7 +204,7 @@ Jiva will automatically look for this file in:
 2. `jiva-directive.md` in workspace root
 3. `.jiva/directive.md` in workspace root
 
-## 🔌 MCP Servers
+## MCP Servers
 
 Jiva leverages the Model Context Protocol (MCP) to provide extensible tooling. It comes pre-configured with the Filesystem server and makes it easy to add more.
 

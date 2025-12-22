@@ -12,6 +12,7 @@ import { ConversationManager } from './conversation-manager.js';
 import { ManagerAgent } from './manager-agent.js';
 import { WorkerAgent } from './worker-agent.js';
 import { logger } from '../utils/logger.js';
+import { orchestrationLogger } from '../utils/orchestration-logger.js';
 import { Message } from '../models/base.js';
 
 export interface DualAgentConfig {
@@ -20,6 +21,7 @@ export interface DualAgentConfig {
   workspace: WorkspaceManager;
   conversationManager?: ConversationManager;
   maxSubtasks?: number;
+  maxIterations?: number;
   autoSave?: boolean;
   condensingThreshold?: number;
 }
@@ -44,6 +46,7 @@ export class DualAgent {
   private worker: WorkerAgent;
 
   private maxSubtasks: number;
+  private maxIterations: number;
   private autoSave: boolean;
   private condensingThreshold: number;
 
@@ -56,12 +59,13 @@ export class DualAgent {
     this.conversationManager = config.conversationManager || null;
 
     this.maxSubtasks = config.maxSubtasks || 10;
+    this.maxIterations = config.maxIterations || 10;
     this.autoSave = config.autoSave !== false;
     this.condensingThreshold = config.condensingThreshold || 30;
 
     // Initialize agents
     this.manager = new ManagerAgent(this.orchestrator, this.workspace);
-    this.worker = new WorkerAgent(this.orchestrator, this.mcpManager, this.workspace);
+    this.worker = new WorkerAgent(this.orchestrator, this.mcpManager, this.workspace, this.maxIterations);
 
     logger.info('[*] Dual-agent system initialized (Manager + Worker)');
   }
@@ -73,6 +77,8 @@ export class DualAgent {
     logger.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     logger.info(`>> User: ${userMessage}`);
     logger.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+    orchestrationLogger.logUserMessage(userMessage);
 
     // Check if conversation needs condensing BEFORE adding new message
     if (this.userConversationHistory.length > this.condensingThreshold && this.conversationManager) {
@@ -97,14 +103,22 @@ export class DualAgent {
     logger.info('\n[PHASE 1: Planning]');
     logger.info('─────────────────────────────────────────');
 
+    const phaseStartTime = Date.now();
+    orchestrationLogger.logPhaseStart('PLANNING');
+
     const plan = await this.manager.createPlan({
       userRequest: userMessage,
       context: this.getRecentContext(),
     });
 
+    orchestrationLogger.logPhaseEnd('PLANNING', Date.now() - phaseStartTime);
+
     // PHASE 2: Execute subtasks
     logger.info('\n[PHASE 2: Execution]');
     logger.info('─────────────────────────────────────────');
+
+    const executionStartTime = Date.now();
+    orchestrationLogger.logPhaseStart('EXECUTION');
 
     const results: { subtask: string; result: string }[] = [];
     const subtasksToExecute = plan.subtasks.slice(0, this.maxSubtasks);
@@ -128,27 +142,24 @@ export class DualAgent {
         result: workerResult.result,
       });
 
-      // Manager reviews result
-      const decision = await this.manager.reviewResults(subtask, workerResult.result);
-      totalIterations += 1;
-
-      if (!decision.isComplete && decision.nextAction) {
-        // Manager wants to do something else
-        logger.info(`[Manager] Next action: ${decision.nextAction}`);
-
-        // Add as new subtask if not at limit
-        if (results.length < this.maxSubtasks) {
-          subtasksToExecute.push(decision.nextAction);
-        }
-      }
+      // Note: Manager reviews are now disabled for individual subtasks
+      // Manager only synthesizes final response at the end
+      // This reduces overhead from 27 reviews to 1 synthesis for typical tasks
     }
+
+    orchestrationLogger.logPhaseEnd('EXECUTION', Date.now() - executionStartTime);
 
     // PHASE 3: Synthesize final response
     logger.info('\n[PHASE 3: Synthesis]');
     logger.info('─────────────────────────────────────────');
 
+    const synthesisStartTime = Date.now();
+    orchestrationLogger.logPhaseStart('SYNTHESIS');
+
     const finalResponse = await this.synthesizeResponse(plan, results);
     totalIterations += 1;
+
+    orchestrationLogger.logPhaseEnd('SYNTHESIS', Date.now() - synthesisStartTime);
 
     // Add assistant response to user conversation history
     this.userConversationHistory.push({
@@ -169,6 +180,8 @@ export class DualAgent {
     logger.info(`[+] Complete: ${totalIterations} iterations, ${allToolsUsed.length} tools used`);
     logger.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
+    orchestrationLogger.logFinalResponse(finalResponse, totalIterations, allToolsUsed);
+
     return {
       content: finalResponse,
       iterations: totalIterations,
@@ -184,12 +197,28 @@ export class DualAgent {
     plan: { subtasks: string[]; reasoning: string },
     results: { subtask: string; result: string }[]
   ): Promise<string> {
-    // If only one subtask and simple, just return the result
+    // If only one subtask and it's a short success message, return directly
+    // But ALWAYS synthesize if result indicates failure or incomplete work
     if (results.length === 1 && results[0].result.length < 500) {
-      return results[0].result;
+      const result = results[0].result;
+
+      // Check if this is a failure/incomplete message
+      const isFailure = result.includes('could not be completed') ||
+                       result.includes('failed') ||
+                       result.includes('error') ||
+                       result.toLowerCase().includes('unable to');
+
+      // If it's a failure, always let Manager synthesize to provide proper context
+      if (isFailure) {
+        logger.info('[DualAgent] Result indicates failure, invoking Manager synthesis');
+        return await this.manager.synthesizeResponse(results);
+      }
+
+      // Otherwise, short successful result can be returned directly
+      return result;
     }
 
-    // Otherwise, ask Manager to synthesize
+    // Multiple subtasks or long result - ask Manager to synthesize
     return await this.manager.synthesizeResponse(results);
   }
 

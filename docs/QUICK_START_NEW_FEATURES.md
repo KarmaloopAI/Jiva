@@ -34,7 +34,7 @@ Your conversation auto-saves in the background! 💾
 
 ```
 You: save
-✓ Conversation saved: conv-2024-12-09T10-30-00-abc123
+✓ Conversation saved: conv-2025-12-09T10-30-00-abc123
 ```
 
 ### 4. List All Conversations
@@ -44,8 +44,8 @@ You: list
 
 Saved Conversations (3):
 
-1. conv-2024-12-09T12-45-15-ghi789
-   Updated: 12/9/2024, 12:45:15 PM
+1. conv-2025-12-09T12-45-15-ghi789
+   Updated: 12/9/2025, 12:45:15 PM
    Messages: 18
    Discussion about implementing new features
 ```
@@ -56,11 +56,11 @@ Saved Conversations (3):
 You: load
 
 ? Select conversation to load:
-  ❯ 1. conv-2024-12-09T12-45-15-ghi789 (12/9/2024, 12:45:15 PM)
-    2. conv-2024-12-09T11-15-30-def456 (12/9/2024, 11:15:30 AM)
+  ❯ 1. conv-2025-12-09T12-45-15-ghi789 (12/9/2025, 12:45:15 PM)
+    2. conv-2025-12-09T11-15-30-def456 (12/9/2025, 11:15:30 AM)
     Cancel
 
-✓ Conversation loaded: conv-2024-12-09T12-45-15-ghi789
+✓ Conversation loaded: conv-2025-12-09T12-45-15-ghi789
 ```
 
 Now you're back in that conversation! 🎉
@@ -101,9 +101,9 @@ ls ~/.jiva/conversations/
 
 Output:
 ```
-conv-2024-12-09T10-30-00-abc123.json
-conv-2024-12-09T11-15-30-def456.json
-conv-2024-12-09T12-45-15-ghi789.json
+conv-2025-12-09T10-30-00-abc123.json
+conv-2025-12-09T11-15-30-def456.json
+conv-2025-12-09T12-45-15-ghi789.json
 ```
 
 Each file is a complete conversation with metadata.

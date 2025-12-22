@@ -7,6 +7,7 @@ import chalk from 'chalk';
 import ora from 'ora';
 import { DualAgent } from '../../core/dual-agent.js';
 import { logger } from '../../utils/logger.js';
+import { orchestrationLogger } from '../../utils/orchestration-logger.js';
 import { formatForCLI } from '../../utils/markdown.js';
 
 export interface REPLOptions {
@@ -60,6 +61,11 @@ export async function startREPL(options: REPLOptions): Promise<void> {
 
       if (command === 'exit' || command === 'quit') {
         console.log(chalk.gray('\nGoodbye!\n'));
+        const logPath = orchestrationLogger.getLogFilePath();
+        if (logPath) {
+          console.log(chalk.gray(`Orchestration log saved to: ${logPath}\n`));
+        }
+        orchestrationLogger.close();
         break;
       }
 

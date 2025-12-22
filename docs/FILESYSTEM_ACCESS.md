@@ -222,7 +222,7 @@ Jiva: ✅ Reads ~/.ssh/config
 You: Move all screenshots from Downloads to ~/Pictures/Screenshots
 Jiva: ✅ Accesses both directories
 
-You: Backup this workspace to ~/Backups/2024-12-09/
+You: Backup this workspace to ~/Backups/2025-12-09/
 Jiva: ✅ Creates backup in different directory
 ```
 

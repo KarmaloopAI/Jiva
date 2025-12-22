@@ -16,6 +16,7 @@ import { DualAgent } from '../../core/dual-agent.js';
 import { runSetupWizard, updateConfiguration } from './setup-wizard.js';
 import { startREPL } from './repl.js';
 import { logger, LogLevel } from '../../utils/logger.js';
+import { orchestrationLogger } from '../../utils/orchestration-logger.js';
 import { readFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
@@ -29,6 +30,8 @@ const packageJson = JSON.parse(
 );
 
 const program = new Command();
+program
+  .option('--condensing-threshold <number>', 'Condensing threshold for agent', parseInt);
 
 program
   .name('jiva')
@@ -66,6 +69,7 @@ program
 
 program
   .command('chat')
+  .option('--condensing-threshold <number>', 'Condensing threshold for agent', parseInt)
   .description('Start interactive chat with Jiva')
   .option('-w, --workspace <path>', 'Workspace directory', process.cwd())
   .option('-d, --directive <path>', 'Path to jiva-directive.md file')
@@ -187,8 +191,9 @@ program
         workspace,
         conversationManager,
         maxSubtasks: options.maxIterations || 10,
+        maxIterations: options.maxIterations || 10,
         autoSave: true,
-        condensingThreshold: 30,
+        condensingThreshold: options.condensingThreshold ?? 30,
       });
 
       // Start REPL
@@ -196,14 +201,23 @@ program
 
       // Cleanup
       await agent.cleanup();
+      orchestrationLogger.close();
+
+      // Show log location
+      const logPath = orchestrationLogger.getLogFilePath();
+      if (logPath) {
+        logger.info(`\nOrchestration log saved to: ${logPath}`);
+      }
     } catch (error) {
       logger.error('Chat session failed', error);
+      orchestrationLogger.close();
       process.exit(1);
     }
   });
 
 program
   .command('run')
+  .option('--condensing-threshold <number>', 'Condensing threshold for agent', parseInt)
   .description('Run Jiva with a single prompt')
   .argument('<prompt>', 'Prompt to execute')
   .option('-w, --workspace <path>', 'Workspace directory', process.cwd())
@@ -326,8 +340,9 @@ program
         workspace,
         conversationManager,
         maxSubtasks: options.maxIterations || 10,
+        maxIterations: options.maxIterations || 10,
         autoSave: true,
-        condensingThreshold: 30,
+        condensingThreshold: options.condensingThreshold ?? 30,
       });
 
       // Execute prompt
@@ -348,16 +363,28 @@ program
 
       // Cleanup
       await agent.cleanup();
+      orchestrationLogger.close();
+
+      // Show log location
+      const logPath = orchestrationLogger.getLogFilePath();
+      if (logPath) {
+        logger.info(`\nOrchestration log saved to: ${logPath}`);
+      }
     } catch (error) {
       logger.error('Execution failed', error);
+      orchestrationLogger.close();
       process.exit(1);
     }
   });
 
 // Default command (interactive chat)
 program.action(async (options) => {
-  // If no command specified, run chat
-  await program.parseAsync(['', '', 'chat']);
+  // If no command specified, run chat with the same options
+  const args = process.argv.slice(2);
+  // Insert 'chat' as the command if not already present
+  const hasCommand = args.some(arg => ['chat', 'run', 'setup', 'config'].includes(arg));
+  const newArgs = hasCommand ? args : ['chat', ...args];
+  await program.parseAsync(['node', 'jiva', ...newArgs]);
 });
 
 program.parse();

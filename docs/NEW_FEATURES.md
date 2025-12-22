@@ -1,4 +1,4 @@
-# New Features - December 2024
+# New Features - December 2025
 
 ## Overview
 
@@ -73,9 +73,9 @@ Automatically saves and allows restoring of conversation histories, enabling:
 
 ```
 ~/.jiva/conversations/
-├── conv-2024-12-09T10-30-00-abc123.json
-├── conv-2024-12-09T11-15-30-def456.json
-└── conv-2024-12-09T12-45-15-ghi789.json
+├── conv-2025-12-09T10-30-00-abc123.json
+├── conv-2025-12-09T11-15-30-def456.json
+└── conv-2025-12-09T12-45-15-ghi789.json
 ```
 
 ### Auto-Save
@@ -90,7 +90,7 @@ Automatically saves and allows restoring of conversation histories, enabling:
 #### Save Current Conversation
 ```
 You: save
-✓ Conversation saved: conv-2024-12-09T10-30-00-abc123
+✓ Conversation saved: conv-2025-12-09T10-30-00-abc123
 ```
 
 #### List Saved Conversations
@@ -99,20 +99,20 @@ You: list
 
 Saved Conversations (3):
 
-1. conv-2024-12-09T12-45-15-ghi789
-   Updated: 12/9/2024, 12:45:15 PM
+1. conv-2025-12-09T12-45-15-ghi789
+   Updated: 12/9/2025, 12:45:15 PM
    Messages: 18
    Workspace: /Users/abidev/dev/Jiva
    Discussion about implementing new features
 
-2. conv-2024-12-09T11-15-30-def456
-   Updated: 12/9/2024, 11:15:30 AM
+2. conv-2025-12-09T11-15-30-def456
+   Updated: 12/9/2025, 11:15:30 AM
    Messages: 24
    Workspace: /Users/abidev/dev/ProjectX
    Debugging authentication issues
 
-3. conv-2024-12-09T10-30-00-abc123
-   Updated: 12/9/2024, 10:30:00 AM
+3. conv-2025-12-09T10-30-00-abc123
+   Updated: 12/9/2025, 10:30:00 AM
    Messages: 12
    Workspace: /Users/abidev/dev/Jiva
    Setting up Jiva configuration
@@ -123,17 +123,17 @@ Saved Conversations (3):
 You: load
 
 Saved Conversations:
-  1. conv-2024-12-09T12-45-15-ghi789 (12/9/2024, 12:45:15 PM)
+  1. conv-2025-12-09T12-45-15-ghi789 (12/9/2025, 12:45:15 PM)
      Discussion about implementing new features
      18 messages
 
-  2. conv-2024-12-09T11-15-30-def456 (12/9/2024, 11:15:30 AM)
+  2. conv-2025-12-09T11-15-30-def456 (12/9/2025, 11:15:30 AM)
      Debugging authentication issues
      24 messages
 
-? Select conversation to load: ❯ 1. conv-2024-12-09T12-45-15-ghi789
+? Select conversation to load: ❯ 1. conv-2025-12-09T12-45-15-ghi789
 
-✓ Conversation loaded: conv-2024-12-09T12-45-15-ghi789
+✓ Conversation loaded: conv-2025-12-09T12-45-15-ghi789
 ```
 
 ### Conversation Metadata
@@ -591,5 +591,5 @@ These four enhancements make Jiva:
 ---
 
 **Documentation Version:** 1.0
-**Last Updated:** December 9, 2024
+**Last Updated:** December 9, 2025
 **Compatible with:** Jiva v0.1.0+

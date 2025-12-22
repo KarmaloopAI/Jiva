@@ -1,6 +1,6 @@
 # Jiva Improvements Summary
 
-**Date:** December 9, 2024
+**Date:** December 9, 2025
 **Version:** 0.1.0+
 
 ## 🎉 Four Major Enhancements Implemented
@@ -44,9 +44,9 @@ condensingThreshold: 30 // Default
 **Storage:**
 ```
 ~/.jiva/conversations/
-├── conv-2024-12-09T10-30-00-abc123.json
-├── conv-2024-12-09T11-15-30-def456.json
-└── conv-2024-12-09T12-45-15-ghi789.json
+├── conv-2025-12-09T10-30-00-abc123.json
+├── conv-2025-12-09T11-15-30-def456.json
+└── conv-2025-12-09T12-45-15-ghi789.json
 ```
 
 ---
@@ -232,7 +232,7 @@ You: Hello Jiva
 Jiva: [Beautifully formatted markdown response]
 
 You: save
-✓ Conversation saved: conv-2024-12-09T10-30-00-abc123
+✓ Conversation saved: conv-2025-12-09T10-30-00-abc123
 
 You: list
 [Shows all saved conversations]
