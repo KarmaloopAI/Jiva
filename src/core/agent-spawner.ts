@@ -73,8 +73,29 @@ export class AgentSpawner {
     this.conversationManager = conversationManager;
     this.basePersonaManager = basePersonaManager;
     this.parentAgentId = options?.parentAgentId;
-    this.maxDepth = options?.maxDepth || 3; // Prevent infinite recursion
+    this.maxDepth = options?.maxDepth || 1; // Default: only top-level can spawn
     this.currentDepth = options?.currentDepth || 0;
+  }
+
+  /**
+   * Check if agent spawning is allowed at current depth
+   */
+  canSpawnMore(): boolean {
+    return this.currentDepth < this.maxDepth;
+  }
+
+  /**
+   * Get current depth level
+   */
+  getCurrentDepth(): number {
+    return this.currentDepth;
+  }
+
+  /**
+   * Get maximum depth
+   */
+  getMaxDepth(): number {
+    return this.maxDepth;
   }
 
   /**
@@ -88,8 +109,20 @@ export class AgentSpawner {
       );
     }
 
+    // Ensure PersonaManager is initialized
+    if (this.basePersonaManager.getPersonas().length === 0) {
+      logger.info('[AgentSpawner] PersonaManager not initialized, initializing now...');
+      await this.basePersonaManager.initialize();
+    }
+
     // Validate persona exists
     const availablePersonas = this.basePersonaManager.getPersonas();
+    if (availablePersonas.length === 0) {
+      throw new Error(
+        `No personas available. Please install personas in ~/.jiva/personas/ or activate one with 'jiva persona activate <name>'`
+      );
+    }
+    
     const personaExists = availablePersonas.some((p: any) => p.manifest.name === request.persona);
     
     if (!personaExists) {
@@ -150,12 +183,13 @@ export class AgentSpawner {
         personaManager: subPersonaManager,
         maxSubtasks: 20,
         maxIterations: request.maxIterations || 10,
+        maxAgentDepth: this.maxDepth, // Inherit parent's max depth limit
         autoSave: false, // Sub-agents don't auto-save
       };
 
       const subAgent = new DualAgent(subAgentConfig);
       
-      // Enable spawning for the sub-agent
+      // Override with the nested spawner (which has currentDepth + 1)
       subAgent.setAgentSpawner(subSpawner);
 
       // Track the spawned agent

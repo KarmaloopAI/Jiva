@@ -210,15 +210,24 @@ program
       // Determine workspace directory first
       const workspaceDir = options.workspace || process.cwd();
 
-      // Update filesystem MCP server to allow broad filesystem access
+      // Ensure base filesystem MCP server is always available
       // The workspace is the default working area, but Jiva can access any files
       // subject to OS permissions
-      // mcpServers already loaded from config above
-      if (mcpServers['filesystem']) {
-        // Note: The filesystem MCP server rejects "/" as a security measure
-        // Use /Users on macOS/Linux to allow access to all user directories
-        // Use C:\Users on Windows
-        const allowedPath = process.platform === 'win32' ? 'C:\\Users' : '/Users';
+      // Note: The filesystem MCP server rejects "/" as a security measure
+      // Use /Users on macOS/Linux to allow access to all user directories
+      // Use C:\Users on Windows
+      const allowedPath = process.platform === 'win32' ? 'C:\\Users' : '/Users';
+      
+      if (!mcpServers['filesystem']) {
+        // Add default filesystem server if not configured
+        mcpServers['filesystem'] = {
+          command: 'npx',
+          args: ['-y', '@modelcontextprotocol/server-filesystem', allowedPath],
+          enabled: true,
+        };
+        logger.info(`Adding default filesystem MCP server (${allowedPath})`);
+      } else {
+        // Update existing filesystem server args
         mcpServers['filesystem'].args = [
           '-y',
           '@modelcontextprotocol/server-filesystem',
@@ -227,7 +236,6 @@ program
         logger.debug(`Filesystem server args set to: ${JSON.stringify(mcpServers['filesystem'].args)}`);
         logger.debug(`Allowed path: "${allowedPath}"`);
       }
-
       // Initialize MCP servers with updated paths
       const mcpManager = new MCPServerManager();
       await mcpManager.initialize(mcpServers);
@@ -594,15 +602,24 @@ program
       // Determine workspace directory first
       const workspaceDir = options.workspace || process.cwd();
 
-      // Update filesystem MCP server to allow broad filesystem access
+      // Ensure base filesystem MCP server is always available
       // The workspace is the default working area, but Jiva can access any files
       // subject to OS permissions
-      // mcpServers already loaded from config above
-      if (mcpServers['filesystem']) {
-        // Note: The filesystem MCP server rejects "/" as a security measure
-        // Use /Users on macOS/Linux to allow access to all user directories
-        // Use C:\Users on Windows
-        const allowedPath = process.platform === 'win32' ? 'C:\\Users' : '/Users';
+      // Note: The filesystem MCP server rejects "/" as a security measure
+      // Use /Users on macOS/Linux to allow access to all user directories
+      // Use C:\Users on Windows
+      const allowedPath = process.platform === 'win32' ? 'C:\\Users' : '/Users';
+      
+      if (!mcpServers['filesystem']) {
+        // Add default filesystem server if not configured
+        mcpServers['filesystem'] = {
+          command: 'npx',
+          args: ['-y', '@modelcontextprotocol/server-filesystem', allowedPath],
+          enabled: true,
+        };
+        logger.info(`Adding default filesystem MCP server (${allowedPath})`);
+      } else {
+        // Update existing filesystem server args
         mcpServers['filesystem'].args = [
           '-y',
           '@modelcontextprotocol/server-filesystem',
@@ -611,7 +628,6 @@ program
         logger.debug(`Filesystem server args set to: ${JSON.stringify(mcpServers['filesystem'].args)}`);
         logger.debug(`Allowed path: "${allowedPath}"`);
       }
-
       // Initialize MCP servers with updated paths
       const mcpManager = new MCPServerManager();
       await mcpManager.initialize(mcpServers);

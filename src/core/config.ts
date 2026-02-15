@@ -38,6 +38,7 @@ const JivaConfigSchema = z.object({
   workspace: z.object({
     defaultDirectivePath: z.string().optional(),
   }).optional(),
+  activePersona: z.string().optional(),
   debug: z.boolean().default(false),
 });
 
@@ -120,6 +121,18 @@ export class ConfigManager {
 
   getDefaultDirectivePath(): string | undefined {
     return this.store.get('workspace.defaultDirectivePath');
+  }
+
+  setActivePersona(name: string | null) {
+    if (name === null) {
+      this.store.delete('activePersona');
+    } else {
+      this.store.set('activePersona', name);
+    }
+  }
+
+  getActivePersona(): string | undefined {
+    return this.store.get('activePersona');
   }
 
   reset() {

@@ -28,6 +28,7 @@ export interface DualAgentConfig {
   personaManager?: PersonaManager;
   maxSubtasks?: number;
   maxIterations?: number;
+  maxAgentDepth?: number; // Max depth for agent spawning (default: 1)
   autoSave?: boolean;
   condensingThreshold?: number;
 }
@@ -56,6 +57,7 @@ export class DualAgent {
 
   private maxSubtasks: number;
   private maxIterations: number;
+  private maxAgentDepth: number;
   private autoSave: boolean;
   private condensingThreshold: number;
 
@@ -70,6 +72,7 @@ export class DualAgent {
 
     this.maxSubtasks = config.maxSubtasks || 10;
     this.maxIterations = config.maxIterations || 10;
+    this.maxAgentDepth = config.maxAgentDepth ?? 1; // Default: only Manager can spawn
     this.autoSave = config.autoSave !== false;
     this.condensingThreshold = config.condensingThreshold || 30;
 
@@ -78,19 +81,30 @@ export class DualAgent {
     this.worker = new WorkerAgent(this.orchestrator, this.mcpManager, this.workspace, this.maxIterations, this.personaManager || undefined);
     this.client = new ClientAgent(this.orchestrator, this.mcpManager);
 
-    // Initialize AgentSpawner if PersonaManager is available
-    if (this.personaManager) {
-      this.agentSpawner = new AgentSpawner(
-        this.orchestrator,
-        this.mcpManager,
-        this.workspace,
-        this.conversationManager,
-        this.personaManager
-      );
-      this.worker.setAgentSpawner(this.agentSpawner);
+    // Initialize AgentSpawner - always available as a baseline tool
+    // Create a PersonaManager if one wasn't provided
+    let spawnerPersonaManager: PersonaManager = this.personaManager!;
+    if (!this.personaManager) {
+      const { PersonaManager } = require('../personas/persona-manager.js');
+      spawnerPersonaManager = new PersonaManager();
+      // Note: Not awaiting initialize() here - will be lazy loaded if needed
     }
+    
+    this.agentSpawner = new AgentSpawner(
+      this.orchestrator,
+      this.mcpManager,
+      this.workspace,
+      this.conversationManager,
+      spawnerPersonaManager,
+      {
+        maxDepth: this.maxAgentDepth,
+        currentDepth: 0,
+      }
+    );
+    this.worker.setAgentSpawner(this.agentSpawner);
 
     logger.info('[*] Three-agent system initialized (Manager + Worker + Client)');
+    logger.info(`[*] Agent spawn depth limit: ${this.maxAgentDepth} (${this.maxAgentDepth === 1 ? 'only Manager can spawn' : `${this.maxAgentDepth} levels deep`})`);
     
     if (this.personaManager) {
       const activePersona = this.personaManager.getActivePersona();

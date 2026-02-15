@@ -8,6 +8,9 @@
   },
   "type": "module",
   "scripts": {
+    "test:web": "playwright test",
+    "postinstall": "playwright install",
+
     "build": "tsc",
     "dev": "tsx src/interfaces/cli/index.ts",
     "dev:http": "tsx src/interfaces/http/index.ts",

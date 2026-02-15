@@ -161,7 +161,17 @@ export class SessionManager extends EventEmitter {
       // Initialize MCP servers per-session
       const mcpManager = new MCPServerManager();
       
-      // Load MCP server config
+      // Ensure base filesystem MCP server is always available
+      const allowedPath = process.platform === 'win32' ? 'C:\\Users' : '/Users';
+      const baseMcpServers: Record<string, any> = {
+        filesystem: {
+          command: 'npx',
+          args: ['-y', '@modelcontextprotocol/server-filesystem', allowedPath],
+          enabled: true,
+        }
+      };
+      
+      // Load MCP server config from storage
       const mcpConfig = await this.config.storageProvider.getConfig<Array<{
         name: string;
         command: string;
@@ -170,14 +180,18 @@ export class SessionManager extends EventEmitter {
       }>>('mcpServers');
       if (mcpConfig && Array.isArray(mcpConfig)) {
         for (const serverConfig of mcpConfig) {
-          await mcpManager.addServer(serverConfig.name, {
+          // Add to base servers (will override filesystem if configured)
+          baseMcpServers[serverConfig.name] = {
             command: serverConfig.command,
             args: serverConfig.args,
             env: serverConfig.env,
             enabled: true,
-          });
+          };
         }
       }
+      
+      // Initialize all MCP servers (base + configured)
+      await mcpManager.initialize(baseMcpServers);
 
       // Initialize workspace
       const workspace = new WorkspaceManager(this.config.storageProvider);

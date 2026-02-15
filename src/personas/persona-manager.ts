@@ -11,14 +11,17 @@ import {
 } from './persona-loader.js';
 import { loadSkillContent } from './skill-loader.js';
 import { logger } from '../utils/logger.js';
+import { ConfigManager } from '../core/config.js';
 
 export class PersonaManager {
   private personas: Persona[] = [];
   private activePersona: Persona | null = null;
   private additionalSearchPaths: string[] = [];
+  private configManager: ConfigManager;
 
   constructor(additionalPaths: string[] = []) {
     this.additionalSearchPaths = additionalPaths;
+    this.configManager = ConfigManager.getInstance();
   }
 
   /**
@@ -35,6 +38,18 @@ export class PersonaManager {
         `Initialized with ${this.personas.length} personas:`,
         this.personas.map((p) => p.manifest.name).join(', ')
       );
+      
+      // Restore active persona from config
+      const savedPersonaName = this.configManager.getActivePersona();
+      if (savedPersonaName) {
+        const success = this.activatePersona(savedPersonaName);
+        if (success) {
+          logger.info(`Restored active persona: ${savedPersonaName}`);
+        } else {
+          logger.warn(`Saved persona '${savedPersonaName}' not found, clearing config`);
+          this.configManager.setActivePersona(null);
+        }
+      }
     }
   }
 
@@ -78,6 +93,9 @@ export class PersonaManager {
     this.activePersona = persona;
     persona.active = true;
 
+    // Persist to config
+    this.configManager.setActivePersona(persona.manifest.name);
+
     const mcpServerCount = persona.mcpServers ? Object.keys(persona.mcpServers).length : 0;
     logger.info(
       `Activated persona: ${persona.manifest.name} ` +
@@ -95,6 +113,7 @@ export class PersonaManager {
       this.activePersona.active = false;
       logger.info(`Deactivated persona: ${this.activePersona.manifest.name}`);
       this.activePersona = null;
+      this.configManager.setActivePersona(null);
     }
   }
 

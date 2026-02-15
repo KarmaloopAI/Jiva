@@ -13,7 +13,7 @@ import { MCPServerManager } from '../mcp/server-manager.js';
 import { WorkspaceManager } from './workspace.js';
 import { PersonaManager } from '../personas/persona-manager.js';
 import { AgentSpawner } from './agent-spawner.js';
-import { Message, MessageContent, ModelResponse } from '../models/base.js';
+import { Message, MessageContent, ModelResponse, Tool } from '../models/base.js';
 import { formatToolResult } from '../models/harmony.js';
 import { logger } from '../utils/logger.js';
 import { orchestrationLogger } from '../utils/orchestration-logger.js';
@@ -142,9 +142,10 @@ BROWSER TASKS:
 - Both steps are required - creating a tab alone does NOT navigate to a URL
 - After navigation succeeds, the task is COMPLETE - stop and report success
 
-Available tools: ${this.mcpManager.getClient().getAllTools().map(t => t.name).join(', ')}${this.agentSpawner ? ', spawn_agent' : ''}`;
+Available tools: ${this.mcpManager.getClient().getAllTools().map(t => t.name).join(', ')}${this.agentSpawner && this.agentSpawner.canSpawnMore() ? ', spawn_agent' : ''}`;
 
-    if (this.agentSpawner) {
+    // Add spawn_agent documentation only if depth allows spawning
+    if (this.agentSpawner && this.agentSpawner.canSpawnMore()) {
       const availablePersonas = this.agentSpawner.getAvailablePersonas();
       systemContent += `\n\nAGENT SPAWNING:
 - You can spawn sub-agents with specific personas to delegate complex tasks
@@ -163,10 +164,13 @@ Available tools: ${this.mcpManager.getClient().getAllTools().map(t => t.name).jo
     }
 
     // System prompt for Worker
+    // Use 'developer' role for Harmony format compatibility (will be converted to 'system' by model)
     conversationHistory.push({
-      role: 'system',
+      role: 'developer' as any,  // Harmony format requires 'developer' for tool injection
       content: systemContent,
     });
+
+    logger.debug(`  [Worker] System prompt includes: Available tools: ${this.mcpManager.getClient().getAllTools().map(t => t.name).join(', ')}`);
 
     // Add subtask instruction
     conversationHistory.push({
@@ -187,7 +191,47 @@ Please complete this subtask and report your findings.`,
       logger.debug(`  [Worker] Iteration ${iteration + 1}/${this.maxIterations}`);
       orchestrationLogger.logWorkerIteration(iteration + 1, this.maxIterations);
 
-      const tools = this.mcpManager.getClient().getAllTools();
+      const mcpTools = this.mcpManager.getClient().getAllTools();
+      
+      // Add spawn_agent tool only if depth limit allows spawning
+      const tools = [...mcpTools];
+      
+      if (this.agentSpawner && this.agentSpawner.canSpawnMore()) {
+        const spawnAgentTool: Tool = {
+          name: 'spawn_agent',
+          description: 'Spawn a sub-agent with a specific persona to delegate complex tasks',
+          parameters: {
+            type: 'object',
+            properties: {
+              persona: {
+                type: 'string',
+                description: 'The persona name for the sub-agent (e.g., "code-reviewer", "developer", "tester")',
+              },
+              task: {
+                type: 'string',
+                description: 'Specific task for the sub-agent to complete',
+              },
+              context: {
+                type: 'string',
+                description: 'Optional additional context or background information',
+              },
+              maxIterations: {
+                type: 'number',
+                description: 'Optional maximum iterations for the sub-agent (default: 10)',
+              },
+            },
+            required: ['persona', 'task'],
+          },
+        };
+        tools.push(spawnAgentTool);
+      }
+      
+      logger.info(`  [Worker] Tools available: ${tools.length}`);
+      if (tools.length > 0) {
+        logger.debug(`  [Worker] Tool names: ${tools.map(t => t.name).join(', ')}`);
+      } else {
+        logger.warn(`  [Worker] WARNING: No tools available! MCP servers may not be connected.`);
+      }
       let response: ModelResponse;
 
       try {
