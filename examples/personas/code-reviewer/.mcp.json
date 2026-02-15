@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "github": {
+      "url": "https://mcp.github.com/v1",
+      "headers": {
+        "Authorization": "Bearer YOUR_GITHUB_TOKEN_HERE"
+      },
+      "enabled": false
+    },
+    "code-analysis": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-code-analysis"],
+      "enabled": true
+    }
+  }
+}

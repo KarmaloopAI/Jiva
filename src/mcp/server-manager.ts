@@ -59,15 +59,30 @@ export class MCPServerManager {
   }
 
   /**
-   * Connect to a specific server
+   * Connect to a specific server (supports both stdio and HTTP/SSE)
    */
   private async connectServer(name: string, config: MCPServerConfig): Promise<void> {
-    await this.mcpClient.connect(
-      name,
-      config.command,
-      config.args || [],
-      config.env
-    );
+    if (config.url) {
+      // HTTP/SSE transport
+      await this.mcpClient.connectSSE(
+        name,
+        config.url,
+        config.headers
+      );
+    } else if (config.command) {
+      // Stdio transport
+      await this.mcpClient.connect(
+        name,
+        config.command,
+        config.args || [],
+        config.env
+      );
+    } else {
+      throw new MCPError(
+        `Invalid MCP server configuration for '${name}': must specify either 'command' or 'url'`,
+        name
+      );
+    }
   }
 
   /**

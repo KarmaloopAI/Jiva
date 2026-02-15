@@ -19,6 +19,7 @@ import { StorageProvider } from '../../storage/provider.js';
 import { logger } from '../../utils/logger.js';
 import { createKrutrimModel } from '../../models/krutrim.js';
 import { Message } from '../../models/base.js';
+import { PersonaManager } from '../../personas/persona-manager.js';
 
 export interface SessionConfig {
   storageProvider: StorageProvider;
@@ -40,6 +41,7 @@ interface ActiveSession {
   mcpManager: MCPServerManager;
   workspace: WorkspaceManager;
   conversationManager: ConversationManager;
+  personaManager: PersonaManager;
   info: SessionInfo;
   idleTimer?: NodeJS.Timeout;
 }
@@ -184,6 +186,25 @@ export class SessionManager extends EventEmitter {
       // Initialize conversation manager
       const conversationManager = new ConversationManager(this.config.storageProvider);
 
+      // Initialize persona manager
+      const personaManager = new PersonaManager();
+      await personaManager.initialize();
+
+      // Merge persona MCP servers with session MCP servers
+      const personaMCPServers = personaManager.getPersonaMCPServers();
+      if (Object.keys(personaMCPServers).length > 0) {
+        logger.info(`[SessionManager] Adding ${Object.keys(personaMCPServers).length} MCP servers from active persona`);
+        
+        for (const [name, config] of Object.entries(personaMCPServers)) {
+          try {
+            await mcpManager.addServer(name, config as any);
+            logger.success(`[SessionManager] Added persona MCP server: ${name}`);
+          } catch (error) {
+            logger.warn(`[SessionManager] Failed to add persona MCP server '${name}': ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
+      }
+
       // Load or create conversation
       const existingConversation = await this.config.storageProvider.loadConversation(sessionId);
       let conversationHistory: Message[] = [];
@@ -200,6 +221,7 @@ export class SessionManager extends EventEmitter {
         mcpManager,
         workspace,
         conversationManager,
+        personaManager,
         maxSubtasks: 20,
         maxIterations: 10,
         autoSave: true, // Always auto-save in cloud mode
@@ -212,6 +234,7 @@ export class SessionManager extends EventEmitter {
         mcpManager,
         workspace,
         conversationManager,
+        personaManager,
         info,
       };
 

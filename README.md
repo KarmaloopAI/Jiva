@@ -38,6 +38,35 @@ Jiva is a powerful autonomous AI agent with a three-agent architecture (Manager,
 - **Authentication**: Firebase Auth, custom JWT, or development mode
 - **Session Management**: Auto-scaling agent instances with idle timeout and cleanup
 - **Container Orchestration**: Multi-stage Docker builds, health probes, graceful shutdown
+- **Personas & Skills**: 100% compatible with Claude's Skills/Plugins system - extend Jiva with domain-specific capabilities
+
+### Personas (Skills & Plugins)
+
+Jiva supports persona-based skill management, fully compatible with Claude's Skills/Plugins system:
+
+```bash
+# List available personas
+jiva persona list
+
+# Activate a persona
+jiva persona activate data-analyst
+
+# Create your own skill
+jiva persona create-skill my-skill \
+  --description "Custom functionality" \
+  --author "Your Name"
+
+# Package and distribute
+jiva persona package-skill my-skill
+```
+
+**Key Features:**
+- **Progressive Disclosure**: Skills load only what's needed (L1→L2→L3)
+- **Automatic Routing**: Agent selects skills based on user request
+- **Composable**: Bundle skills, commands, agents, and MCP servers
+- **Portable**: Same .skill files work on Claude and Jiva
+
+See **[Personas Guide](docs/guides/PERSONAS.md)** for complete documentation.
 
 ### v0.2.1 Features
 - **Dual-Agent System**: Separate Manager and Worker agents for better task focus and reliability

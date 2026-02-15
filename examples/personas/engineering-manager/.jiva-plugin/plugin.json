@@ -1,0 +1,7 @@
+{
+  "name": "engineering-manager",
+  "version": "1.0.0",
+  "description": "Software engineering manager that coordinates development teams by spawning specialized sub-agents",
+  "author": "Jiva Team",
+  "tags": ["management", "coordination", "leadership"]
+}

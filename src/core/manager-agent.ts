@@ -12,6 +12,7 @@
 
 import { ModelOrchestrator } from '../models/orchestrator.js';
 import { WorkspaceManager } from './workspace.js';
+import { PersonaManager } from '../personas/persona-manager.js';
 import { Message } from '../models/base.js';
 import { logger } from '../utils/logger.js';
 import { orchestrationLogger } from '../utils/orchestration-logger.js';
@@ -35,16 +36,19 @@ export interface ManagerDecision {
 export class ManagerAgent {
   private orchestrator: ModelOrchestrator;
   private workspace: WorkspaceManager;
+  private personaManager?: PersonaManager;
   private conversationHistory: Message[] = [];
 
-  constructor(orchestrator: ModelOrchestrator, workspace: WorkspaceManager) {
+  constructor(orchestrator: ModelOrchestrator, workspace: WorkspaceManager, personaManager?: PersonaManager) {
     this.orchestrator = orchestrator;
     this.workspace = workspace;
+    this.personaManager = personaManager;
     this.initializeSystemPrompt();
   }
 
   private initializeSystemPrompt() {
     const directivePrompt = this.workspace.getDirectivePrompt();
+    const personaPrompt = this.personaManager?.getSystemPromptAddition() || '';
 
     let systemContent = `You are the Manager Agent in a two-agent system.
 
@@ -72,6 +76,10 @@ IMPORTANT:
 - Review Worker results critically
 - Only mark complete when user's request is fully satisfied
 `;
+
+    if (personaPrompt) {
+      systemContent += `\n${personaPrompt}\n`;
+    }
 
     if (directivePrompt) {
       systemContent += `\n${directivePrompt}`;

@@ -11,6 +11,8 @@ import { ModelOrchestrator } from '../models/orchestrator.js';
 import { MCPServerManager } from '../mcp/server-manager.js';
 import { WorkspaceManager } from './workspace.js';
 import { ConversationManager } from './conversation-manager.js';
+import { PersonaManager } from '../personas/persona-manager.js';
+import { AgentSpawner } from './agent-spawner.js';
 import { ManagerAgent } from './manager-agent.js';
 import { WorkerAgent } from './worker-agent.js';
 import { ClientAgent } from './client-agent.js';
@@ -23,6 +25,7 @@ export interface DualAgentConfig {
   mcpManager: MCPServerManager;
   workspace: WorkspaceManager;
   conversationManager?: ConversationManager;
+  personaManager?: PersonaManager;
   maxSubtasks?: number;
   maxIterations?: number;
   autoSave?: boolean;
@@ -44,6 +47,8 @@ export class DualAgent {
   private mcpManager: MCPServerManager;
   private workspace: WorkspaceManager;
   private conversationManager: ConversationManager | null;
+  private personaManager: PersonaManager | null;
+  private agentSpawner: AgentSpawner | null = null;
 
   private manager: ManagerAgent;
   private worker: WorkerAgent;
@@ -61,6 +66,7 @@ export class DualAgent {
     this.mcpManager = config.mcpManager;
     this.workspace = config.workspace;
     this.conversationManager = config.conversationManager || null;
+    this.personaManager = config.personaManager || null;
 
     this.maxSubtasks = config.maxSubtasks || 10;
     this.maxIterations = config.maxIterations || 10;
@@ -68,11 +74,30 @@ export class DualAgent {
     this.condensingThreshold = config.condensingThreshold || 30;
 
     // Initialize agents (three-agent architecture)
-    this.manager = new ManagerAgent(this.orchestrator, this.workspace);
-    this.worker = new WorkerAgent(this.orchestrator, this.mcpManager, this.workspace, this.maxIterations);
+    this.manager = new ManagerAgent(this.orchestrator, this.workspace, this.personaManager || undefined);
+    this.worker = new WorkerAgent(this.orchestrator, this.mcpManager, this.workspace, this.maxIterations, this.personaManager || undefined);
     this.client = new ClientAgent(this.orchestrator, this.mcpManager);
 
+    // Initialize AgentSpawner if PersonaManager is available
+    if (this.personaManager) {
+      this.agentSpawner = new AgentSpawner(
+        this.orchestrator,
+        this.mcpManager,
+        this.workspace,
+        this.conversationManager,
+        this.personaManager
+      );
+      this.worker.setAgentSpawner(this.agentSpawner);
+    }
+
     logger.info('[*] Three-agent system initialized (Manager + Worker + Client)');
+    
+    if (this.personaManager) {
+      const activePersona = this.personaManager.getActivePersona();
+      if (activePersona) {
+        logger.info(`[*] Active persona: ${activePersona.manifest.name} (${activePersona.skills.length} skills)`);
+      }
+    }
   }
 
   /**
@@ -267,6 +292,13 @@ export class DualAgent {
   }
 
   async cleanup() {
+    logger.info('[DualAgent] Cleaning up...');
+    
+    // Cleanup spawned agents
+    if (this.agentSpawner) {
+      await this.agentSpawner.cleanup();
+    }
+    
     await this.mcpManager.cleanup();
     logger.info('[*] Dual-agent system cleaned up');
   }
@@ -291,6 +323,27 @@ export class DualAgent {
 
   getConversationManager(): ConversationManager | null {
     return this.conversationManager;
+  }
+
+  getPersonaManager(): PersonaManager | null {
+    return this.personaManager;
+  }
+
+  /**
+   * Set agent spawner (used by parent agents to enable spawning in sub-agents)
+   */
+  setAgentSpawner(spawner: AgentSpawner): void {
+    this.agentSpawner = spawner;
+    if (this.worker) {
+      this.worker.setAgentSpawner(spawner);
+    }
+  }
+
+  /**
+   * Get agent spawner
+   */
+  getAgentSpawner(): AgentSpawner | null {
+    return this.agentSpawner;
   }
 
   async saveConversation(): Promise<string | null> {

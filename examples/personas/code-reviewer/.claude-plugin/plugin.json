@@ -1,0 +1,12 @@
+{
+  "name": "code-reviewer",
+  "description": "Code review persona with comprehensive analysis capabilities",
+  "version": "1.0.0",
+  "author": {
+    "name": "Jiva Community",
+    "email": "community@jiva-agent.dev"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/KarmaloopAI/Jiva",
+  "jivaVersion": ">=0.3.0"
+}

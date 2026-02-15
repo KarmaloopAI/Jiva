@@ -3,12 +3,22 @@ import { z } from 'zod';
 import { ConfigurationError } from '../utils/errors.js';
 
 // Zod schemas for validation
+// Support both stdio-based and HTTP/SSE-based MCP servers
 const MCPServerConfigSchema = z.object({
-  command: z.string(),
+  // Stdio transport (command-based)
+  command: z.string().optional(),
   args: z.array(z.string()).optional(),
   env: z.record(z.string()).optional(),
+  
+  // HTTP/SSE transport (URL-based)
+  url: z.string().url().optional(),
+  headers: z.record(z.string()).optional(),
+  
   enabled: z.boolean().default(true),
-});
+}).refine(
+  (data) => (data.command !== undefined) || (data.url !== undefined),
+  { message: "Must specify either 'command' (for stdio) or 'url' (for HTTP/SSE)" }
+);
 
 const ModelConfigSchema = z.object({
   name: z.string(),

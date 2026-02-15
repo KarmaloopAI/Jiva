@@ -11,6 +11,8 @@
 import { ModelOrchestrator } from '../models/orchestrator.js';
 import { MCPServerManager } from '../mcp/server-manager.js';
 import { WorkspaceManager } from './workspace.js';
+import { PersonaManager } from '../personas/persona-manager.js';
+import { AgentSpawner } from './agent-spawner.js';
 import { Message, MessageContent, ModelResponse } from '../models/base.js';
 import { formatToolResult } from '../models/harmony.js';
 import { logger } from '../utils/logger.js';
@@ -48,6 +50,8 @@ export class WorkerAgent {
   private orchestrator: ModelOrchestrator;
   private mcpManager: MCPServerManager;
   private workspace: WorkspaceManager;
+  private personaManager?: PersonaManager;
+  private agentSpawner?: AgentSpawner;
   private maxIterations: number;
   private contextMemory: WorkerContextMemory;
 
@@ -55,16 +59,25 @@ export class WorkerAgent {
     orchestrator: ModelOrchestrator,
     mcpManager: MCPServerManager,
     workspace: WorkspaceManager,
-    maxIterations: number = 5
+    maxIterations: number = 5,
+    personaManager?: PersonaManager
   ) {
     this.orchestrator = orchestrator;
     this.mcpManager = mcpManager;
     this.workspace = workspace;
+    this.personaManager = personaManager;
     this.maxIterations = maxIterations;
     this.contextMemory = {
       recentFileReads: new Map(),
       filesJustModified: new Set(),
     };
+  }
+
+  /**
+   * Set agent spawner (enables sub-agent spawning)
+   */
+  setAgentSpawner(spawner: AgentSpawner): void {
+    this.agentSpawner = spawner;
   }
 
   /**
@@ -84,10 +97,9 @@ export class WorkerAgent {
     const toolsUsed: string[] = [];
     let iterationCount = 0;
 
-    // System prompt for Worker
-    conversationHistory.push({
-      role: 'system',
-      content: `You are the Worker Agent in a two-agent system.
+    // Build system prompt for Worker
+    const personaPrompt = this.personaManager?.getSystemPromptAddition() || '';
+    let systemContent = `You are the Worker Agent in a two-agent system.
 
 ROLE:
 You execute specific subtasks using available tools. You do NOT plan or make high-level decisions.
@@ -130,7 +142,30 @@ BROWSER TASKS:
 - Both steps are required - creating a tab alone does NOT navigate to a URL
 - After navigation succeeds, the task is COMPLETE - stop and report success
 
-Available tools: ${this.mcpManager.getClient().getAllTools().map(t => t.name).join(', ')}`,
+Available tools: ${this.mcpManager.getClient().getAllTools().map(t => t.name).join(', ')}${this.agentSpawner ? ', spawn_agent' : ''}`;
+
+    if (this.agentSpawner) {
+      const availablePersonas = this.agentSpawner.getAvailablePersonas();
+      systemContent += `\n\nAGENT SPAWNING:
+- You can spawn sub-agents with specific personas to delegate complex tasks
+- Use spawn_agent tool when you need specialized expertise or parallel work
+- Tool: spawn_agent
+- Parameters:
+  * persona (required): Persona name - ${availablePersonas.join(', ')}
+  * task (required): Specific task for the sub-agent
+  * context (optional): Additional context or background info
+- Example: spawn_agent({ persona: "code-reviewer", task: "Review the authentication code in src/auth/", context: "Focus on security issues" })
+- The sub-agent will complete the task and return results to you`;
+    }
+
+    if (personaPrompt) {
+      systemContent += `\n\n${personaPrompt}`;
+    }
+
+    // System prompt for Worker
+    conversationHistory.push({
+      role: 'system',
+      content: systemContent,
     });
 
     // Add subtask instruction
@@ -229,6 +264,40 @@ Do NOT call the same tool again. Either move to the NEXT required step, or if th
             const args = JSON.parse(toolCall.function.arguments);
             orchestrationLogger.logWorkerToolCall(toolName, args);
 
+            // Handle spawn_agent specially
+            if (toolName === 'spawn_agent') {
+              if (!this.agentSpawner) {
+                throw new Error('Agent spawning is not enabled');
+              }
+
+              logger.info(`  [Worker] Spawning sub-agent with persona: ${args.persona}`);
+              const spawnResult = await this.agentSpawner.spawnAgent({
+                persona: args.persona,
+                task: args.task,
+                context: args.context,
+                maxIterations: args.maxIterations,
+              });
+
+              toolsUsed.push(toolName);
+
+              const resultText = `Sub-agent spawned with persona '${spawnResult.persona}' completed the task.
+
+RESULT:
+${spawnResult.result}
+
+Iterations: ${spawnResult.iterations}
+Tools used: ${spawnResult.toolsUsed.join(', ')}`;
+
+              orchestrationLogger.logWorkerToolResult(toolName, true, false);
+
+              const toolMessage = formatToolResult(toolCall.id, toolName, resultText);
+              conversationHistory.push(toolMessage);
+
+              logger.success(`  ✓ [Worker] Sub-agent completed task`);
+              continue;
+            }
+
+            // Regular MCP tool execution
             const result = await this.mcpManager.getClient().executeTool(toolName, args);
 
             toolsUsed.push(toolName);

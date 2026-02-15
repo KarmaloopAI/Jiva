@@ -6,6 +6,7 @@
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import {
   CallToolResultSchema,
   ListToolsResultSchema,
@@ -17,7 +18,7 @@ import { Tool } from '../models/base.js';
 export interface MCPServerConnection {
   name: string;
   client: Client;
-  transport: StdioClientTransport;
+  transport: StdioClientTransport | SSEClientTransport;
   tools: Tool[];
 }
 
@@ -25,7 +26,7 @@ export class MCPClient {
   private connections: Map<string, MCPServerConnection> = new Map();
 
   /**
-   * Connect to an MCP server
+   * Connect to an MCP server (stdio-based)
    */
   async connect(
     name: string,
@@ -34,7 +35,7 @@ export class MCPClient {
     env?: Record<string, string>
   ): Promise<void> {
     try {
-      logger.info(`Connecting to MCP server: ${name}`);
+      logger.info(`Connecting to MCP server: ${name} (stdio)`);
       logger.debug(`Command: ${command}`);
       logger.debug(`Args: ${JSON.stringify(args)}`);
       logger.debug(`Args length: ${args.length}, values: ${args.map((a, i) => `[${i}]="${a}"`).join(', ')}`);
@@ -45,36 +46,76 @@ export class MCPClient {
         env: env || {},
       });
 
-      const client = new Client(
-        {
-          name: 'jiva-agent',
-          version: '0.1.0',
-        },
-        {
-          capabilities: {},
-        }
-      );
-
-      await client.connect(transport);
-
-      // List available tools
-      const toolsResult = await client.listTools();
-      const tools = this.convertMCPTools(toolsResult.tools || []);
-
-      this.connections.set(name, {
-        name,
-        client,
-        transport,
-        tools,
-      });
-
-      logger.success(`Connected to MCP server: ${name} (${tools.length} tools available)`);
+      await this.connectWithTransport(name, transport);
     } catch (error) {
       throw new MCPError(
         `Failed to connect to MCP server '${name}': ${error instanceof Error ? error.message : String(error)}`,
         name
       );
     }
+  }
+
+  /**
+   * Connect to an HTTP/SSE-based MCP server
+   */
+  async connectSSE(
+    name: string,
+    url: string,
+    headers?: Record<string, string>
+  ): Promise<void> {
+    try {
+      logger.info(`Connecting to MCP server: ${name} (HTTP/SSE)`);
+      logger.debug(`URL: ${url}`);
+
+      const transport = new SSEClientTransport(
+        new URL(url),
+        headers ? {
+          requestInit: {
+            headers: headers,
+          },
+        } : undefined
+      );
+
+      await this.connectWithTransport(name, transport);
+    } catch (error) {
+      throw new MCPError(
+        `Failed to connect to MCP server '${name}': ${error instanceof Error ? error.message : String(error)}`,
+        name
+      );
+    }
+  }
+
+  /**
+   * Common connection logic for any transport type
+   */
+  private async connectWithTransport(
+    name: string,
+    transport: StdioClientTransport | SSEClientTransport
+  ): Promise<void> {
+    const client = new Client(
+      {
+        name: 'jiva-agent',
+        version: '0.3.0',
+      },
+      {
+        capabilities: {},
+      }
+    );
+
+    await client.connect(transport);
+
+    // List available tools
+    const toolsResult = await client.listTools();
+    const tools = this.convertMCPTools(toolsResult.tools || []);
+
+    this.connections.set(name, {
+      name,
+      client,
+      transport,
+      tools,
+    });
+
+    logger.success(`Connected to MCP server: ${name} (${tools.length} tools available)`);
   }
 
   /**
