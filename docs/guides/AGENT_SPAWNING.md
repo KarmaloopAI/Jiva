@@ -321,6 +321,6 @@ class AgentSpawner {
 
 ---
 
-**Version**: 0.3.0  
+**Version**: 0.3.1  
 **Status**: Production-ready  
 **Requires**: PersonaManager initialized with personas

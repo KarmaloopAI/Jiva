@@ -1,6 +1,6 @@
 # Jiva Personas: Skills & Plugins Guide
 
-version: 0.3.0  
+version: 0.3.1  
 **100% compatible with Claude's Skills/Plugins system**
 
 ## Overview
@@ -198,7 +198,7 @@ my-persona/
   },
   "license": "MIT",
   "homepage": "https://github.com/user/persona",
-  "jivaVersion": ">=0.3.0"
+  "jivaVersion": ">=0.3.1"
 }
 ```
 

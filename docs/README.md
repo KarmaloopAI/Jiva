@@ -7,7 +7,7 @@ Welcome to the Jiva documentation! This guide will help you find the information
 New to Jiva? Start here:
 
 - **[Quick Start Guide](guides/QUICKSTART.md)** - Get up and running in 30 seconds
-- **[Quick Start for New Features](guides/QUICK_START.md)** - Try the latest v0.3.0 features
+- **[Quick Start for New Features](guides/QUICK_START.md)** - Try the latest v0.3.1 features
 - **[Configuration Guide](guides/CONFIGURATION.md)** - Set up models, MCP servers, and storage
 
 ## Deployment
@@ -39,7 +39,7 @@ Deep dives into Jiva's design:
 
 ## Release Notes
 
-- **[v0.3.0](release_notes/v0.3.0.md)** - Current release (Cloud deployment + three-agent architecture)
+- **[v0.3.1](release_notes/v0.3.1.md)** - Current release (Cloud deployment + three-agent architecture)
 - **[v0.2.1](release_notes/v0.2.1.md)** - Previous release
 
 ## Quick Links by Use Case
@@ -91,7 +91,7 @@ docs/
 │   ├── FILESYSTEM_ACCESS.md       # MCP filesystem details
 │   └── MAXTOKEN_FIX.md           # Token management
 └── release_notes/
-    ├── v0.3.0.md                  # Current release
+    ├── v0.3.1.md                  # Current release
     └── v0.2.1.md                  # Previous release
 ```
 
@@ -115,7 +115,7 @@ Legend: ✅ Supported | ⚠️ Partial | ➖ Not applicable | 🚧 In developmen
 
 ## Version Information
 
-**Current Version:** 0.3.0  
+**Current Version:** 0.3.1  
 **Release Date:** February 15, 2026  
 **Node Version Required:** 20.0.0+
 

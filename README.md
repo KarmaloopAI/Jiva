@@ -31,7 +31,7 @@ Jiva is a powerful autonomous AI agent with a three-agent architecture (Manager,
 - **Directive-Based**: Orient agent behavior with custom `jiva-directive.md` files
 - **Storage Abstraction**: Local filesystem or cloud storage (GCS, future: S3, Redis)
 
-### v0.3.0 Features
+### v0.3.1 Features
 - **Production Deployment**: One-command Cloud Run deployment with GCS persistence
 - **Client Agent**: Intelligent validation that ensures work quality and catches false failures
 - **HTTP/WebSocket API**: RESTful endpoints and real-time bidirectional communication
@@ -413,7 +413,7 @@ Edit your config file at `~/.config/jiva-nodejs/config.json` (Linux) or `~/Libra
 #### Programmatically
 
 ```typescript
-### Three-Agent System (v0.3.0)
+### Three-Agent System (v0.3.1)
 
 Jiva uses a three-agent architecture for intelligent task execution:
 
@@ -437,7 +437,7 @@ User Request
 
 **Manager Agent**: High-level planning and task decomposition  
 **Worker Agent**: Tool execution and information gathering  
-**Client Agent**: Adaptive validation and quality control (new in v0.3.0)
+**Client Agent**: Adaptive validation and quality control (new in v0.3.1)
 
 The Client agent uses tiered involvement levels to balance quality with efficiency:
 - **MINIMAL**: Information requests → metadata validation only
@@ -453,15 +453,15 @@ jiva/
 │   │   ├── dual-agent.ts        # Main orchestrator
 │   │   ├── manager-agent.ts     # Planning & coordination
 │   │   ├── worker-agent.ts      # Tool execution
-│   │   └── client-agent.ts      # Quality validation (v0.3.0)
+│   │   └── client-agent.ts      # Quality validation (v0.3.1)
 │   ├── models/            # Model integrations and Harmony format
 │   ├── mcp/               # MCP client and server management
-│   ├── storage/           # Storage abstraction (v0.3.0)
+│   ├── storage/           # Storage abstraction (v0.3.1)
 │   │   ├── local-provider.ts    # Filesystem storage
 │   │   └── gcp-bucket-provider.ts # Cloud storage
 │   ├── interfaces/        # CLI and HTTP interfaces
 │   │   ├── cli/           # CLI interface
-│   │   └── http/          # Cloud Run HTTP/WebSocket (v0.3.0)
+│   │   └── http/          # Cloud Run HTTP/WebSocket (v0.3.1)
 │   └── utils/             # Utilities and helpers
 ```
 

@@ -127,7 +127,7 @@ Created 3 new personas for multi-agent collaboration:
    - Customization tips
 
 **Updated Documentation:**
-- `docs/release_notes/v0.3.0.md` - Added agent spawning section
+- `docs/release_notes/v0.3.1.md` - Added agent spawning section
 
 ## 🔧 Technical Details
 

@@ -1,7 +1,7 @@
 # Skills & Personas Implementation Summary
 
 **Status:** ✅ Complete  
-**Version:** 0.3.0  
+**Version:** 0.3.1  
 **Date:** February 15, 2026
 
 ## What Was Implemented
@@ -109,7 +109,7 @@ examples/personas/
 ## Documentation
 
 - **[Personas Guide](docs/guides/PERSONAS.md)** - Complete user guide
-- **[v0.3.0 Release Notes](docs/release_notes/v0.3.0.md)** - Updated with personas feature
+- **[v0.3.1 Release Notes](docs/release_notes/v0.3.1.md)** - Updated with personas feature
 - **[README.md](README.md)** - Updated with personas quick start
 - **[Example Persona](examples/personas/code-reviewer/)** - Working code reviewer
 
