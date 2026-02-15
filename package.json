@@ -1,7 +1,7 @@
 {
   "name": "jiva-core",
-  "version": "0.2.3",
-  "description": "Versatile autonomous AI agent powered by gpt-oss-120b with full MCP support. Mission-driven execution, smart conversations, and extensible tooling.",
+  "version": "0.3.0",
+  "description": "Versatile autonomous AI agent with three-agent architecture (Manager, Worker, Client) powered by gpt-oss-120b. Adaptive validation, full MCP support, and intelligent quality control.",
   "main": "dist/index.js",
   "bin": {
     "jiva": "dist/interfaces/cli/index.js"
@@ -10,7 +10,9 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/interfaces/cli/index.ts",
+    "dev:http": "tsx src/interfaces/http/index.ts",
     "start": "node --loader ts-node/esm src/interfaces/cli/index.ts",
+    "serve": "node dist/interfaces/http/index.js",
     "type-check": "tsc --noEmit",
     "fix-filesystem": "node fix-filesystem-config.js",
     "prepublishOnly": "npm run build"
@@ -49,19 +51,37 @@
     "chalk": "^5.3.0",
     "commander": "^12.1.0",
     "conf": "^13.0.1",
+    "express": "^4.18.2",
     "inquirer": "^12.0.1",
+    "jsonwebtoken": "^9.0.2",
     "marked": "^15.0.12",
     "marked-terminal": "^7.3.0",
     "ora": "^8.1.1",
+    "ws": "^8.16.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {
     "ts-node": "^10.9.2",
+    "@types/express": "^4.17.21",
     "@types/inquirer": "^9.0.7",
+    "@types/jsonwebtoken": "^9.0.5",
     "@types/marked-terminal": "^6.1.1",
     "@types/node": "^22.10.2",
+    "@types/ws": "^8.5.10",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
+  },
+  "peerDependencies": {
+    "@google-cloud/storage": "^7.0.0",
+    "firebase-admin": "^12.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@google-cloud/storage": {
+      "optional": true
+    },
+    "firebase-admin": {
+      "optional": true
+    }
   },
   "engines": {
     "node": ">=20.0.0"

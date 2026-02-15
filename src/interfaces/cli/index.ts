@@ -20,6 +20,7 @@ import { orchestrationLogger } from '../../utils/orchestration-logger.js';
 import { readFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
+import { createLocalProvider } from '../../storage/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -53,8 +54,45 @@ program
 program
   .command('config')
   .description('Update Jiva configuration')
-  .action(async () => {
+  .option('--show', 'Show current configuration and source')
+  .action(async (options) => {
     try {
+      if (options.show) {
+        // Show current configuration
+        const config = configManager.getConfig();
+        const configPath = configManager.getConfigPath();
+        
+        console.log(chalk.bold.cyan('\n∞ Jiva Configuration\n'));
+        console.log(chalk.gray('Configuration source:'), chalk.white(configPath));
+        console.log();
+        
+        if (config.models?.reasoning) {
+          console.log(chalk.bold('Reasoning Model:'));
+          console.log(chalk.gray('  Endpoint:'), config.models.reasoning.endpoint);
+          console.log(chalk.gray('  Model:'), config.models.reasoning.defaultModel);
+          console.log(chalk.gray('  Harmony Format:'), config.models.reasoning.useHarmonyFormat ? 'Yes' : 'No');
+          console.log();
+        }
+        
+        if (config.models?.multimodal) {
+          console.log(chalk.bold('Multimodal Model:'));
+          console.log(chalk.gray('  Endpoint:'), config.models.multimodal.endpoint);
+          console.log(chalk.gray('  Model:'), config.models.multimodal.defaultModel);
+          console.log();
+        }
+        
+        const mcpServers = configManager.getMCPServers();
+        if (Object.keys(mcpServers).length > 0) {
+          console.log(chalk.bold('MCP Servers:'));
+          for (const [name, server] of Object.entries(mcpServers)) {
+            console.log(chalk.gray(`  ${name}:`), server.enabled ? chalk.green('enabled') : chalk.red('disabled'));
+          }
+          console.log();
+        }
+        
+        return;
+      }
+      
       if (!configManager.isConfigured()) {
         console.log(chalk.yellow('Jiva is not configured. Running setup wizard...\n'));
         await runSetupWizard();
@@ -71,6 +109,7 @@ program
   .command('chat')
   .option('--condensing-threshold <number>', 'Condensing threshold for agent', parseInt)
   .description('Start interactive chat with Jiva')
+  .option('-c, --config <path>', 'Path to configuration JSON file')
   .option('-w, --workspace <path>', 'Workspace directory', process.cwd())
   .option('-d, --directive <path>', 'Path to jiva-directive.md file')
   .option('--debug', 'Enable debug mode')
@@ -78,10 +117,30 @@ program
   .option('--max-iterations <number>', 'Maximum agent iterations', parseInt)
   .action(async (options) => {
     try {
-      // Check configuration
-      if (!configManager.isConfigured()) {
-        console.log(chalk.yellow('Jiva is not configured. Running setup wizard...\n'));
-        await runSetupWizard();
+      // Load configuration from file if provided
+      let configSource = 'default (~/.config/jiva/config.json)';
+      let modelConfig: any;
+      let mcpServers: any;
+      
+      if (options.config) {
+        configSource = options.config;
+        console.log(chalk.gray(`Loading configuration from: ${configSource}\n`));
+        const configFile = await import('fs/promises').then(fs => fs.readFile(options.config, 'utf-8'));
+        const config = JSON.parse(configFile);
+        modelConfig = config.models;
+        mcpServers = config.mcpServers || {};
+      } else {
+        // Use default ConfigManager
+        if (!configManager.isConfigured()) {
+          console.log(chalk.yellow('Jiva is not configured. Running setup wizard...\n'));
+          await runSetupWizard();
+        }
+        configManager.validateConfig();
+        modelConfig = {
+          reasoning: configManager.getReasoningModel(),
+          multimodal: configManager.getMultimodalModel(),
+        };
+        mcpServers = configManager.getMCPServers();
       }
 
       // Set debug mode if requested
@@ -91,11 +150,11 @@ program
         logger.setLogLevel(LogLevel.DEBUG);
       }
 
-      // Validate configuration
-      configManager.validateConfig();
-
-      // Create models
-      const reasoningModelConfig = configManager.getReasoningModel()!;
+      // Create models from loaded config
+      if (!modelConfig?.reasoning) {
+        throw new Error('Reasoning model configuration is required');
+      }
+      const reasoningModelConfig = modelConfig.reasoning;
       const reasoningModel = createKrutrimModel({
         endpoint: reasoningModelConfig.endpoint,
         apiKey: reasoningModelConfig.apiKey,
@@ -105,7 +164,7 @@ program
       });
 
       let multimodalModel;
-      const multimodalModelConfig = configManager.getMultimodalModel();
+      const multimodalModelConfig = modelConfig.multimodal;
       if (multimodalModelConfig) {
         multimodalModel = createKrutrimModel({
           endpoint: multimodalModelConfig.endpoint,
@@ -154,7 +213,7 @@ program
       // Update filesystem MCP server to allow broad filesystem access
       // The workspace is the default working area, but Jiva can access any files
       // subject to OS permissions
-      const mcpServers = configManager.getMCPServers();
+      // mcpServers already loaded from config above
       if (mcpServers['filesystem']) {
         // Note: The filesystem MCP server rejects "/" as a security measure
         // Use /Users on macOS/Linux to allow access to all user directories
@@ -180,9 +239,9 @@ program
       });
       await workspace.initialize();
 
-      // Initialize conversation manager
-      const conversationManager = new ConversationManager();
-      await conversationManager.initialize();
+      // Initialize conversation manager with local storage provider
+      const storageProvider = await createLocalProvider();
+      const conversationManager = new ConversationManager(storageProvider);
 
       // Create agent (dual-agent architecture)
       const agent = new DualAgent({
@@ -190,8 +249,8 @@ program
         mcpManager,
         workspace,
         conversationManager,
-        maxSubtasks: options.maxIterations || 10,
-        maxIterations: options.maxIterations || 10,
+        maxSubtasks: 20, // Manager's subtask limit (separate from Worker iterations)
+        maxIterations: options.maxIterations || 10, // Worker's iteration limit per subtask
         autoSave: true,
         condensingThreshold: options.condensingThreshold ?? 30,
       });
@@ -220,6 +279,7 @@ program
   .option('--condensing-threshold <number>', 'Condensing threshold for agent', parseInt)
   .description('Run Jiva with a single prompt')
   .argument('<prompt>', 'Prompt to execute')
+  .option('-c, --config <path>', 'Path to configuration JSON file')
   .option('-w, --workspace <path>', 'Workspace directory', process.cwd())
   .option('-d, --directive <path>', 'Path to jiva-directive.md file')
   .option('--debug', 'Enable debug mode')
@@ -227,10 +287,28 @@ program
   .option('--max-iterations <number>', 'Maximum agent iterations', parseInt)
   .action(async (prompt, options) => {
     try {
-      // Check configuration
-      if (!configManager.isConfigured()) {
-        console.log(chalk.red('✗ Jiva is not configured. Please run: jiva setup\n'));
-        process.exit(1);
+      // Load configuration from file if provided
+      let modelConfig: any;
+      let mcpServers: any;
+      
+      if (options.config) {
+        console.log(chalk.gray(`Loading configuration from: ${options.config}\n`));
+        const configFile = await import('fs/promises').then(fs => fs.readFile(options.config, 'utf-8'));
+        const config = JSON.parse(configFile);
+        modelConfig = config.models;
+        mcpServers = config.mcpServers || {};
+      } else {
+        // Use default ConfigManager
+        if (!configManager.isConfigured()) {
+          console.log(chalk.red('✗ Jiva is not configured. Please run: jiva setup\n'));
+          process.exit(1);
+        }
+        configManager.validateConfig();
+        modelConfig = {
+          reasoning: configManager.getReasoningModel(),
+          multimodal: configManager.getMultimodalModel(),
+        };
+        mcpServers = configManager.getMCPServers();
       }
 
       // Set debug mode if requested
@@ -240,11 +318,11 @@ program
         logger.setLogLevel(LogLevel.DEBUG);
       }
 
-      // Validate configuration
-      configManager.validateConfig();
-
-      // Create models
-      const reasoningModelConfig = configManager.getReasoningModel()!;
+      // Create models from loaded config
+      if (!modelConfig?.reasoning) {
+        throw new Error('Reasoning model configuration is required');
+      }
+      const reasoningModelConfig = modelConfig.reasoning;
       const reasoningModel = createKrutrimModel({
         endpoint: reasoningModelConfig.endpoint,
         apiKey: reasoningModelConfig.apiKey,
@@ -303,7 +381,7 @@ program
       // Update filesystem MCP server to allow broad filesystem access
       // The workspace is the default working area, but Jiva can access any files
       // subject to OS permissions
-      const mcpServers = configManager.getMCPServers();
+      // mcpServers already loaded from config above
       if (mcpServers['filesystem']) {
         // Note: The filesystem MCP server rejects "/" as a security measure
         // Use /Users on macOS/Linux to allow access to all user directories
@@ -329,9 +407,9 @@ program
       });
       await workspace.initialize();
 
-      // Initialize conversation manager
-      const conversationManager = new ConversationManager();
-      await conversationManager.initialize();
+      // Initialize conversation manager with local storage provider
+      const storageProvider = await createLocalProvider();
+      const conversationManager = new ConversationManager(storageProvider);
 
       // Create agent (dual-agent architecture)
       const agent = new DualAgent({
@@ -339,8 +417,8 @@ program
         mcpManager,
         workspace,
         conversationManager,
-        maxSubtasks: options.maxIterations || 10,
-        maxIterations: options.maxIterations || 10,
+        maxSubtasks: 20, // Manager's subtask limit (separate from Worker iterations)
+        maxIterations: options.maxIterations || 10, // Worker's iteration limit per subtask
         autoSave: true,
         condensingThreshold: options.condensingThreshold ?? 30,
       });

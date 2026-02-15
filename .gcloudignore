@@ -1,0 +1,49 @@
+# Google Cloud Build ignore patterns
+# Files not needed in Cloud Build/Container Registry
+
+# Node modules (will be installed in container)
+node_modules/
+
+# Development and docs
+docs/
+examples/
+*.md
+!README.md
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Build artifacts (will be rebuilt)
+dist/
+*.tsbuildinfo
+
+# Test files
+test/
+tests/
+*.test.ts
+*.test.js
+*.spec.ts
+*.spec.js
+
+# npm package files
+.npmignore
+.npmrc
+
+# Scripts (except deploy.sh which is needed)
+setup.sh
+fix-filesystem-config.js

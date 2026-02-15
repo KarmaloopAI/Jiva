@@ -10,9 +10,25 @@ Your configuration is stored at:
 - macOS/Linux: `~/.config/jiva-nodejs/config.json`
 - Windows: `%APPDATA%\jiva-nodejs\config.json`
 
-You can view the exact path with:
+You can view the exact path and current configuration with:
 ```bash
-jiva config → View Configuration
+jiva config --show
+```
+
+This displays:
+```
+∞ Jiva Configuration
+
+Configuration source: /Users/username/.config/jiva-nodejs/config.json
+
+Reasoning Model:
+  Endpoint: https://api.groq.com/openai/v1/chat/completions
+  Model: openai/gpt-oss-120b
+  Harmony Format: No
+
+MCP Servers:
+  filesystem: enabled
+  playwright: enabled
 ```
 
 ## Interactive Configuration
@@ -384,6 +400,159 @@ Jiva works with any OpenAI-compatible API. Requirements:
 - POST endpoint accepting OpenAI chat completion format
 - Standard message roles: `system`, `user`, `assistant`, `tool`
 - Optional: Tool calling support (standard OpenAI format)
+
+## Custom Configuration Files
+
+In addition to the default configuration stored in `~/.config/jiva-nodejs/`, you can provide custom configuration files for different projects or environments.
+
+### Using Custom Config
+
+Use the `--config` flag to specify a configuration file:
+
+```bash
+# Start chat with custom config
+jiva chat --config ./my-project-config.json
+
+# Run with custom config
+jiva run "analyze this code" --config ./config/production.json
+
+# Works with all options
+jiva chat --config ./team-config.json --workspace ./src --directive ./jiva-directive.md
+```
+
+### Config File Format
+
+The custom config file uses the same format as the default configuration:
+
+```json
+{
+  "models": {
+    "reasoning": {
+      "name": "reasoning",
+      "endpoint": "https://cloud.olakrutrim.com/v1/chat/completions",
+      "apiKey": "YOUR_API_KEY_HERE",
+      "type": "reasoning",
+      "defaultModel": "gpt-oss-120b",
+      "useHarmonyFormat": true
+    },
+    "multimodal": {
+      "name": "multimodal",
+      "endpoint": "https://cloud.olakrutrim.com/v1/chat/completions",
+      "apiKey": "YOUR_API_KEY_HERE",
+      "type": "multimodal",
+      "defaultModel": "Llama-4-Maverick",
+      "useHarmonyFormat": false
+    }
+  },
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/Users"],
+      "enabled": true
+    },
+    "brave-search": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+      "env": {
+        "BRAVE_API_KEY": "YOUR_API_KEY"
+      },
+      "enabled": false
+    }
+  },
+  "workspace": {
+    "defaultDirectivePath": "./jiva-directive.md"
+  },
+  "debug": false
+}
+```
+
+See [examples/jiva-config.example.json](../examples/jiva-config.example.json) for a complete template.
+
+### Use Cases for Custom Config Files
+
+**1. Project-Specific Configuration**
+```bash
+# Each project can have its own config
+cd ~/projects/web-app
+jiva chat --config ./jiva-config.json
+
+cd ~/projects/data-analysis
+jiva chat --config ./jiva-config.json
+```
+
+**2. Environment-Based Config**
+```bash
+# Different configs for dev/staging/production
+jiva run "deploy" --config ./config/dev.json
+jiva run "deploy" --config ./config/prod.json
+```
+
+**3. Team Configuration Sharing**
+```bash
+# Check config into Git (without API keys!)
+git add team-jiva-config.json
+git commit -m "Add team Jiva configuration"
+
+# Team members use the shared config
+jiva chat --config ./team-jiva-config.json
+```
+
+**4. Testing Different Models**
+```bash
+# Compare different model providers
+jiva run "test query" --config ./config/groq.json
+jiva run "test query" --config ./config/openai.json
+jiva run "test query" --config ./config/krutrim.json
+```
+
+### Best Practices
+
+**Don't commit API keys!** Use environment variables or `.env` files:
+
+```json
+{
+  "models": {
+    "reasoning": {
+      "apiKey": "${JIVA_API_KEY}",
+      "endpoint": "${JIVA_ENDPOINT}",
+      ...
+    }
+  }
+}
+```
+
+Then load from environment:
+```bash
+export JIVA_API_KEY="your-key"
+jiva chat --config ./project-config.json
+```
+
+**Export your current config** to create a template:
+```bash
+# View current config and path
+jiva config --show
+
+# Copy to project (manually copy the values)
+cp ~/.config/jiva-nodejs/config.json ./my-config-template.json
+
+# Remove sensitive data
+nano my-config-template.json
+```
+
+## Cloud Run Configuration
+
+For Cloud Run deployments, configuration is loaded dynamically from GCS bucket using the StorageProvider. See [CLOUD_RUN_DEPLOYMENT.md](./CLOUD_RUN_DEPLOYMENT.md) for details.
+
+Configuration storage path:
+```
+gs://your-bucket/{tenantId}/config/models.json
+gs://your-bucket/{tenantId}/config/mcpServers.json
+```
+
+The SessionManager automatically:
+1. Loads config from storage on session creation
+2. Falls back to environment variables if not found
+3. Saves default config back to storage
 
 ### Programmatic Configuration
 

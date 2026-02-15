@@ -119,6 +119,17 @@ IMPORTANT:
 - Explain what you did and what you found
 - If you can't complete the task, explain why clearly
 
+CRITICAL - Avoid Repetitive Actions:
+- NEVER call the same tool with the same arguments more than once
+- If a tool succeeds, move on to the next step - do NOT repeat it
+- For browser tasks: open tab ONCE, then navigate ONCE to the URL
+- If you've already created/opened something, don't create/open it again
+
+BROWSER TASKS:
+- To open a URL: First use playwright__browser_tabs to create a new tab, THEN use playwright__browser_navigate to go to the URL
+- Both steps are required - creating a tab alone does NOT navigate to a URL
+- After navigation succeeds, the task is COMPLETE - stop and report success
+
 Available tools: ${this.mcpManager.getClient().getAllTools().map(t => t.name).join(', ')}`,
     });
 
@@ -180,6 +191,35 @@ Please complete this subtask and report your findings.`,
       // Check for tool calls
       if (response.toolCalls && response.toolCalls.length > 0) {
         logger.info(`  [Worker] Using ${response.toolCalls.length} tool(s)`);
+
+        // Detect repetitive tool calls BEFORE executing
+        const proposedTools = response.toolCalls.map(tc => {
+          const args = JSON.parse(tc.function.arguments);
+          return `${tc.function.name}:${JSON.stringify(args)}`;
+        });
+        
+        // Check if we're about to repeat the same tool call
+        const lastToolCalls = toolsUsed.slice(-2);
+        const isRepetitive = proposedTools.some(proposed => {
+          const toolName = proposed.split(':')[0];
+          return lastToolCalls.filter(t => t === toolName).length >= 2;
+        });
+
+        if (isRepetitive && iteration >= 2) {
+          logger.warn(`  [Worker] Detected repetitive tool usage - interrupting loop`);
+          conversationHistory.push({
+            role: 'user',
+            content: `STOP: You are repeating the same action multiple times. This tool has already succeeded. 
+
+For browser tasks:
+1. You already created a new tab - do NOT create another one
+2. Now use playwright__browser_navigate to go to the actual URL
+3. If navigation is already done, the task is COMPLETE - just provide your summary
+
+Do NOT call the same tool again. Either move to the NEXT required step, or if the task is complete, provide your final summary WITHOUT any tool calls.`,
+          });
+          continue; // Skip executing the repetitive tools, let model reconsider
+        }
 
         for (const toolCall of response.toolCalls) {
           const toolName = toolCall.function.name;
@@ -341,6 +381,20 @@ Please complete this subtask and report your findings.`,
       return false;
     }
 
+    // Immediate prompt after browser navigation - that's usually the end of the task
+    const hasBrowserNavigation = toolsUsed.some(tool => tool.includes('browser_navigate'));
+    if (hasBrowserNavigation) {
+      return true;
+    }
+
+    // Detect repetitive tool usage - sign of stuck loop
+    const lastThreeTools = toolsUsed.slice(-3);
+    if (lastThreeTools.length === 3 && 
+        lastThreeTools[0] === lastThreeTools[1] && 
+        lastThreeTools[1] === lastThreeTools[2]) {
+      return true; // Same tool called 3 times in a row - prompt for completion
+    }
+
     // Don't prompt too frequently - only every 2 iterations after first
     if (currentIteration % 2 !== 0) {
       return false;
@@ -351,7 +405,7 @@ Please complete this subtask and report your findings.`,
       'create', 'write', 'generate', 'build', 'make',
       'read', 'list', 'find', 'search', 'get',
       'update', 'modify', 'edit', 'change',
-      'delete', 'remove',
+      'delete', 'remove', 'open', 'navigate', 'browse',
     ];
 
     const instructionLower = instruction.toLowerCase();
@@ -359,15 +413,17 @@ Please complete this subtask and report your findings.`,
       instructionLower.includes(indicator)
     );
 
-    // Prompt if we've seen successful file/content operations
-    const hasFileOperations = toolsUsed.some(tool =>
+    // Prompt if we've seen successful file/content or browser operations
+    const hasSignificantOperations = toolsUsed.some(tool =>
       tool.includes('write') ||
       tool.includes('create') ||
       tool.includes('edit') ||
-      tool.includes('read')
+      tool.includes('read') ||
+      tool.includes('browser') ||
+      tool.includes('navigate')
     );
 
-    // Prompt if we have completion indicators and file operations
-    return hasCompletionIndicator && hasFileOperations && toolsUsed.length >= 2;
+    // Prompt if we have completion indicators and significant operations
+    return hasCompletionIndicator && hasSignificantOperations && toolsUsed.length >= 2;
   }
 }

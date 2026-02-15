@@ -1,0 +1,499 @@
+/**
+ * Client Agent - Adaptive validation and quality control
+ *
+ * Acts as user advocate, validating that Manager/Worker actually deliver
+ * what the user requested. Uses tiered involvement levels to minimize cost:
+ *
+ * - MINIMAL: Info requests, simple queries → metadata validation only
+ *   BUT: Detects unjustified failures and escalates to STANDARD
+ * - STANDARD: Creation requests → file existence + basic validation
+ * - THOROUGH: Complex/testing requests OR failures → full E2E validation with tools
+ */
+
+import { ModelOrchestrator } from '../models/orchestrator.js';
+import { MCPServerManager } from '../mcp/server-manager.js';
+import { logger } from '../utils/logger.js';
+import { MCPClient } from '../mcp/client.js';
+import { WorkerResult } from './worker-agent.js';
+
+interface FailureAnalysis {
+  claimsFailure: boolean;
+  hasEvidence: boolean;
+  reasoning: string;
+  suggestedAction?: string;
+}
+
+export enum InvolvementLevel {
+  MINIMAL = 'minimal',     // Metadata only, no tools
+  STANDARD = 'standard',   // Basic validation with read tools
+  THOROUGH = 'thorough',   // Full E2E validation with all tools
+}
+
+export interface Requirement {
+  type: 'file_creation' | 'file_modification' | 'testing' | 'verification' | 'information' | 'other';
+  description: string;
+  filePath?: string;
+  mustUseTools?: string[]; // Tools that must be used for this requirement
+}
+
+export interface ValidationResult {
+  approved: boolean;
+  requirementsMet: boolean;
+  issues: string[];
+  nextAction?: string;
+  involvementLevel: InvolvementLevel;
+}
+
+export class ClientAgent {
+  private orchestrator: ModelOrchestrator;
+  private mcpManager: MCPServerManager;
+  private mcpClient: MCPClient;
+  private failureCount: number = 0;
+
+  // Read-only tools Client can use for validation
+  private readonly ALLOWED_TOOLS = [
+    'filesystem__read_text_file',
+    'filesystem__list_directory',
+    'filesystem__directory_tree',
+    'filesystem__search_files',
+    'playwright__browser_navigate',
+    'playwright__browser_console_messages',
+    'playwright__browser_take_screenshot',
+    'playwright__browser_evaluate',
+  ];
+
+  constructor(orchestrator: ModelOrchestrator, mcpManager: MCPServerManager) {
+    this.orchestrator = orchestrator;
+    this.mcpManager = mcpManager;
+    this.mcpClient = mcpManager.getClient();
+  }
+
+  /**
+   * Determine involvement level based on user request complexity
+   */
+  determineInvolvementLevel(userMessage: string, subtasks: string[]): InvolvementLevel {
+    const messageLower = userMessage.toLowerCase();
+    const subtasksLower = subtasks.join(' ').toLowerCase();
+
+    // THOROUGH: User explicitly requests testing/verification
+    const testKeywords = ['test', 'verify', 'check', 'make sure', 'ensure', 'validate'];
+    if (testKeywords.some(kw => messageLower.includes(kw))) {
+      logger.debug('[Client] THOROUGH mode: Testing/verification requested');
+      return InvolvementLevel.THOROUGH;
+    }
+
+    // THOROUGH: After failures (user frustrated)
+    if (this.failureCount > 0) {
+      logger.debug(`[Client] THOROUGH mode: ${this.failureCount} previous failures detected`);
+      return InvolvementLevel.THOROUGH;
+    }
+
+    // THOROUGH: Complex multi-file operations
+    if (subtasks.length > 3 || (messageLower.includes('component') && messageLower.includes('index.html'))) {
+      logger.debug('[Client] THOROUGH mode: Complex multi-file operation');
+      return InvolvementLevel.THOROUGH;
+    }
+
+    // MINIMAL: Information-only requests
+    const infoKeywords = ['what', 'list', 'show', 'explain', 'describe', 'how', 'tell me'];
+    const creationKeywords = ['create', 'build', 'write', 'generate', 'make', 'add'];
+    const hasInfoKeyword = infoKeywords.some(kw => messageLower.includes(kw));
+    const hasCreationKeyword = creationKeywords.some(kw => messageLower.includes(kw));
+
+    if (hasInfoKeyword && !hasCreationKeyword) {
+      logger.debug('[Client] MINIMAL mode: Information request');
+      return InvolvementLevel.MINIMAL;
+    }
+
+    // STANDARD: Default for creation/modification tasks
+    logger.debug('[Client] STANDARD mode: Regular creation task');
+    return InvolvementLevel.STANDARD;
+  }
+
+  /**
+   * Parse requirements from user message
+   */
+  parseRequirements(userMessage: string, subtasks: string[]): Requirement[] {
+    const requirements: Requirement[] = [];
+    const messageLower = userMessage.toLowerCase();
+    const combined = (messageLower + ' ' + subtasks.join(' ').toLowerCase());
+
+    // Detect file creation requirements
+    const fileMatches = userMessage.match(/(?:create|build|generate|write|save as)\s+([a-zA-Z0-9._/-]+\.(html|js|css|md|json|txt|py|ts|tsx|jsx))/gi);
+    if (fileMatches) {
+      fileMatches.forEach(match => {
+        const filename = match.split(/\s+/).pop();
+        if (filename) {
+          requirements.push({
+            type: 'file_creation',
+            description: `Create file: ${filename}`,
+            filePath: filename,
+          });
+        }
+      });
+    }
+
+    // Detect testing requirements (explicit verification requests)
+    const testKeywords = ['test', 'verify', 'check', 'make sure', 'ensure'];
+    if (testKeywords.some(kw => combined.includes(kw))) {
+      requirements.push({
+        type: 'testing',
+        description: 'Verify functionality through testing',
+        mustUseTools: ['playwright__'],
+      });
+    }
+
+    // Detect browser verification requirements - ONLY for file verification, not general browsing
+    // This should trigger for "open index.html in browser" but NOT for "open linkedin.com"
+    const isLocalFileOpen = (combined.includes('open') && combined.includes('.html')) ||
+                            (combined.includes('browser') && combined.includes('.html'));
+    const isExternalUrl = combined.match(/open\s+(?:https?:\/\/)?(?:www\.)?[a-z0-9-]+\.[a-z]{2,}/i);
+    
+    if (isLocalFileOpen && !isExternalUrl) {
+      requirements.push({
+        type: 'verification',
+        description: 'Browser testing required for local HTML file',
+        mustUseTools: ['playwright__browser_navigate', 'playwright__browser_console_messages'],
+      });
+    }
+    
+    // For external URLs, don't require specific tools - just opening the page is enough
+    if (isExternalUrl) {
+      requirements.push({
+        type: 'verification',
+        description: 'Open external URL',
+        // No mustUseTools - Worker just needs to navigate, Client shouldn't demand specific validation tools
+      });
+    }
+
+    // Default: at least verify Worker did some work
+    if (requirements.length === 0) {
+      requirements.push({
+        type: 'other',
+        description: 'General task completion',
+      });
+    }
+
+    return requirements;
+  }
+
+  /**
+   * Validate Worker's work at appropriate involvement level
+   */
+  async validate(
+    userMessage: string,
+    subtasks: string[],
+    workerResult: WorkerResult,
+    involvementLevel?: InvolvementLevel
+  ): Promise<ValidationResult> {
+    let level = involvementLevel || this.determineInvolvementLevel(userMessage, subtasks);
+    const requirements = this.parseRequirements(userMessage, subtasks);
+
+    // CRITICAL: Use LLM to check for unjustified failure claims BEFORE other validation
+    // Even in MINIMAL mode, we must catch agents giving up without trying
+    const failureAnalysis = await this.analyzeForUnjustifiedFailure(userMessage, workerResult);
+    
+    if (failureAnalysis.claimsFailure && !failureAnalysis.hasEvidence) {
+      logger.info(`[Client] Detected unjustified failure claim - escalating from ${level} to STANDARD`);
+      logger.info(`[Client] LLM reasoning: ${failureAnalysis.reasoning}`);
+      logger.info(`[Client] Tools attempted: ${workerResult.toolsUsed.length}`);
+      
+      // Escalate to at least STANDARD to properly validate
+      if (level === InvolvementLevel.MINIMAL) {
+        level = InvolvementLevel.STANDARD;
+      }
+    }
+
+    logger.info(`[Client] Validating with ${level.toUpperCase()} involvement`);
+
+    const result: ValidationResult = {
+      approved: false,
+      requirementsMet: false,
+      issues: [],
+      involvementLevel: level,
+    };
+
+    // Layer 0: Unjustified Failure Detection (always done first)
+    if (failureAnalysis.claimsFailure && !failureAnalysis.hasEvidence) {
+      const failureIssue = failureAnalysis.suggestedAction || 
+        `REJECTED: Worker claims failure without sufficient evidence. ${failureAnalysis.reasoning}`;
+      result.issues.push(failureIssue);
+    }
+
+    // Layer 1: Process Validation (always done, no tools needed)
+    const processValidation = this.validateProcess(requirements, workerResult);
+    if (processValidation.issues.length > 0) {
+      result.issues.push(...processValidation.issues);
+    }
+
+    // Layer 2: Outcome Validation (only for STANDARD and THOROUGH)
+    if (level === InvolvementLevel.STANDARD || level === InvolvementLevel.THOROUGH) {
+      const outcomeValidation = await this.validateOutcome(requirements, workerResult, level);
+      if (outcomeValidation.issues.length > 0) {
+        result.issues.push(...outcomeValidation.issues);
+      }
+    }
+
+    // Determine approval
+    result.requirementsMet = result.issues.length === 0;
+    result.approved = result.requirementsMet;
+
+    if (!result.approved && result.issues.length > 0) {
+      result.nextAction = result.issues[0]; // Most critical issue becomes next action
+      this.failureCount++;
+    } else {
+      this.failureCount = 0; // Reset on success
+    }
+
+    return result;
+  }
+
+  /**
+   * Use LLM to analyze worker result for unjustified failure claims
+   * This is language-agnostic and captures semantic meaning
+   */
+  private async analyzeForUnjustifiedFailure(
+    userMessage: string,
+    workerResult: WorkerResult
+  ): Promise<FailureAnalysis> {
+    const toolCount = workerResult.toolsUsed.length;
+    const toolList = workerResult.toolsUsed.join(', ') || 'none';
+
+    const analysisPrompt = `You are a quality control agent. Analyze the following Worker response to determine if it's claiming failure and whether that failure is justified.
+
+USER REQUEST: ${userMessage}
+
+WORKER RESPONSE:
+${workerResult.result}
+
+WORKER REASONING: ${workerResult.reasoning}
+
+TOOLS USED: ${toolList} (${toolCount} total)
+WORKER SUCCESS FLAG: ${workerResult.success}
+
+Analyze and respond in this EXACT JSON format:
+{
+  "claimsFailure": <true if the response indicates the task cannot/could not be done, or refuses to do it>,
+  "hasEvidence": <true if there is concrete evidence justifying the failure (actual error messages, specific technical blockers, permission issues, etc.)>,
+  "reasoning": "<brief explanation of your analysis>",
+  "suggestedAction": "<if claimsFailure is true and hasEvidence is false, provide a specific instruction for the Worker to actually attempt the task>"
+}
+
+IMPORTANT CRITERIA:
+- If the Worker used 0 tools and claims failure, hasEvidence should be false (they didn't even try)
+- If the Worker claims something is "impossible" or "cannot be done" without showing actual error messages, hasEvidence should be false
+- Legitimate evidence includes: actual error output, specific file/permission errors, concrete technical limitations
+- Vague reasons like "I don't have the ability" or "this is outside my scope" are NOT evidence
+
+Respond ONLY with the JSON, no other text.`;
+
+    try {
+      const response = await this.orchestrator.chat({
+        messages: [
+          { role: 'system', content: 'You are a strict quality control validator. Respond only with valid JSON.' },
+          { role: 'user', content: analysisPrompt },
+        ],
+        temperature: 0.1, // Low temperature for consistent analysis
+      });
+
+      // Parse the JSON response
+      const jsonMatch = response.content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const analysis = JSON.parse(jsonMatch[0]) as FailureAnalysis;
+        return analysis;
+      }
+    } catch (error) {
+      logger.debug(`[Client] Failed to analyze failure claim: ${error}`);
+    }
+
+    // Default: assume no failure claim if analysis fails
+    return {
+      claimsFailure: false,
+      hasEvidence: true,
+      reasoning: 'Analysis could not be performed',
+    };
+  }
+
+  /**
+   * Layer 1: Process Validation (metadata only, no tools)
+   */
+  private validateProcess(requirements: Requirement[], workerResult: WorkerResult): { issues: string[] } {
+    const issues: string[] = [];
+
+    // Check if Worker used appropriate tools for requirements
+    for (const req of requirements) {
+      if (req.mustUseTools && req.mustUseTools.length > 0) {
+        const usedRequiredTool = req.mustUseTools.some(requiredTool => {
+          // Match if required tool is contained in actual tool name (e.g., 'playwright__browser' matches 'playwright__browser_navigate')
+          // OR if actual tool exactly matches the required tool
+          return workerResult.toolsUsed.some(actualTool =>
+            actualTool === requiredTool || actualTool.startsWith(requiredTool) || requiredTool.startsWith(actualTool.split('__')[0] + '__')
+          );
+        });
+
+        if (!usedRequiredTool) {
+          issues.push(
+            `${req.description} requires using ${req.mustUseTools.join(' or ')} but Worker did not use these tools. ` +
+            `Create a subtask specifically for ${req.description.toLowerCase()}.`
+          );
+        }
+      }
+    }
+
+    // Check if Worker succeeded
+    if (!workerResult.success) {
+      issues.push(
+        `Worker did not complete the task successfully. This suggests the task needs to be broken down differently or requires clarification.`
+      );
+    }
+
+    return { issues };
+  }
+
+  /**
+   * Layer 2: Outcome Validation (uses read-only tools)
+   */
+  private async validateOutcome(
+    requirements: Requirement[],
+    workerResult: WorkerResult,
+    level: InvolvementLevel
+  ): Promise<{ issues: string[] }> {
+    const issues: string[] = [];
+
+    // File existence validation
+    for (const req of requirements) {
+      if (req.type === 'file_creation' && req.filePath) {
+        try {
+          const exists = await this.fileExists(req.filePath);
+          if (!exists) {
+            issues.push(`Required file not created: ${req.filePath}`);
+          } else if (level === InvolvementLevel.THOROUGH) {
+            // For THOROUGH, also validate file contents
+            const validation = await this.validateFileContents(req.filePath);
+            if (!validation.valid) {
+              issues.push(`File ${req.filePath} created but has issues: ${validation.issue}`);
+            }
+          }
+        } catch (error) {
+          logger.debug(`[Client] Error validating file ${req.filePath}: ${error}`);
+        }
+      }
+    }
+
+    // Browser testing validation (only for THOROUGH)
+    if (level === InvolvementLevel.THOROUGH) {
+      for (const req of requirements) {
+        if ((req.type === 'testing' || req.type === 'verification') &&
+            workerResult.result.includes('.html')) {
+          // Extract HTML filename from result
+          const htmlMatch = workerResult.result.match(/([a-zA-Z0-9._-]+\.html)/);
+          if (htmlMatch) {
+            const htmlFile = htmlMatch[1];
+            const browserValidation = await this.validateInBrowser(htmlFile);
+            if (!browserValidation.valid) {
+              issues.push(browserValidation.issue!);
+            }
+          }
+        }
+      }
+    }
+
+    return { issues };
+  }
+
+  /**
+   * Check if file exists using read tool
+   */
+  private async fileExists(filePath: string): Promise<boolean> {
+    try {
+      await this.mcpClient.executeTool('filesystem__read_text_file', {
+        path: filePath,
+        head: 1,
+      });
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  /**
+   * Validate file contents for common issues
+   */
+  private async validateFileContents(filePath: string): Promise<{ valid: boolean; issue?: string }> {
+    try {
+      const content = await this.mcpClient.executeTool('filesystem__read_text_file', {
+        path: filePath,
+        head: 200,
+      });
+
+      const contentStr = typeof content === 'string' ? content : JSON.stringify(content);
+
+      // Check for HTML path mismatches
+      if (filePath.endsWith('.html')) {
+        const hrefMatches = contentStr.match(/href="([^"]+)"/g) || [];
+        const srcMatches = contentStr.match(/src="([^"]+)"/g) || [];
+
+        for (const match of [...hrefMatches, ...srcMatches]) {
+          const pathMatch = match.match(/(?:href|src)="([^"]+)"/);
+          if (pathMatch) {
+            const referencedPath = pathMatch[1];
+            if (!referencedPath.startsWith('http') && !referencedPath.startsWith('data:')) {
+              const exists = await this.fileExists(referencedPath);
+              if (!exists) {
+                return {
+                  valid: false,
+                  issue: `HTML references non-existent file: ${referencedPath}. Fix file paths or create missing files.`
+                };
+              }
+            }
+          }
+        }
+      }
+
+      return { valid: true };
+    } catch (error) {
+      return { valid: false, issue: `Could not read file: ${error}` };
+    }
+  }
+
+  /**
+   * Validate HTML file in browser
+   */
+  private async validateInBrowser(htmlFile: string): Promise<{ valid: boolean; issue?: string }> {
+    try {
+      // Navigate to file
+      const workspaceDir = process.cwd();
+      const fileUrl = `file://${workspaceDir}/${htmlFile}`;
+
+      await this.mcpClient.executeTool('playwright__browser_navigate', {
+        url: fileUrl,
+      });
+
+      // Check for console errors
+      const errors = await this.mcpClient.executeTool('playwright__browser_console_messages', {
+        level: 'error',
+      });
+
+      const errorStr = typeof errors === 'string' ? errors : JSON.stringify(errors);
+      if (errorStr && errorStr.length > 0 && !errorStr.includes('[]')) {
+        return {
+          valid: false,
+          issue: `Browser errors detected in ${htmlFile}: ${errorStr}. Fix these errors before delivery.`
+        };
+      }
+
+      return { valid: true };
+    } catch (error) {
+      logger.debug(`[Client] Browser validation error: ${error}`);
+      // Don't fail validation if browser test fails - might not have browser available
+      return { valid: true };
+    }
+  }
+
+  /**
+   * Reset failure tracking (for new conversation/session)
+   */
+  resetFailureTracking(): void {
+    this.failureCount = 0;
+  }
+}

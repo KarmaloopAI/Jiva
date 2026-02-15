@@ -2,14 +2,14 @@
  * Conversation Manager
  *
  * Handles conversation persistence, condensing, and restoration.
+ * Now uses StorageProvider abstraction for cloud-native support.
  */
 
 import { Message } from '../models/base.js';
 import { logger } from '../utils/logger.js';
-import { promises as fs } from 'fs';
-import { join, dirname } from 'path';
-import { homedir } from 'os';
 import { ModelOrchestrator } from '../models/orchestrator.js';
+import { StorageProvider } from '../storage/provider.js';
+import { SavedConversation } from '../storage/types.js';
 
 export interface ConversationMetadata {
   id: string;
@@ -21,31 +21,16 @@ export interface ConversationMetadata {
   summary?: string;
 }
 
-export interface SavedConversation {
-  metadata: ConversationMetadata;
-  messages: Message[];
-}
-
 export class ConversationManager {
-  private conversationsDir: string;
+  private storageProvider: StorageProvider;
   private currentConversationId: string | null = null;
 
-  constructor() {
-    this.conversationsDir = join(homedir(), '.jiva', 'conversations');
+  constructor(storageProvider: StorageProvider, orchestrator?: ModelOrchestrator) {
+    this.storageProvider = storageProvider;
+    this.orchestrator = orchestrator;
   }
 
-  /**
-   * Initialize conversations directory
-   */
-  async initialize(): Promise<void> {
-    try {
-      await fs.mkdir(this.conversationsDir, { recursive: true });
-      logger.debug(`Conversations directory: ${this.conversationsDir}`);
-    } catch (error) {
-      logger.error('Failed to create conversations directory', error);
-      throw error;
-    }
-  }
+  private orchestrator?: ModelOrchestrator;
 
   /**
    * Generate a unique conversation ID
@@ -57,14 +42,7 @@ export class ConversationManager {
   }
 
   /**
-   * Get path for a conversation file
-   */
-  private getConversationPath(id: string): string {
-    return join(this.conversationsDir, `${id}.json`);
-  }
-
-  /**
-   * Save conversation to disk
+   * Save conversation using StorageProvider
    */
   async saveConversation(
     messages: Message[],
@@ -74,23 +52,25 @@ export class ConversationManager {
   ): Promise<string> {
     const finalId = conversationId || this.currentConversationId || this.generateConversationId();
 
-    // Load existing metadata if updating an existing conversation
-    let existingMetadata: ConversationMetadata | undefined;
+    // Use provided orchestrator or fallback to constructor orchestrator
+    const modelOrchestrator = orchestrator || this.orchestrator;
+
+    // Load existing conversation if updating
+    let existingData: SavedConversation | null = null;
     if (this.currentConversationId && finalId === this.currentConversationId) {
       try {
-        const existing = await this.loadConversation(finalId);
-        existingMetadata = existing.metadata;
+        existingData = await this.storageProvider.loadConversation(finalId);
       } catch (error) {
-        // Ignore, will create new metadata
+        // Ignore, will create new
       }
     }
 
     // Generate title if this is a new conversation and we have at least one user message
-    let title = existingMetadata?.title;
+    let title = existingData?.metadata?.title;
     const hasUserMessage = messages.some(msg => msg.role === 'user');
-    if (!title && hasUserMessage && orchestrator) {
+    if (!title && hasUserMessage && modelOrchestrator) {
       logger.info('Generating conversation title...');
-      title = await this.generateTitle(messages, orchestrator);
+      title = await this.generateTitle(messages, modelOrchestrator);
       logger.info(`Title generated: ${title}`);
     } else if (!title && hasUserMessage) {
       // Fallback: use first user message as title if no orchestrator
@@ -106,11 +86,11 @@ export class ConversationManager {
     const metadata: ConversationMetadata = {
       id: finalId,
       title,
-      created: existingMetadata?.created || new Date().toISOString(),
+      created: existingData?.metadata?.created || new Date().toISOString(),
       updated: new Date().toISOString(),
       messageCount: messages.length,
       workspace,
-      summary: existingMetadata?.summary,
+      summary: existingData?.metadata?.summary,
     };
 
     const conversation: SavedConversation = {
@@ -118,8 +98,7 @@ export class ConversationManager {
       messages,
     };
 
-    const path = this.getConversationPath(finalId);
-    await fs.writeFile(path, JSON.stringify(conversation, null, 2), 'utf-8');
+    await this.storageProvider.saveConversation(conversation);
 
     this.currentConversationId = finalId;
     logger.debug(`Conversation saved: ${finalId}`);
@@ -128,14 +107,15 @@ export class ConversationManager {
   }
 
   /**
-   * Load conversation from disk
+   * Load conversation using StorageProvider
    */
   async loadConversation(id: string): Promise<SavedConversation> {
-    const path = this.getConversationPath(id);
-
     try {
-      const data = await fs.readFile(path, 'utf-8');
-      const conversation = JSON.parse(data) as SavedConversation;
+      const conversation = await this.storageProvider.loadConversation(id);
+
+      if (!conversation) {
+        throw new Error(`Conversation not found: ${id}`);
+      }
 
       this.currentConversationId = id;
       logger.debug(`Conversation loaded: ${id}`);
@@ -148,27 +128,11 @@ export class ConversationManager {
   }
 
   /**
-   * List all saved conversations
+   * List all saved conversations using StorageProvider
    */
   async listConversations(): Promise<ConversationMetadata[]> {
     try {
-      const files = await fs.readdir(this.conversationsDir);
-      const conversations: ConversationMetadata[] = [];
-
-      for (const file of files) {
-        if (file.endsWith('.json')) {
-          try {
-            const data = await fs.readFile(
-              join(this.conversationsDir, file),
-              'utf-8'
-            );
-            const conversation = JSON.parse(data) as SavedConversation;
-            conversations.push(conversation.metadata);
-          } catch (error) {
-            logger.warn(`Failed to read conversation file: ${file}`);
-          }
-        }
-      }
+      const conversations = await this.storageProvider.listConversations();
 
       // Sort by updated date (most recent first)
       conversations.sort((a, b) =>
@@ -183,13 +147,11 @@ export class ConversationManager {
   }
 
   /**
-   * Delete a conversation
+   * Delete a conversation using StorageProvider
    */
   async deleteConversation(id: string): Promise<void> {
-    const path = this.getConversationPath(id);
-
     try {
-      await fs.unlink(path);
+      await this.storageProvider.deleteConversation(id);
       logger.debug(`Conversation deleted: ${id}`);
 
       if (this.currentConversationId === id) {

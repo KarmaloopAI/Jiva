@@ -2,15 +2,16 @@
 
 [![npm version](https://img.shields.io/npm/v/jiva-core.svg)](https://www.npmjs.com/package/jiva-core) [![License](https://img.shields.io/github/license/KarmaloopAI/Jiva.svg)](LICENSE) [![GitHub stars](https://img.shields.io/github/stars/KarmaloopAI/Jiva.svg?style=social&label=Star)](https://github.com/KarmaloopAI/Jiva)
 
-Jiva is a powerful autonomous AI agent powered by gpt-oss-120b with full MCP (Model Context Protocol) support. It's designed to be highly goal-oriented, autonomous, and extensible for various use cases.
+Jiva is a powerful autonomous AI agent with a three-agent architecture (Manager, Worker, Client) powered by gpt-oss-120b with full MCP (Model Context Protocol) support. Deploy as a CLI tool or scale to production on Google Cloud Run.
 
 ## Quick Links
 
-- **[Quick Start Guide](docs/QUICKSTART.md)** - Get up and running in 30 seconds
-- **[Configuration Guide](docs/CONFIGURATION.md)** - Detailed configuration and provider setup
-- **[New Features Guide](docs/NEW_FEATURES.md)** - Latest improvements and features
-- **[Build Instructions](docs/BUILD.md)** - Detailed setup and development workflow
-- **[Troubleshooting](docs/TROUBLESHOOTING.md)** - Common issues and solutions
+- **[Quick Start Guide](docs/guides/QUICKSTART.md)** - Get up and running in 30 seconds
+- **[Cloud Run Deployment](docs/deployment/CLOUD_RUN_DEPLOYMENT.md)** - Deploy to production
+- **[Configuration Guide](docs/guides/CONFIGURATION.md)** - Detailed configuration and provider setup
+- **[Documentation](docs/README.md)** - Complete documentation index
+- **[Build Instructions](docs/guides/BUILD.md)** - Detailed setup and development workflow
+- **[Troubleshooting](docs/guides/TROUBLESHOOTING.md)** - Common issues and solutions
 
 ## Demo
 
@@ -19,26 +20,34 @@ Jiva is a powerful autonomous AI agent powered by gpt-oss-120b with full MCP (Mo
 ## Features
 
 ### Core Capabilities
-- **Dual-Agent Architecture**: Manager + Worker pattern for reliable task execution and planning
+- **Three-Agent Architecture**: Manager for planning, Worker for execution, Client for quality validation
+- **Adaptive Quality Control**: Client agent uses tiered validation (MINIMAL→STANDARD→THOROUGH) based on task complexity
+- **Unjustified Failure Detection**: LLM-powered analysis catches agents giving up without trying
+- **Cloud-Ready Deployment**: Run on Google Cloud Run with auto-scaling, WebSocket support, and GCS storage
+- **Multi-Tenancy**: Per-tenant isolation with authenticated session management
 - **Provider Agnostic**: Works with Krutrim, Groq, OpenAI, Ollama, and any OpenAI-compatible API
-- **Three-Phase Execution**: Planning → Execution → Synthesis for structured task completion
 - **MCP Integration**: Seamless integration with Model Context Protocol servers for extensible tooling
 - **Smart Conversations**: Auto-save, restore, and AI-generated titles for all conversations
-- **Pretty Markdown**: Beautiful terminal output with syntax highlighting
 - **Directive-Based**: Orient agent behavior with custom `jiva-directive.md` files
-- **Multi-Modal Support**: Optional image understanding via Llama-4-Maverick-17B
-- **Auto-Condensing**: Intelligent conversation history management to prevent token overload
+- **Storage Abstraction**: Local filesystem or cloud storage (GCS, future: S3, Redis)
 
-### Advanced Features (v0.2.1)
+### v0.3.0 Features
+- **Production Deployment**: One-command Cloud Run deployment with GCS persistence
+- **Client Agent**: Intelligent validation that ensures work quality and catches false failures
+- **HTTP/WebSocket API**: RESTful endpoints and real-time bidirectional communication
+- **Authentication**: Firebase Auth, custom JWT, or development mode
+- **Session Management**: Auto-scaling agent instances with idle timeout and cleanup
+- **Container Orchestration**: Multi-stage Docker builds, health probes, graceful shutdown
+
+### v0.2.1 Features
 - **Dual-Agent System**: Separate Manager and Worker agents for better task focus and reliability
 - **Chain-of-Thought Logging**: Transparent reasoning at INFO level with clean ASCII formatting
 - **Robust Error Recovery**: Automatic retry with error feedback for API and tool failures
 - **Workspace-Aware Operations**: Smart path resolution for file operations
 - **Slash Commands**: Use `/help`, `/load`, `/save`, `/list` for easy conversation management
 - **Smart Tool Format Detection**: Auto-detects Harmony vs Standard OpenAI tool calling format
-- **Extensible Architecture**: Designed to expand from CLI to desktop or web applications
 
-See [NEW_FEATURES.md](docs/NEW_FEATURES.md) for detailed information.
+See [release notes](docs/release_notes/) for detailed version history.
 
 ## Installation
 
@@ -58,21 +67,15 @@ jiva setup
 
 ```bash
 git clone https://github.com/KarmaloopAI/Jiva.git
-cd jiva
-npm install
-npm run build
-npm link  # For global CLI access
-```
+cd jCLI Mode (Local Development)
 
-## Quick Start
-
-### 1. Install Jiva
+#### 1. Install Jiva
 
 ```bash
 npm install -g jiva-core
 ```
 
-### 2. First-Time Setup
+#### 2. First-Time Setup
 
 Run the interactive setup wizard:
 
@@ -86,7 +89,7 @@ You'll be prompted for:
 - Optional multimodal model (Llama-4-Maverick-17B)
 - MCP server configuration
 
-### 3. Start Chatting
+#### 3. Start Chatting
 
 Launch interactive mode:
 
@@ -104,7 +107,68 @@ You: /save                    # Save this conversation
 You: /list                    # View all saved conversations
 ```
 
+### Cloud Run Mode (Production)
+
+Deploy Jiva as an auto-scaling HTTP/WebSocket service:
+
+#### 1. Prerequisites
+
+- Google Cloud account with billing enabled
+- `gcloud` CLI installed and configured
+- Docker installed (for local testing)
+
+#### 2. One-Command Deployment
+
+```bash
+git clone https://github.com/KarmaloopAI/Jiva.git
+cd jiva
+./deploy.sh YOUR_PROJECT_ID us-central1
+```
+
+The script automatically:
+- Enables required GCP APIs
+- Creates GCS bucket for state storage
+- Configures service account and IAM roles
+- Builds and deploys container to Cloud Run
+- Outputs service URL
+
+#### 3. Test Deployment
+
+```bash
+SERVICE_URL=$(gcloud run services describe jiva --region=us-central1 --format='value(status.url)')
+
+# Health check
+curl $SERVICE_URL/health
+
+# Chat endpoint (with auth bypass for testing)
+curl -X POST $SERVICE_URL/api/chat \
+  -H "Content-Type: application/json" \
+  -H "X-Session-Id: test-session" \
+  -d '{"message": "Hello, Jiva!"}'
+```
+
+**Full deployment guide:** [Cloud Run Deployment](docs/deployment/CLOUD_RUN_DEPLOYMENT.md)ry these commands:**
+```bash
+You: /help                    # Show all available commands
+You: /servers                 # Check MCP server status
+You: /tools                   # List all available tools
+You: List files in this directory
+You: /save                    # Save this conversation
+You: /list                    # View all saved conversations
+```
+
 ### 4. Advanced Usage
+
+**View current configuration:**
+```bash
+jiva config --show
+```
+
+**Use a custom configuration file:**
+```bash
+jiva chat --config ./my-project-config.json
+jiva run "analyze code" --config ./team-config.json
+```
 
 **Custom workspace and directive:**
 ```bash
@@ -216,7 +280,7 @@ Provides comprehensive file operations across user directories (subject to OS pe
 - **Package:** `@modelcontextprotocol/server-filesystem`
 - **Access:** `/Users` (macOS/Linux) or `C:\Users` (Windows)
 - **Tools:** read_file, write_file, list_directory, create_directory, and more
-- **Details:** See [FILESYSTEM_ACCESS.md](docs/FILESYSTEM_ACCESS.md)
+- **Details:** See [FILESYSTEM_ACCESS.md](docs/architecture/FILESYSTEM_ACCESS.md)
 
 ### Recommended Additional Servers
 
@@ -320,93 +384,140 @@ Edit your config file at `~/.config/jiva-nodejs/config.json` (Linux) or `~/Libra
 #### Programmatically
 
 ```typescript
-import { configManager } from 'jiva-core';
+### Three-Agent System (v0.3.0)
 
-configManager.addMCPServer('playwright', {
-  command: 'npx',
-  args: ['@playwright/mcp@latest'],
-  enabled: true,
-});
+Jiva uses a three-agent architecture for intelligent task execution:
+
+```
+User Request
+     ↓
+┌────────────────┐
+│ Manager Agent  │  Plans subtasks, coordinates workflow
+└────────┬───────┘
+         ↓
+┌────────────────┐
+│ Worker Agent   │  Executes subtasks with MCP tools
+└────────┬───────┘
+         ↓
+┌────────────────┐
+│ Client Agent   │  Validates outputs, ensures quality
+└────────┬───────┘
+         ↓
+    Final Response
 ```
 
-### Checking MCP Server Status
+**Manager Agent**: High-level planning and task decomposition  
+**Worker Agent**: Tool execution and information gathering  
+**Client Agent**: Adaptive validation and quality control (new in v0.3.0)
 
-```bash
-jiva chat
-# Type: /servers
-```
+The Client agent uses tiered involvement levels to balance quality with efficiency:
+- **MINIMAL**: Information requests → metadata validation only
+- **STANDARD**: Creation tasks → file exists + basic checks
+- **THOROUGH**: Complex tasks or after failures → full E2E validation
 
-You'll see:
-```
-MCP Servers:
-  ✓ filesystem: 12 tools
-  ✓ playwright: 8 tools
-  ✓ desktop-commander: 6 tools
-```
-
-**Troubleshooting MCP Issues:** See [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md#mcp-server-issues)
-
-## CLI Commands
-
-### Interactive Mode Commands
-
-While in chat mode, you can use these commands (prefix with `/`):
-
-- `/help` - Show available commands
-- `/exit` / `/quit` - Exit the session
-- `/reset` - Reset conversation history
-- `/history` - Show conversation history
-- `/tools` - List available MCP tools
-- `/servers` - Show MCP server status
-- `/save` - Save current conversation ✨ NEW
-- `/load` - Load a saved conversation ✨ NEW
-- `/list` - List all saved conversations ✨ NEW
-
-## Architecture
-
-Jiva is designed with extensibility in mind:
+### Project Structure
 
 ```
 jiva/
 ├── src/
-│   ├── core/           # Core agent logic
-│   ├── models/         # Model integrations and Harmony format
-│   ├── mcp/            # MCP client and server management
-│   ├── interfaces/     # CLI, Electron, Web interfaces
-│   └── utils/          # Utilities and helpers
+│   ├── core/              # Three-agent system
+│   │   ├── dual-agent.ts        # Main orchestrator
+│   │   ├── manager-agent.ts     # Planning & coordination
+│   │   ├── worker-agent.ts      # Tool execution
+│   │   └── client-agent.ts      # Quality validation (v0.3.0)
+│   ├── models/            # Model integrations and Harmony format
+│   ├── mcp/               # MCP client and server management
+│   ├── storage/           # Storage abstraction (v0.3.0)
+│   │   ├── local-provider.ts    # Filesystem storage
+│   │   └── gcp-bucket-provider.ts # Cloud storage
+│   ├── interfaces/        # CLI and HTTP interfaces
+│   │   ├── cli/           # CLI interface
+│   │   └── http/          # Cloud Run HTTP/WebSocket (v0.3.0)
+│   └── utils/             # Utilities and helpers
 ```
 
 ### Key Components
 
-1. **DualAgent**: Main orchestrator coordinating Manager and Worker agents (v0.2.1+)
+1. **DualAgent**: Main orchestrator coordinating Manager, Worker, and Client agents
 2. **ManagerAgent**: High-level planning, task breakdown, and result synthesis
 3. **WorkerAgent**: Focused tool execution and information gathering
-4. **ModelOrchestrator**: Manages multi-model coordination (reasoning + multimodal)
-5. **MCPServerManager**: Handles MCP server lifecycle and tool discovery
-6. **WorkspaceManager**: Manages workspace directory and directive files
-7. **Harmony Format Handler**: Implements gpt-oss-120b's required response format
+4. **ClientAgent**: Adaptive validation with unjustified failure detection
+5. **ModelOrchestrator**: Manages multi-model coordination (reasoning + multimodal)
+6. **MCPServerManager**: Handles MCP server lifecycle and tool discovery
+7. **StorageProvider**: Unified interface for local/cloud persistence
+8. **SessionManager**: Manages DualAgent lifecycle in cloud deployments
 
-**Legacy:** JivaAgent (single-agent) remains available for compatibility
+**Troubleshooting MCP Issues:** See [TROUBLESHOOTING.md](docs/guides/TROUBLESHOOTING.md#mcp-server-issues)
 
-## Working with gpt-oss-120b
+### CLI/Library Mode
 
-The gpt-oss-120b model requires the Harmony response format. Jiva handles this automatically with:
+```typescript
+import {
+  DualAgent,
+  createKrutrimModel,
+  ModelOrchestrator,
+  MCPServerManager,
+  WorkspaceManager,
+  ConversationManager,
+  createStorageProvider,
+} from 'jiva-core';
 
-### Tool Call Parsing
-- Robust parsing of `<|call|>function_name({"param": "value"})<|return|>` format
-- Automatic JSON fixing for common formatting issues
-- Validation against available tools
+// Create storage provider (auto-detects local/cloud)
+const storageProvider = await createStorageProvider();
 
-### Multi-Channel Output
-- Analysis channel: Chain-of-thought reasoning
-- Final channel: User-facing responses
-- Tool calling: Structured function calls
+// Create models
+const reasoningModel = createKrutrimModel({
+  endpoint: 'https://cloud.olakrutrim.com/v1/chat/completions',
+  apiKey: 'your-api-key',
+  model: 'gpt-oss-120b',
+  type: 'reasoning',
+});
 
-### Error Handling
-- Retry logic for malformed tool calls
-- Graceful degradation when tools fail
-- Detailed logging for debugging
+// Create orchestrator
+const orchestrator = new ModelOrchestrator({ reasoningModel });
 
+// Initialize MCP
+const mcpManager = new MCPServerManager();
+await mcpManager.initialize({
+  filesystem: {
+    command: 'npx',
+    args: ['-y', '@modelcontextprotocol/server-filesystem', process.cwd()],
+    enabled: true,
+  },
+});
+
+// Initialize workspace
+const workspace = new WorkspaceManager(storageProvider);
+await workspace.initialize();
+
+// Initialize conversation manager
+const conversationManager = new ConversationManager(storageProvider);
+
+// Create three-agent system
+const agent = new DualAgent({
+  orchestrator,
+  mcpManager,
+  workspace,
+  conversationManager,
+  maxSubtasks: 20,        // Manager's subtask limit
+  maxIterations: 10,      // Worker's iteration limit per subtask
+});
+
+// Use agent
+const response = await agent.chat('Hello, Jiva!');
+console.log(response.content);
+console.log(`Plan: ${response.plan?.subtasks.join(', ')}`);
+console.log(`Tools used: ${response.toolsUsed.join(', ')}`);
+
+// Cleanup
+await agent.cleanup();
+```
+
+### Cloud Mode (HTTP/WebSocket)
+
+For cloud deployments, see the [HTTP interface documentation](docs/deployment/CLOUD_RUN_IMPLEMENTATION.md) and [example programs](examples/).
+
+**Key difference:** Cloud mode uses `SessionManager` to handle multiple concurrent agent instances with per-tenant isolation.
 ## Development
 
 ### Build

@@ -1,8 +1,10 @@
 /**
- * Dual Agent System - Coordinates Manager and Worker agents
+ * Dual Agent System - Coordinates Manager, Worker, and Client agents
  *
- * This is the main entry point that replaces the old single-agent architecture.
- * It implements a two-agent pattern for better separation of concerns.
+ * Three-agent architecture:
+ * - Manager: High-level planning and coordination
+ * - Worker: Task execution with tools
+ * - Client: Adaptive validation and quality control
  */
 
 import { ModelOrchestrator } from '../models/orchestrator.js';
@@ -11,6 +13,7 @@ import { WorkspaceManager } from './workspace.js';
 import { ConversationManager } from './conversation-manager.js';
 import { ManagerAgent } from './manager-agent.js';
 import { WorkerAgent } from './worker-agent.js';
+import { ClientAgent } from './client-agent.js';
 import { logger } from '../utils/logger.js';
 import { orchestrationLogger } from '../utils/orchestration-logger.js';
 import { Message } from '../models/base.js';
@@ -44,6 +47,7 @@ export class DualAgent {
 
   private manager: ManagerAgent;
   private worker: WorkerAgent;
+  private client: ClientAgent;
 
   private maxSubtasks: number;
   private maxIterations: number;
@@ -63,11 +67,12 @@ export class DualAgent {
     this.autoSave = config.autoSave !== false;
     this.condensingThreshold = config.condensingThreshold || 30;
 
-    // Initialize agents
+    // Initialize agents (three-agent architecture)
     this.manager = new ManagerAgent(this.orchestrator, this.workspace);
     this.worker = new WorkerAgent(this.orchestrator, this.mcpManager, this.workspace, this.maxIterations);
+    this.client = new ClientAgent(this.orchestrator, this.mcpManager);
 
-    logger.info('[*] Dual-agent system initialized (Manager + Worker)');
+    logger.info('[*] Three-agent system initialized (Manager + Worker + Client)');
   }
 
   /**
@@ -142,9 +147,37 @@ export class DualAgent {
         result: workerResult.result,
       });
 
-      // Note: Manager reviews are now disabled for individual subtasks
-      // Manager only synthesizes final response at the end
-      // This reduces overhead from 27 reviews to 1 synthesis for typical tasks
+      // Client validates Worker's result (adaptive involvement)
+      const validation = await this.client.validate(
+        userMessage,
+        plan.subtasks,
+        workerResult
+      );
+
+      if (!validation.approved && validation.nextAction) {
+        logger.info(`[Client] Validation failed: ${validation.issues.join(', ')}`);
+        logger.info(`[Client] Requesting correction: ${validation.nextAction}`);
+
+        // Deduplicate correction subtasks - don't add the same correction twice
+        const normalizedCorrection = validation.nextAction.toLowerCase().trim();
+        const isDuplicate = subtasksToExecute.some(existing => 
+          existing.toLowerCase().trim() === normalizedCorrection
+        ) || results.some(r => 
+          r.subtask.toLowerCase().trim() === normalizedCorrection
+        );
+
+        // Add correction subtask (but don't exceed maxSubtasks and avoid duplicates)
+        if (isDuplicate) {
+          logger.warn(`[Client] Skipping duplicate correction subtask`);
+        } else if (subtasksToExecute.length < this.maxSubtasks) {
+          subtasksToExecute.push(validation.nextAction);
+          logger.info(`[Client] Added correction subtask (${subtasksToExecute.length} total)`);
+        } else {
+          logger.warn(`[Client] Cannot add correction - maxSubtasks (${this.maxSubtasks}) reached`);
+        }
+      } else if (validation.approved) {
+        logger.info(`[Client] Validation passed (${validation.involvementLevel} level)`);
+      }
     }
 
     orchestrationLogger.logPhaseEnd('EXECUTION', Date.now() - executionStartTime);

@@ -1,0 +1,135 @@
+# Cloud Run service configuration for Jiva
+# Deploy with: gcloud run services replace cloud-run.yaml
+
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: jiva
+  labels:
+    app: jiva
+    environment: production
+spec:
+  template:
+    metadata:
+      annotations:
+        # Launch stage for beta features
+        run.googleapis.com/launch-stage: "BETA"
+        
+        # Scale to zero when idle
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "10"
+        
+        # CPU allocation - always allocated since we need WebSocket support
+        run.googleapis.com/cpu-throttling: "false"
+        
+        # Startup probe for slow initialization
+        run.googleapis.com/startup-cpu-boost: "true"
+        
+        # Container execution environment
+        run.googleapis.com/execution-environment: gen2
+        
+        # Session affinity for WebSocket connections
+        run.googleapis.com/session-affinity: "true"
+    spec:
+      # Timeout for long-running WebSocket sessions
+      timeoutSeconds: 3600  # 60 minutes
+      
+      # Container concurrency (WebSocket connections per instance)
+      containerConcurrency: 80
+      
+      serviceAccountName: jiva-cloud-run@PROJECT_ID.iam.gserviceaccount.com
+      
+      containers:
+      - name: jiva
+        image: gcr.io/PROJECT_ID/jiva:latest
+        
+        ports:
+        - name: http1
+          containerPort: 8080
+        
+        env:
+        # Node environment
+        - name: NODE_ENV
+          value: "production"
+        
+        # Server configuration
+        - name: LOG_LEVEL
+          value: "info"
+        
+        # Storage configuration
+        - name: JIVA_STORAGE_PROVIDER
+          value: "gcp"
+        - name: JIVA_GCP_BUCKET
+          value: "jiva-state-BUCKET_NAME"
+        - name: JIVA_GCP_PROJECT
+          value: "PROJECT_ID"
+        
+        # Session configuration
+        - name: MAX_CONCURRENT_SESSIONS
+          value: "100"
+        - name: SESSION_IDLE_TIMEOUT_MS
+          value: "1800000"  # 30 minutes
+        
+        # Authentication
+        - name: AUTH_STRATEGY
+          value: "firebase"  # or "custom"
+        - name: AUTH_DISABLED
+          value: "true"  # Set to false for production
+        
+        # Model configuration (from Secret Manager)
+        - name: JIVA_MODEL_PROVIDER
+          value: "krutrim"
+        - name: JIVA_MODEL_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: jiva-model-api-key
+              key: latest
+        - name: JIVA_MODEL_BASE_URL
+          value: "https://cloud.olakrutrim.com/v1/chat/completions"
+        - name: JIVA_MODEL_NAME
+          value: "gpt-oss-120b"
+        
+        # MCP Server Configuration
+        - name: ENABLE_MCP_SERVERS
+          value: "true"
+        - name: MCP_FILESYSTEM_ENABLED
+          value: "true"
+        - name: MCP_FILESYSTEM_ALLOWED_PATHS
+          value: "/tmp,/workspace"
+        
+        # CORS allowed origins
+        - name: ALLOWED_ORIGINS
+          value: "https://yourdomain.com,https://app.yourdomain.com"
+        
+        resources:
+          limits:
+            # CPU: 2 vCPU for handling concurrent sessions
+            cpu: "2000m"
+            # Memory: 4GB for model inference and session state
+            memory: "4Gi"
+          requests:
+            cpu: "1000m"
+            memory: "2Gi"
+        
+        # Health probes
+        startupProbe:
+          httpGet:
+            path: /startup
+            port: 8080
+          initialDelaySeconds: 0
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 0
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+  traffic:
+  - percent: 100
+    latestRevision: true

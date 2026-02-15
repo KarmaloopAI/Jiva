@@ -1,0 +1,47 @@
+{
+  "models": {
+    "reasoning": {
+      "name": "reasoning",
+      "endpoint": "https://cloud.olakrutrim.com/v1/chat/completions",
+      "apiKey": "YOUR_API_KEY_HERE",
+      "type": "reasoning",
+      "defaultModel": "gpt-oss-120b",
+      "useHarmonyFormat": true
+    },
+    "multimodal": {
+      "name": "multimodal",
+      "endpoint": "https://cloud.olakrutrim.com/v1/chat/completions",
+      "apiKey": "YOUR_API_KEY_HERE",
+      "type": "multimodal",
+      "defaultModel": "Llama-4-Maverick",
+      "useHarmonyFormat": false
+    }
+  },
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/Users"],
+      "enabled": true
+    },
+    "brave-search": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+      "env": {
+        "BRAVE_API_KEY": "YOUR_BRAVE_API_KEY_HERE"
+      },
+      "enabled": false
+    },
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "YOUR_GITHUB_TOKEN_HERE"
+      },
+      "enabled": false
+    }
+  },
+  "workspace": {
+    "defaultDirectivePath": "./jiva-directive.md"
+  },
+  "debug": false
+}
