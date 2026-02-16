@@ -68,6 +68,28 @@ jiva persona package-skill my-skill
 
 See **[Personas Guide](docs/guides/PERSONAS.md)** for complete documentation.
 
+### v0.3.2 Bug Fixes & Quality Improvements
+**Bug Fixes:**
+- **Persona Isolation**: Sub-agents now use ephemeral personas that don't overwrite parent agent configuration
+- **Context Propagation**: Workspace directory automatically injected into all sub-agent task messages
+- **Enhanced Logging**: Persona context included in all log messages for better multi-agent debugging
+- **Reduced Hallucination**: Temperature lowered from 0.3-0.7 to 0.1-0.2 for more deterministic, fact-based behavior
+
+**HTTP/Cloud Compatibility:**
+- **🚨 Per-Tenant Persona Config** (CRITICAL): Fixed cross-tenant persona configuration leakage - each tenant's settings now isolated in GCS
+- **Session-Scoped Logging**: Fixed persona context race conditions in concurrent HTTP sessions
+- **Cloud-Aware Orchestration**: Orchestration logs now persist to cloud storage (GCS/S3) instead of ephemeral filesystem
+
+**Quality Improvements:**
+- **LLM-Based Validation**: Client agent uses semantic analysis instead of keyword matching for involvement level detection
+- **Coherence Checking**: Detects when Worker fabricates accomplishments not supported by actual tool usage
+- **Robust Plan Parsing**: Manager agent parsing with JSON format, LLM cleanup fallback, and garbage filtering
+- **Client Logging**: Full orchestration traceability for validation decisions and quality control
+
+**⚠️ CRITICAL:** If running in HTTP/Cloud mode (v0.3.1+), **upgrade immediately**:
+- v0.3.1 has cross-tenant configuration leakage (security issue)
+- v0.3.2 fixes multi-tenant isolation with per-tenant storage
+
 ### v0.2.1 Features
 - **Dual-Agent System**: Separate Manager and Worker agents for better task focus and reliability
 - **Chain-of-Thought Logging**: Transparent reasoning at INFO level with clean ASCII formatting

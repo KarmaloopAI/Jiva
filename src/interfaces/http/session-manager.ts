@@ -17,6 +17,7 @@ import { WorkspaceManager } from '../../core/workspace.js';
 import { ConversationManager } from '../../core/conversation-manager.js';
 import { StorageProvider } from '../../storage/provider.js';
 import { logger } from '../../utils/logger.js';
+import { orchestrationLogger } from '../../utils/orchestration-logger.js';
 import { createKrutrimModel } from '../../models/krutrim.js';
 import { Message } from '../../models/base.js';
 import { PersonaManager } from '../../personas/persona-manager.js';
@@ -87,6 +88,10 @@ export class SessionManager extends EventEmitter {
     const session = await this.createSession(tenantId, sessionId);
     this.sessions.set(key, session);
     this.resetIdleTimer(key);
+
+    // Configure logger and orchestration logger for this session
+    logger.setSessionId(sessionId);
+    orchestrationLogger.setStorageProvider(this.config.storageProvider, sessionId);
 
     this.emit('sessionCreated', { tenantId, sessionId });
     return session.agent;
@@ -200,8 +205,9 @@ export class SessionManager extends EventEmitter {
       // Initialize conversation manager
       const conversationManager = new ConversationManager(this.config.storageProvider);
 
-      // Initialize persona manager
-      const personaManager = new PersonaManager();
+      // Initialize persona manager with per-tenant storage provider
+      // This ensures persona config is isolated per tenant, not shared globally
+      const personaManager = new PersonaManager([], false, this.config.storageProvider);
       await personaManager.initialize();
 
       // Merge persona MCP servers with session MCP servers
@@ -294,8 +300,14 @@ export class SessionManager extends EventEmitter {
         logger.debug(`[SessionManager] Persisted ${conversationHistory.length} messages`);
       }
 
-      // Flush logs
+      // Flush orchestration logs
+      await orchestrationLogger.flush();
+
+      // Flush structured logs
       await this.config.storageProvider.flushLogs();
+
+      // Clean up session-specific logger context
+      logger.clearSessionContext(sessionId);
 
       // Cleanup MCP servers
       await session.mcpManager.cleanup();
@@ -342,6 +354,9 @@ export class SessionManager extends EventEmitter {
       session.info.lastActivityAt = new Date();
       session.info.messageCount++;
       this.resetIdleTimer(key);
+      
+      // Ensure logger knows current session context
+      logger.setSessionId(sessionId);
     }
   }
 

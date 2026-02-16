@@ -11,6 +11,12 @@ export enum LogLevel {
 class Logger {
   private static instance: Logger;
   private logLevel: LogLevel = LogLevel.INFO;
+  private personaContext: string | null = null;
+  
+  // Session-scoped persona contexts for concurrent HTTP sessions
+  // Key: sessionId, Value: persona name
+  private sessionContexts: Map<string, string | null> = new Map();
+  private currentSessionId: string | null = null;
 
   private constructor() {}
 
@@ -23,6 +29,46 @@ class Logger {
 
   setLogLevel(level: LogLevel) {
     this.logLevel = level;
+  }
+
+  /**
+   * Set current session ID for multi-session environments (HTTP/Cloud)
+   */
+  setSessionId(sessionId: string | null) {
+    this.currentSessionId = sessionId;
+  }
+
+  /**
+   * Set persona context for the current session or global
+   */
+  setPersonaContext(persona: string | null) {
+    if (this.currentSessionId) {
+      // Multi-session mode: store per-session context
+      this.sessionContexts.set(this.currentSessionId, persona);
+    } else {
+      // Single-session mode (CLI): use global context
+      this.personaContext = persona;
+    }
+  }
+
+  /**
+   * Get persona context for the current session or global
+   */
+  getPersonaContext(): string | null {
+    if (this.currentSessionId) {
+      // Multi-session mode: get per-session context
+      return this.sessionContexts.get(this.currentSessionId) || null;
+    } else {
+      // Single-session mode (CLI): use global context
+      return this.personaContext;
+    }
+  }
+
+  /**
+   * Clear session-specific context when session ends
+   */
+  clearSessionContext(sessionId: string) {
+    this.sessionContexts.delete(sessionId);
   }
 
   debug(message: string, ...args: any[]) {
@@ -61,7 +107,15 @@ class Logger {
 
     const timestamp = new Date().toISOString();
     const prefix = this.getPrefix(level);
-    const formattedMessage = `${chalk.gray(timestamp)} ${prefix} ${message}`;
+    
+    // Get persona context for current session (supports concurrent sessions)
+    const personaCtx = this.getPersonaContext();
+    const personaPrefix = personaCtx ? chalk.magenta(`[${personaCtx}]`) + ' ' : '';
+    
+    // Add session ID prefix in multi-session mode
+    const sessionPrefix = this.currentSessionId ? chalk.cyan(`[${this.currentSessionId.substring(0, 8)}]`) + ' ' : '';
+    
+    const formattedMessage = `${chalk.gray(timestamp)} ${prefix} ${sessionPrefix}${personaPrefix}${message}`;
 
     console.log(formattedMessage, ...args);
   }

@@ -138,13 +138,14 @@ export class AgentSpawner {
     logger.info(`[AgentSpawner] Depth: ${this.currentDepth + 1}/${this.maxDepth}`);
 
     try {
-      // Create a new PersonaManager for the sub-agent
-      const subPersonaManager = new PersonaManager();
+      // Create an ephemeral PersonaManager for the sub-agent
+      // Ephemeral = true means it won't persist persona to global config
+      const subPersonaManager = new PersonaManager([], true);
       await subPersonaManager.initialize();
 
-      // Activate the requested persona
+      // Activate the requested persona (ephemeral, won't overwrite parent's persona)
       await subPersonaManager.activatePersona(request.persona);
-      logger.success(`[AgentSpawner] Activated persona: ${request.persona}`);
+      logger.success(`[AgentSpawner] Activated ephemeral persona: ${request.persona}`);
 
       // Merge persona MCP servers
       const personaMCPServers = subPersonaManager.getPersonaMCPServers();
@@ -206,29 +207,44 @@ export class AgentSpawner {
       this.agents.set(agentId, spawnedAgent);
 
       // Prepare task message with context
-      let taskMessage = request.task;
+      // IMPORTANT: Always include workspace path for sub-agents
+      const workspacePath = this.workspace.getWorkspaceDir();
+      let contextSection = `Project root: ${workspacePath}`;
+      
       if (request.context) {
-        taskMessage = `CONTEXT:\n${request.context}\n\nTASK:\n${request.task}`;
+        contextSection += `\n${request.context}`;
       }
+      
+      const taskMessage = `CONTEXT:\n${contextSection}\n\nTASK:\n${request.task}`;
 
-      // Execute the task
-      logger.info(`[AgentSpawner] Executing task with sub-agent...`);
-      const response = await subAgent.chat(taskMessage);
+      // Save parent's persona context and set sub-agent's persona for logging
+      const parentPersonaContext = logger.getPersonaContext();
+      
+      try {
+        logger.setPersonaContext(request.persona);
 
-      // Update agent status
-      spawnedAgent.messageCount = 1;
-      spawnedAgent.status = 'completed';
-      spawnedAgent.result = response.content;
+        // Execute the task
+        logger.info(`[AgentSpawner] Executing task with sub-agent...`);
+        const response = await subAgent.chat(taskMessage);
 
-      logger.success(`[AgentSpawner] Sub-agent completed task (${response.iterations} iterations)`);
+        // Update agent status
+        spawnedAgent.messageCount = 1;
+        spawnedAgent.status = 'completed';
+        spawnedAgent.result = response.content;
 
-      return {
-        agentId,
-        persona: request.persona,
-        result: response.content,
-        iterations: response.iterations,
-        toolsUsed: response.toolsUsed,
-      };
+        logger.success(`[AgentSpawner] Sub-agent completed task (${response.iterations} iterations)`);
+
+        return {
+          agentId,
+          persona: request.persona,
+          result: response.content,
+          iterations: response.iterations,
+          toolsUsed: response.toolsUsed,
+        };
+      } finally {
+        // Always restore parent's persona context
+        logger.setPersonaContext(parentPersonaContext);
+      }
 
     } catch (error) {
       logger.error(`[AgentSpawner] Sub-agent failed:`, error);

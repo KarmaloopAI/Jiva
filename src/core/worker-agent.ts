@@ -71,6 +71,14 @@ export class WorkerAgent {
       recentFileReads: new Map(),
       filesJustModified: new Set(),
     };
+    
+    // Set persona context for logging
+    if (personaManager) {
+      const activePersona = personaManager.getActivePersona();
+      if (activePersona) {
+        logger.setPersonaContext(activePersona.manifest.name);
+      }
+    }
   }
 
   /**
@@ -150,12 +158,13 @@ Available tools: ${this.mcpManager.getClient().getAllTools().map(t => t.name).jo
       systemContent += `\n\nAGENT SPAWNING:
 - You can spawn sub-agents with specific personas to delegate complex tasks
 - Use spawn_agent tool when you need specialized expertise or parallel work
+- Sub-agents automatically receive the current workspace path (${this.workspace.getWorkspaceDir()})
 - Tool: spawn_agent
 - Parameters:
   * persona (required): Persona name - ${availablePersonas.join(', ')}
   * task (required): Specific task for the sub-agent
-  * context (optional): Additional context or background info
-- Example: spawn_agent({ persona: "code-reviewer", task: "Review the authentication code in src/auth/", context: "Focus on security issues" })
+  * context (optional): Additional domain-specific context (workspace path is automatically included)
+- Example: spawn_agent({ persona: "code-reviewer", task: "Review the authentication code in src/auth/", context: "Focus on security vulnerabilities and best practices" })
 - The sub-agent will complete the task and return results to you`;
     }
 
@@ -238,7 +247,7 @@ Please complete this subtask and report your findings.`,
         response = await this.orchestrator.chat({
           messages: conversationHistory,
           tools: tools.length > 0 ? tools : undefined,
-          temperature: 0.3,
+          temperature: 0.1, // Low temperature for deterministic tool execution
         });
       } catch (error) {
         // API error (e.g., invalid tool call parameters)

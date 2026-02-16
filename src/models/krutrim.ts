@@ -131,7 +131,7 @@ export class KrutrimModel implements IModel {
       const requestBody: any = {
         model: options.model || this.config.model,
         messages: apiMessages,
-        temperature: options.temperature ?? 0.7,
+        temperature: options.temperature ?? 0.2, // Lower default to reduce hallucination
       };
 
       if (options.maxTokens) {

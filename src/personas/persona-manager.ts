@@ -12,16 +12,21 @@ import {
 import { loadSkillContent } from './skill-loader.js';
 import { logger } from '../utils/logger.js';
 import { ConfigManager } from '../core/config.js';
+import { StorageProvider } from '../storage/provider.js';
 
 export class PersonaManager {
   private personas: Persona[] = [];
   private activePersona: Persona | null = null;
   private additionalSearchPaths: string[] = [];
   private configManager: ConfigManager;
+  private storageProvider: StorageProvider | null = null; // Per-tenant storage for cloud mode
+  private ephemeral: boolean; // If true, don't persist persona to config (for sub-agents)
 
-  constructor(additionalPaths: string[] = []) {
+  constructor(additionalPaths: string[] = [], ephemeral: boolean = false, storageProvider?: StorageProvider) {
     this.additionalSearchPaths = additionalPaths;
     this.configManager = ConfigManager.getInstance();
+    this.storageProvider = storageProvider || null;
+    this.ephemeral = ephemeral;
   }
 
   /**
@@ -39,15 +44,17 @@ export class PersonaManager {
         this.personas.map((p) => p.manifest.name).join(', ')
       );
       
-      // Restore active persona from config
-      const savedPersonaName = this.configManager.getActivePersona();
-      if (savedPersonaName) {
-        const success = this.activatePersona(savedPersonaName);
-        if (success) {
-          logger.info(`Restored active persona: ${savedPersonaName}`);
-        } else {
-          logger.warn(`Saved persona '${savedPersonaName}' not found, clearing config`);
-          this.configManager.setActivePersona(null);
+      // Restore active persona from config only if not ephemeral
+      if (!this.ephemeral) {
+        const savedPersonaName = await this.getPersistedActivePersona();
+        if (savedPersonaName) {
+          const success = await this.activatePersona(savedPersonaName);
+          if (success) {
+            logger.info(`Restored active persona: ${savedPersonaName}`);
+          } else {
+            logger.warn(`Saved persona '${savedPersonaName}' not found, clearing config`);
+            await this.persistActivePersona(null);
+          }
         }
       }
     }
@@ -77,7 +84,7 @@ export class PersonaManager {
   /**
    * Activate a persona by name
    */
-  activatePersona(name: string): boolean {
+  async activatePersona(name: string): Promise<boolean> {
     const persona = findPersona(this.personas, name);
 
     if (!persona) {
@@ -93,12 +100,15 @@ export class PersonaManager {
     this.activePersona = persona;
     persona.active = true;
 
-    // Persist to config
-    this.configManager.setActivePersona(persona.manifest.name);
+    // Persist to config only if not ephemeral (sub-agents are ephemeral)
+    if (!this.ephemeral) {
+      await this.persistActivePersona(persona.manifest.name);
+    }
 
     const mcpServerCount = persona.mcpServers ? Object.keys(persona.mcpServers).length : 0;
+    const mode = this.ephemeral ? '(ephemeral)' : '';
     logger.info(
-      `Activated persona: ${persona.manifest.name} ` +
+      `Activated persona: ${persona.manifest.name} ${mode} ` +
         `(${persona.skills.length} skills, ${mcpServerCount} MCP servers)`
     );
 
@@ -108,12 +118,16 @@ export class PersonaManager {
   /**
    * Deactivate the current persona
    */
-  deactivatePersona(): void {
+  async deactivatePersona(): Promise<void> {
     if (this.activePersona) {
       this.activePersona.active = false;
       logger.info(`Deactivated persona: ${this.activePersona.manifest.name}`);
       this.activePersona = null;
-      this.configManager.setActivePersona(null);
+      
+      // Clear config only if not ephemeral
+      if (!this.ephemeral) {
+        await this.persistActivePersona(null);
+      }
     }
   }
 
@@ -255,5 +269,47 @@ When a user's request matches a skill description, read that skill's SKILL.md fi
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&apos;');
+  }
+
+  /**
+   * Get persisted active persona from storage (cloud mode) or config (CLI mode)
+   */
+  private async getPersistedActivePersona(): Promise<string | undefined> {
+    if (this.storageProvider) {
+      // Cloud mode: Read from per-tenant storage
+      try {
+        const config = await this.storageProvider.getConfig<{ activePersona?: string }>('personas');
+        return config?.activePersona;
+      } catch (error) {
+        logger.debug('[PersonaManager] No persona config in storage');
+        return undefined;
+      }
+    } else {
+      // CLI mode: Use global ConfigManager
+      return this.configManager.getActivePersona();
+    }
+  }
+
+  /**
+   * Persist active persona to storage (cloud mode) or config (CLI mode)
+   */
+  private async persistActivePersona(name: string | null): Promise<void> {
+    if (this.storageProvider) {
+      // Cloud mode: Write to per-tenant storage
+      try {
+        if (name === null) {
+          // Clear persona config
+          await this.storageProvider.setConfig('personas', { activePersona: null });
+        } else {
+          await this.storageProvider.setConfig('personas', { activePersona: name });
+        }
+        logger.debug(`[PersonaManager] Persisted activePersona to storage: ${name}`);
+      } catch (error) {
+        logger.warn(`[PersonaManager] Failed to persist persona to storage: ${error}`);
+      }
+    } else {
+      // CLI mode: Use global ConfigManager
+      this.configManager.setActivePersona(name);
+    }
   }
 }

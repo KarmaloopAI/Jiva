@@ -224,7 +224,7 @@ ${conversationText}`;
         messages: [
           { role: 'user', content: summaryPrompt }
         ],
-        temperature: 0.3,
+        temperature: 0.1, // Low temperature for deterministic summarization
         maxTokens: 1000,
       });
 
@@ -283,7 +283,7 @@ ${conversationText}`;
 
       const response = await orchestrator.chat({
         messages: [{ role: 'user', content: titlePrompt }],
-        temperature: 0.3,
+        temperature: 0.1, // Low temperature for deterministic title generation
         maxTokens: 20,
       });
 
@@ -349,7 +349,7 @@ Summary:`;
 
       const response = await orchestrator.chat({
         messages: [{ role: 'user', content: summaryPrompt }],
-        temperature: 0.3,
+        temperature: 0.1, // Low temperature for deterministic summary generation
         maxTokens: 100,
       });
 

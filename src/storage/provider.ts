@@ -164,6 +164,12 @@ export abstract class StorageProvider {
   }
 
   /**
+   * Append raw string content to a log file (for orchestration logs)
+   * This is separate from appendLog() which buffers structured LogEntry objects
+   */
+  abstract appendToLog(key: string, content: string): Promise<void>;
+
+  /**
    * Flush buffered logs to persistent storage
    */
   abstract flushLogs(): Promise<void>;

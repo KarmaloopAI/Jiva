@@ -352,7 +352,7 @@ persona
       const personaManager = new PersonaManager();
       await personaManager.initialize();
       
-      const success = personaManager.activatePersona(name);
+      const success = await personaManager.activatePersona(name);
       
       if (success) {
         const persona = personaManager.getActivePersona();
@@ -383,7 +383,7 @@ persona
         return;
       }
       
-      personaManager.deactivatePersona();
+      await personaManager.deactivatePersona();
       console.log(chalk.green(`\n✓ Deactivated persona: ${current.manifest.name}\n`));
     } catch (error) {
       logger.error('Failed to deactivate persona', error);

@@ -1,17 +1,18 @@
 /**
- * Orchestration Logger - Tracks Manager/Worker coordination
+ * Orchestration Logger - Tracks Manager/Worker/Client coordination
  *
- * Writes detailed logs to understand how tasks flow through the dual-agent system.
- * Logs are written to: ~/.jiva/logs/orchestration-{timestamp}.log
+ * Writes detailed logs to understand how tasks flow through the three-agent system.
+ * Supports both local filesystem (CLI) and cloud storage (HTTP) modes.
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { StorageProvider } from '../storage/provider.js';
 
 interface OrchestrationEvent {
   timestamp: string;
-  phase: 'DUAL_AGENT' | 'MANAGER' | 'WORKER';
+  phase: 'DUAL_AGENT' | 'MANAGER' | 'WORKER' | 'CLIENT';
   event: string;
   details: Record<string, any>;
 }
@@ -21,6 +22,12 @@ class OrchestrationLogger {
   private logFilePath: string | null = null;
   private logStream: fs.WriteStream | null = null;
   private sessionStart: Date;
+  
+  // Cloud-aware: buffer logs and flush to storage provider
+  private storageProvider: StorageProvider | null = null;
+  private sessionId: string | null = null;
+  private logBuffer: string[] = [];
+  private maxBufferSize: number = 100;
 
   private constructor() {
     this.sessionStart = new Date();
@@ -32,6 +39,36 @@ class OrchestrationLogger {
       OrchestrationLogger.instance = new OrchestrationLogger();
     }
     return OrchestrationLogger.instance;
+  }
+
+  /**
+   * Configure for cloud/HTTP mode with storage provider
+   */
+  setStorageProvider(storageProvider: StorageProvider, sessionId: string) {
+    this.storageProvider = storageProvider;
+    this.sessionId = sessionId;
+    // In cloud mode, don't use filesystem
+    if (this.logStream) {
+      this.logStream.end();
+      this.logStream = null;
+    }
+  }
+
+  /**
+   * Reset to filesystem mode (CLI)
+   */
+  resetToFilesystemMode() {
+    if (this.storageProvider) {
+      // Flush any remaining logs
+      this.flushToStorage();
+    }
+    this.storageProvider = null;
+    this.sessionId = null;
+    this.logBuffer = [];
+    // Reinitialize filesystem logging
+    if (!this.logStream) {
+      this.initializeLogFile();
+    }
   }
 
   private initializeLogFile(): void {
@@ -71,8 +108,6 @@ class OrchestrationLogger {
   }
 
   private writeEvent(event: OrchestrationEvent): void {
-    if (!this.logStream) return;
-
     const line = [
       `[${event.timestamp}]`,
       `[${event.phase}]`,
@@ -80,7 +115,46 @@ class OrchestrationLogger {
       Object.keys(event.details).length > 0 ? JSON.stringify(event.details, null, 2) : '',
     ].filter(Boolean).join(' ');
 
-    this.logStream.write(line + '\n');
+    const logLine = line + '\n';
+
+    // Cloud mode: buffer and periodically flush to storage
+    if (this.storageProvider && this.sessionId) {
+      this.logBuffer.push(logLine);
+      
+      // Auto-flush when buffer reaches threshold
+      if (this.logBuffer.length >= this.maxBufferSize) {
+        this.flushToStorage();
+      }
+    } 
+    // Local mode: write to filesystem
+    else if (this.logStream) {
+      this.logStream.write(logLine);
+    }
+  }
+
+  /**
+   * Flush buffered logs to cloud storage
+   */
+  private flushToStorage() {
+    if (!this.storageProvider || !this.sessionId || this.logBuffer.length === 0) {
+      return;
+    }
+
+    try {
+      // Append to orchestration log in storage
+      const logContent = this.logBuffer.join('');
+      const logKey = `sessions/${this.sessionId}/orchestration.log`;
+      
+      // Note: This is async but we don't await to avoid blocking
+      // The storage provider should handle the write asynchronously
+      this.storageProvider.appendToLog(logKey, logContent).catch(err => {
+        console.error('[OrchestrationLogger] Failed to flush to storage:', err);
+      });
+      
+      this.logBuffer = [];
+    } catch (error) {
+      console.error('[OrchestrationLogger] Error flushing to storage:', error);
+    }
   }
 
   // DualAgent events
@@ -234,12 +308,56 @@ class OrchestrationLogger {
     });
   }
 
+  // Client events
+  logClientAnalysis(level: string, requirementCount: number, reasoning: string): void {
+    this.writeEvent({
+      timestamp: new Date().toISOString(),
+      phase: 'CLIENT',
+      event: 'TASK_ANALYSIS',
+      details: { level, requirementCount, reasoning },
+    });
+  }
+
+  logClientCoherenceCheck(isCoherent: boolean, unsupportedClaims: string[], reasoning: string): void {
+    this.writeEvent({
+      timestamp: new Date().toISOString(),
+      phase: 'CLIENT',
+      event: 'COHERENCE_CHECK',
+      details: { isCoherent, unsupportedClaimCount: unsupportedClaims.length, unsupportedClaims, reasoning },
+    });
+  }
+
+  logClientValidation(approved: boolean, issues: string[], nextAction?: string): void {
+    this.writeEvent({
+      timestamp: new Date().toISOString(),
+      phase: 'CLIENT',
+      event: 'VALIDATION_RESULT',
+      details: { approved, issueCount: issues.length, issues, nextAction },
+    });
+  }
+
   // Utility
   getLogFilePath(): string | null {
     return this.logFilePath;
   }
 
+  /**
+   * Manually flush logs (call before session ends)
+   */
+  async flush(): Promise<void> {
+    if (this.storageProvider && this.sessionId) {
+      this.flushToStorage();
+      // Wait a bit for async writes to complete
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  }
+
   close(): void {
+    // Flush any remaining logs
+    if (this.storageProvider && this.sessionId) {
+      this.flushToStorage();
+    }
+    
     if (this.logStream) {
       const footer = [
         '',

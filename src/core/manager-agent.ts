@@ -43,6 +43,15 @@ export class ManagerAgent {
     this.orchestrator = orchestrator;
     this.workspace = workspace;
     this.personaManager = personaManager;
+    
+    // Set persona context for logging
+    if (personaManager) {
+      const activePersona = personaManager.getActivePersona();
+      if (activePersona) {
+        logger.setPersonaContext(activePersona.manifest.name);
+      }
+    }
+    
     this.initializeSystemPrompt();
   }
 
@@ -109,41 +118,28 @@ CRITICAL - Subtask Granularity:
 - For information gathering: 1-2 subtasks maximum
 - Only create separate subtasks when they are truly independent or sequential dependencies exist
 
-Examples:
-BAD (too granular):
-  - Ask user for requirements
-  - Create HTML structure
-  - Add CSS styling
-  - Add JavaScript logic
-  - Test in browser
-  (This should be 1 subtask: "Create calculator app as calc.html")
+Examples of GOOD vs BAD:
+BAD: 5 granular steps like "Create HTML structure", "Add CSS", "Add JS", "Test"
+GOOD: 1 subtask: "Create the calculator application as calc.html"
 
-GOOD (appropriate level):
-  - Create the calculator application
-  - Refine based on user feedback (if needed)
-
-BAD (too granular):
-  - List directory contents
-  - Read package.json
-  - Identify dependencies
-  - Format output
-  (This should be 1 subtask: "List and analyze project dependencies")
-
-GOOD (appropriate level):
-  - Analyze project dependencies and structure
+BAD: "List directory contents", "Read package.json", "Identify dependencies"
+GOOD: 1 subtask: "Analyze project dependencies and structure"
 
 Guidelines:
 - Don't create subtasks for clarifying requirements - Worker can ask if needed
 - Don't create subtasks for implementation details (styling, specific code structure)
 - Don't create separate "test" or "verify" subtasks - Worker does this naturally
 - Trust Worker to handle file operations, error checking, and iteration
+- Each subtask MUST be a clear, actionable instruction - NOT prose, advice, or explanation
 
-Respond in this format:
-REASONING: <brief explanation of your high-level approach>
-SUBTASKS:
-- <subtask 1>
-- <subtask 2> (only if truly necessary)
-...`;
+Respond ONLY with valid JSON in this exact format (no other text before or after):
+{
+  "reasoning": "<brief explanation of your high-level approach>",
+  "subtasks": [
+    "<subtask 1 - a clear, actionable instruction>",
+    "<subtask 2 - only if truly necessary>"
+  ]
+}`;
 
     this.conversationHistory.push({
       role: 'user',
@@ -152,7 +148,7 @@ SUBTASKS:
 
     const response = await this.orchestrator.chat({
       messages: this.conversationHistory,
-      temperature: 0.3,
+      temperature: 0.1, // Low temperature for deterministic planning
     });
 
     this.conversationHistory.push({
@@ -160,21 +156,27 @@ SUBTASKS:
       content: response.content,
     });
 
-    // Parse response
-    const reasoning = this.extractSection(response.content, 'REASONING');
-    const subtasksText = this.extractSection(response.content, 'SUBTASKS');
-    const subtasks = subtasksText
-      .split('\n')
-      .filter(line => line.trim().startsWith('-'))
-      .map(line => line.replace(/^-\s*/, '').trim());
+    // Parse JSON response with fallback
+    let plan: { reasoning: string; subtasks: string[] };
 
-    logger.info(`[Manager] Reasoning: ${reasoning}`);
-    logger.info(`[Manager] Plan: ${subtasks.length} subtasks`);
-    subtasks.forEach((task, i) => logger.info(`  ${i + 1}. ${task}`));
+    try {
+      plan = this.parseJsonPlan(response.content);
+    } catch (parseError) {
+      // Fallback: ask LLM to clean the raw output into valid JSON
+      logger.warn('[Manager] Failed to parse plan JSON, attempting LLM cleanup');
+      plan = await this.cleanPlanWithLLM(response.content);
+    }
 
-    orchestrationLogger.logManagerPlanCreated(subtasks, reasoning);
+    // Validate subtasks - filter out garbage entries
+    plan.subtasks = this.validateSubtasks(plan.subtasks);
 
-    return { subtasks, reasoning };
+    logger.info(`[Manager] Reasoning: ${plan.reasoning}`);
+    logger.info(`[Manager] Plan: ${plan.subtasks.length} subtasks`);
+    plan.subtasks.forEach((task, i) => logger.info(`  ${i + 1}. ${task}`));
+
+    orchestrationLogger.logManagerPlanCreated(plan.subtasks, plan.reasoning);
+
+    return { subtasks: plan.subtasks, reasoning: plan.reasoning };
   }
 
   /**
@@ -207,7 +209,7 @@ NEXT_ACTION: <what to do next, if CONTINUE>`;
 
     const response = await this.orchestrator.chat({
       messages: this.conversationHistory,
-      temperature: 0.3,
+      temperature: 0.1, // Low temperature for deterministic decisions
     });
 
     this.conversationHistory.push({
@@ -254,7 +256,7 @@ Present information clearly with relevant details, code snippets, or examples as
 
     const response = await this.orchestrator.chat({
       messages: this.conversationHistory,
-      temperature: 0.5,
+      temperature: 0.1, // Low temperature for deterministic synthesis
     });
 
     this.conversationHistory.push({
@@ -265,6 +267,90 @@ Present information clearly with relevant details, code snippets, or examples as
     logger.info('[Manager] Final response created');
 
     return response.content;
+  }
+
+  /**
+   * Parse a JSON plan from LLM output. Extracts the first JSON object found.
+   */
+  private parseJsonPlan(content: string): { reasoning: string; subtasks: string[] } {
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      throw new Error('No JSON object found in response');
+    }
+
+    const parsed = JSON.parse(jsonMatch[0]);
+
+    if (!parsed.subtasks || !Array.isArray(parsed.subtasks) || parsed.subtasks.length === 0) {
+      throw new Error('Invalid plan structure: missing or empty subtasks array');
+    }
+
+    return {
+      reasoning: parsed.reasoning || '',
+      subtasks: parsed.subtasks.map((s: any) => String(s)),
+    };
+  }
+
+  /**
+   * Fallback: use LLM to clean a raw plan response into valid JSON
+   */
+  private async cleanPlanWithLLM(rawContent: string): Promise<{ reasoning: string; subtasks: string[] }> {
+    const cleanupPrompt = `The following text is a plan that should have been JSON but was not properly formatted.
+Extract the reasoning and actionable subtasks from it and return valid JSON.
+Ignore any prose, markdown separators, advice paragraphs, or non-actionable content.
+Only include entries that are clear, actionable task instructions.
+
+Raw text:
+${rawContent}
+
+Return ONLY valid JSON in this exact format (no other text):
+{
+  "reasoning": "<the reasoning extracted from the text>",
+  "subtasks": ["<subtask 1>", "<subtask 2>"]
+}`;
+
+    try {
+      const cleanupResponse = await this.orchestrator.chat({
+        messages: [
+          { role: 'system', content: 'You are a JSON formatting assistant. Return only valid JSON.' },
+          { role: 'user', content: cleanupPrompt },
+        ],
+        temperature: 0.1,
+      });
+
+      return this.parseJsonPlan(cleanupResponse.content);
+    } catch (error) {
+      // Ultimate fallback: treat the entire raw content as a single subtask
+      logger.error('[Manager] LLM cleanup also failed, using raw content as single subtask');
+      return {
+        reasoning: 'Plan parsing failed - executing as single task',
+        subtasks: [rawContent.substring(0, 500).trim()],
+      };
+    }
+  }
+
+  /**
+   * Validate that each subtask is a reasonable, actionable instruction.
+   * Removes garbage entries like separators, prose fragments, or empty strings.
+   */
+  private validateSubtasks(subtasks: string[]): string[] {
+    const validated = subtasks.filter(task => {
+      const trimmed = task.trim();
+      // Reject empty or too-short entries
+      if (trimmed.length < 5) return false;
+      // Reject markdown separators (---, ===, ***)
+      if (/^[-=*]{2,}$/.test(trimmed)) return false;
+      // Reject entries that are just punctuation/symbols
+      if (/^[^a-zA-Z0-9]*$/.test(trimmed)) return false;
+      return true;
+    });
+
+    // Ensure at least one subtask
+    if (validated.length === 0) {
+      logger.warn('[Manager] All subtasks filtered out, preserving first original');
+      return subtasks.length > 0 ? [subtasks[0]] : ['Complete the user request'];
+    }
+
+    return validated;
   }
 
   private extractSection(content: string, sectionName: string): string {

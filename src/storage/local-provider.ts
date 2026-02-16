@@ -202,6 +202,18 @@ export class LocalStorageProvider extends StorageProvider {
   // Logging
   // ─────────────────────────────────────────────────────────────
 
+  async appendToLog(key: string, content: string): Promise<void> {
+    // For local filesystem, append directly to file
+    const logFile = path.join(this.basePath, key);
+    const logDir = path.dirname(logFile);
+    
+    if (!existsSync(logDir)) {
+      mkdirSync(logDir, { recursive: true });
+    }
+    
+    await fs.appendFile(logFile, content);
+  }
+
   async flushLogs(): Promise<void> {
     if (this.logBuffer.length === 0) return;
 

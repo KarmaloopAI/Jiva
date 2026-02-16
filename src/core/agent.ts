@@ -49,7 +49,7 @@ export class JivaAgent {
     this.workspace = config.workspace;
     this.conversationManager = config.conversationManager || null;
     this.maxIterations = config.maxIterations || 10;
-    this.temperature = config.temperature || 0.7;
+    this.temperature = config.temperature || 0.2; // Lower default to reduce hallucination
     this.autoSave = config.autoSave !== false; // Default true
     this.condensingThreshold = config.condensingThreshold || 30;
 

@@ -86,7 +86,9 @@ export class DualAgent {
     let spawnerPersonaManager: PersonaManager = this.personaManager!;
     if (!this.personaManager) {
       const { PersonaManager } = require('../personas/persona-manager.js');
-      spawnerPersonaManager = new PersonaManager();
+      // Use ephemeral=false for top-level agent's spawner (it should persist)
+      // Note: No StorageProvider here - CLI mode uses ConfigManager
+      spawnerPersonaManager = new PersonaManager([], false);
       // Note: Not awaiting initialize() here - will be lazy loaded if needed
     }
     

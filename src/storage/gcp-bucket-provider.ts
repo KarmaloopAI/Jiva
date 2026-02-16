@@ -279,6 +279,22 @@ export class GCPBucketProvider extends StorageProvider {
   // Logging
   // ─────────────────────────────────────────────────────────────
 
+  async appendToLog(key: string, content: string): Promise<void> {
+    try {
+      // Read existing content, append new content, write back
+      const existingContent = await this.readText(key);
+      const newContent = existingContent ? existingContent + content : content;
+      await this.writeText(key, newContent);
+    } catch (error) {
+      // If file doesn't exist, create it
+      if ((error as any)?.code === 404) {
+        await this.writeText(key, content);
+      } else {
+        throw error;
+      }
+    }
+  }
+
   async flushLogs(): Promise<void> {
     if (this.logBuffer.length === 0) return;
 
