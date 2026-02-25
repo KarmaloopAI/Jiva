@@ -58,23 +58,68 @@ export class ClientAgent {
   private mcpClient: MCPClient;
   private failureCount: number = 0;
 
-  // Read-only tools Client can use for validation
-  private readonly ALLOWED_TOOLS = [
-    'filesystem__read_text_file',
-    'filesystem__list_directory',
-    'filesystem__directory_tree',
-    'filesystem__search_files',
-    'playwright__browser_navigate',
-    'playwright__browser_console_messages',
-    'playwright__browser_take_screenshot',
-    'playwright__browser_evaluate',
-  ];
+  // Lazily cached list of all available tool names (populated on first use)
+  private _availableTools: string[] | null = null;
 
   constructor(orchestrator: ModelOrchestrator, mcpManager: MCPServerManager) {
     this.orchestrator = orchestrator;
     this.mcpManager = mcpManager;
     this.mcpClient = mcpManager.getClient();
   }
+
+  // ─── Tool Discovery ───────────────────────────────────────────────────────
+
+  /**
+   * Returns all tool names currently available from connected MCP servers.
+   * Result is cached after the first call; call resetToolCache() if servers change.
+   */
+  private getAvailableTools(): string[] {
+    if (this._availableTools === null) {
+      this._availableTools = this.mcpClient.getAllTools().map(t => t.name);
+      logger.debug(`[Client] Discovered ${this._availableTools.length} available tools: ${this._availableTools.join(', ')}`);
+    }
+    return this._availableTools;
+  }
+
+  /** Reset the tool cache (e.g. after MCP server reconnects). */
+  resetToolCache(): void {
+    this._availableTools = null;
+  }
+
+  /**
+   * Find the first available tool whose name contains any of the given substrings.
+   * Returns null if no match is found.
+   */
+  private findTool(...patterns: string[]): string | null {
+    const tools = this.getAvailableTools();
+    for (const pattern of patterns) {
+      const found = tools.find(t => t.includes(pattern));
+      if (found) return found;
+    }
+    return null;
+  }
+
+  /**
+   * Build a human-readable summary of available tool categories for LLM prompts.
+   */
+  private buildToolContextForPrompt(): string {
+    const tools = this.getAvailableTools();
+    if (tools.length === 0) {
+      return 'No MCP tools are currently available.';
+    }
+    // Group by server prefix (everything before __)
+    const byServer: Record<string, string[]> = {};
+    for (const tool of tools) {
+      const [server] = tool.split('__');
+      if (!byServer[server]) byServer[server] = [];
+      byServer[server].push(tool);
+    }
+    return Object.entries(byServer)
+      .map(([server, serverTools]) => `- ${server}: ${serverTools.join(', ')}`)
+      .join('\n');
+  }
+
+  // ─── Task Analysis ────────────────────────────────────────────────────────
 
   /**
    * Use LLM to analyze the task and determine involvement level + requirements.
@@ -90,6 +135,7 @@ export class ClientAgent {
       ? `\nWorker Result (first 500 chars): ${workerResult.result.substring(0, 500)}\nWorker Success: ${workerResult.success}\nTools Used: ${workerResult.toolsUsed.join(', ') || 'none'} (${workerResult.toolsUsed.length} total)`
       : '';
 
+    const availableToolsContext = this.buildToolContextForPrompt();
     const analysisPrompt = `You are a task analyst for a software agent system. Analyze the user's request to determine:
 1. How deeply to validate the Worker's output (involvement level)
 2. What specific requirements the task implies
@@ -100,6 +146,9 @@ SUBTASKS: ${JSON.stringify(subtasks)}
 ${workerContext}
 
 PREVIOUS FAILURE COUNT: ${this.failureCount}
+
+AVAILABLE TOOLS (what the Worker and Client can actually use):
+${availableToolsContext}
 
 Respond ONLY with valid JSON in this exact format (no other text):
 {
@@ -116,19 +165,14 @@ Respond ONLY with valid JSON in this exact format (no other text):
 }
 
 CRITICAL RULES for involvementLevel:
-- THOROUGH: ONLY when the user EXPLICITLY asks to test or verify something in a browser/test environment, OR after previous failures (failureCount > 0), OR for complex multi-file operations (>3 subtasks)
+- THOROUGH: ONLY when the user EXPLICITLY asks to test or verify something, OR after previous failures (failureCount > 0), OR for complex multi-file operations (>3 subtasks)
 - MINIMAL: Information-only requests (listing files, explaining code, describing something, answering questions) where no files are created or modified
 - STANDARD: Default for creation, modification, or action tasks
 
 CRITICAL RULES for requirements:
-- "testing" type with mustUseTools ["playwright__"] should ONLY be set when the user wants browser-based testing or verification of a web page/HTML/UI
-- Words like "check", "find", "verify" in the context of system administration (disk space, processes, configurations) are NOT browser testing — they are "information" type WITHOUT playwright tools
-- Examples:
-  - "check how much space my caches use" = type "information", mustUseTools null
-  - "find the biggest files in Downloads" = type "information", mustUseTools null
-  - "test the login page in the browser" = type "testing", mustUseTools ["playwright__"]
-  - "create index.html and verify it works" = type "file_creation" + type "testing" with playwright
-  - "make sure the server is running" = type "verification", mustUseTools null
+- Only set mustUseTools to tool names listed in AVAILABLE TOOLS above — do NOT reference tools that are not available
+- If the required tool is not in AVAILABLE TOOLS, set mustUseTools to null
+- "testing" type should only be set when the user explicitly wants something executed and verified
 - If no specific tools are required, set mustUseTools to null
 - Always include at least one requirement entry`;
 
@@ -192,116 +236,7 @@ CRITICAL RULES for requirements:
     };
   }
 
-  /**
-   * @deprecated Use analyzeTaskRequirements() instead. Kept for reference.
-   * Determine involvement level based on user request complexity
-   */
-  determineInvolvementLevel(userMessage: string, subtasks: string[]): InvolvementLevel {
-    const messageLower = userMessage.toLowerCase();
-    const subtasksLower = subtasks.join(' ').toLowerCase();
-
-    // THOROUGH: User explicitly requests testing/verification
-    const testKeywords = ['test', 'verify', 'check', 'make sure', 'ensure', 'validate'];
-    if (testKeywords.some(kw => messageLower.includes(kw))) {
-      logger.debug('[Client] THOROUGH mode: Testing/verification requested');
-      return InvolvementLevel.THOROUGH;
-    }
-
-    // THOROUGH: After failures (user frustrated)
-    if (this.failureCount > 0) {
-      logger.debug(`[Client] THOROUGH mode: ${this.failureCount} previous failures detected`);
-      return InvolvementLevel.THOROUGH;
-    }
-
-    // THOROUGH: Complex multi-file operations
-    if (subtasks.length > 3 || (messageLower.includes('component') && messageLower.includes('index.html'))) {
-      logger.debug('[Client] THOROUGH mode: Complex multi-file operation');
-      return InvolvementLevel.THOROUGH;
-    }
-
-    // MINIMAL: Information-only requests
-    const infoKeywords = ['what', 'list', 'show', 'explain', 'describe', 'how', 'tell me'];
-    const creationKeywords = ['create', 'build', 'write', 'generate', 'make', 'add'];
-    const hasInfoKeyword = infoKeywords.some(kw => messageLower.includes(kw));
-    const hasCreationKeyword = creationKeywords.some(kw => messageLower.includes(kw));
-
-    if (hasInfoKeyword && !hasCreationKeyword) {
-      logger.debug('[Client] MINIMAL mode: Information request');
-      return InvolvementLevel.MINIMAL;
-    }
-
-    // STANDARD: Default for creation/modification tasks
-    logger.debug('[Client] STANDARD mode: Regular creation task');
-    return InvolvementLevel.STANDARD;
-  }
-
-  /**
-   * @deprecated Use analyzeTaskRequirements() instead. Kept for reference.
-   * Parse requirements from user message
-   */
-  parseRequirements(userMessage: string, subtasks: string[]): Requirement[] {
-    const requirements: Requirement[] = [];
-    const messageLower = userMessage.toLowerCase();
-    const combined = (messageLower + ' ' + subtasks.join(' ').toLowerCase());
-
-    // Detect file creation requirements
-    const fileMatches = userMessage.match(/(?:create|build|generate|write|save as)\s+([a-zA-Z0-9._/-]+\.(html|js|css|md|json|txt|py|ts|tsx|jsx))/gi);
-    if (fileMatches) {
-      fileMatches.forEach(match => {
-        const filename = match.split(/\s+/).pop();
-        if (filename) {
-          requirements.push({
-            type: 'file_creation',
-            description: `Create file: ${filename}`,
-            filePath: filename,
-          });
-        }
-      });
-    }
-
-    // Detect testing requirements (explicit verification requests)
-    const testKeywords = ['test', 'verify', 'check', 'make sure', 'ensure'];
-    if (testKeywords.some(kw => combined.includes(kw))) {
-      requirements.push({
-        type: 'testing',
-        description: 'Verify functionality through testing',
-        mustUseTools: ['playwright__'],
-      });
-    }
-
-    // Detect browser verification requirements - ONLY for file verification, not general browsing
-    // This should trigger for "open index.html in browser" but NOT for "open linkedin.com"
-    const isLocalFileOpen = (combined.includes('open') && combined.includes('.html')) ||
-                            (combined.includes('browser') && combined.includes('.html'));
-    const isExternalUrl = combined.match(/open\s+(?:https?:\/\/)?(?:www\.)?[a-z0-9-]+\.[a-z]{2,}/i);
-    
-    if (isLocalFileOpen && !isExternalUrl) {
-      requirements.push({
-        type: 'verification',
-        description: 'Browser testing required for local HTML file',
-        mustUseTools: ['playwright__browser_navigate', 'playwright__browser_console_messages'],
-      });
-    }
-    
-    // For external URLs, don't require specific tools - just opening the page is enough
-    if (isExternalUrl) {
-      requirements.push({
-        type: 'verification',
-        description: 'Open external URL',
-        // No mustUseTools - Worker just needs to navigate, Client shouldn't demand specific validation tools
-      });
-    }
-
-    // Default: at least verify Worker did some work
-    if (requirements.length === 0) {
-      requirements.push({
-        type: 'other',
-        description: 'General task completion',
-      });
-    }
-
-    return requirements;
-  }
+  // ─── Main Validation Entry Point ──────────────────────────────────────────
 
   /**
    * Validate Worker's work at appropriate involvement level
@@ -500,6 +435,7 @@ Respond ONLY with the JSON, no other text.`;
 
     const toolList = workerResult.toolsUsed.join(', ');
     const uniqueTools = [...new Set(workerResult.toolsUsed)].join(', ');
+    const availableToolsContext = this.buildToolContextForPrompt();
 
     const coherencePrompt = `You are a strict quality auditor. Your job is to determine whether a Worker agent's result is SUPPORTED by the tools it actually used, or whether it fabricated/hallucinated claims.
 
@@ -512,13 +448,16 @@ TOOLS ACTUALLY USED (in order): ${toolList}
 UNIQUE TOOLS USED: ${uniqueTools}
 TOTAL TOOL CALLS: ${workerResult.toolsUsed.length}
 
+AVAILABLE TOOLS IN THIS SYSTEM:
+${availableToolsContext}
+
 CRITICAL: Analyze whether the claims in the Worker's result are supported by the tools it used.
 
-Key tool semantics:
-- filesystem__list_directory / filesystem__directory_tree / filesystem__search_files = only shows file/folder NAMES and structure, does NOT read file contents
-- filesystem__read_text_file / filesystem__read_file = actually reads file content
-- mcp-shell-server__shell_exec = runs a shell command (check what command was likely run based on context)
-- playwright__* = browser automation tools
+Key tool semantics to apply:
+- Tools with names like "list_directory", "directory_tree", "search_files" show file/folder NAMES only — they do NOT read file contents
+- Tools with names like "read_text_file", "read_file", "get_file_content" actually read file content
+- Tools with names like "shell_exec", "run_command", "bash", "execute" run shell commands — infer what was run from the worker's result
+- For any other tool, infer its semantics from its name
 
 Common hallucination patterns to detect:
 1. Worker claims to have "inspected", "reviewed", "analyzed", or "scanned" source code but never used read_text_file — it only listed directories
@@ -641,46 +580,52 @@ Respond ONLY with valid JSON:
       }
     }
 
-    // Browser testing validation (only for THOROUGH)
+    // Shell-based deep verification (THOROUGH only)
     if (level === InvolvementLevel.THOROUGH) {
-      for (const req of requirements) {
-        if ((req.type === 'testing' || req.type === 'verification') &&
-            workerResult.result.includes('.html')) {
-          // Extract HTML filename from result
-          const htmlMatch = workerResult.result.match(/([a-zA-Z0-9._-]+\.html)/);
-          if (htmlMatch) {
-            const htmlFile = htmlMatch[1];
-            const browserValidation = await this.validateInBrowser(htmlFile);
-            if (!browserValidation.valid) {
-              issues.push(browserValidation.issue!);
-            }
-          }
-        }
-      }
+      const shellIssues = await this.validateWithShell(requirements, workerResult);
+      issues.push(...shellIssues.issues);
     }
 
     return { issues };
   }
 
+  // ─── Tool-Based Verification ────────────────────────────────────────────────────
+
   /**
-   * Check if file exists using read tool
+   * Check whether a file exists, using whichever MCP tool is available.
+   * Tries filesystem read tools first, then falls back to shell.
    */
   private async fileExists(filePath: string): Promise<boolean> {
-    try {
-      await this.mcpClient.executeTool('filesystem__read_text_file', {
-        path: filePath,
-        head: 1,
-      });
-      return true;
-    } catch (error) {
-      return false;
+    const readTool = this.findTool('read_text_file', 'read_file', 'get_file_content');
+    if (readTool) {
+      try {
+        await this.mcpClient.executeTool(readTool, { path: filePath, head: 1 });
+        return true;
+      } catch {
+        return false;
+      }
     }
+
+    const shellTool = this.findTool('shell_exec', 'run_command', 'bash', 'execute');
+    if (shellTool) {
+      try {
+        const result = await this.mcpClient.executeTool(shellTool, {
+          command: `test -f "${filePath}" && echo "exists" || echo "not_found"`,
+        });
+        return String(result).includes('exists');
+      } catch {
+        return false;
+      }
+    }
+
+    logger.debug('[Client] No tool available to verify file existence');
+    return false;
   }
 
   /**
    * Use LLM to generate an actionable correction instruction from raw validation issues.
-   * Instead of echoing "requires using playwright__ but Worker did not use these tools",
-   * produces something like "Use the filesystem tools to list ~/Library/Caches and report sizes".
+   * Translates internal validation failures into concrete, tool-specific directions
+   * for the Worker, referencing only the tools actually available in the system.
    */
   private async generateCorrectionInstruction(
     userMessage: string,
@@ -688,6 +633,7 @@ Respond ONLY with valid JSON:
     issues: string[],
     workerResult: WorkerResult
   ): Promise<string> {
+    const availableToolsContext = this.buildToolContextForPrompt();
     const correctionPrompt = `You are generating a correction instruction for a Worker agent that failed to complete a task properly.
 
 ORIGINAL USER REQUEST: ${userMessage}
@@ -700,10 +646,12 @@ ${issues.map((issue, i) => `${i + 1}. ${issue}`).join('\n')}
 WORKER'S RESULT (first 300 chars): ${workerResult.result.substring(0, 300)}
 TOOLS WORKER USED: ${workerResult.toolsUsed.join(', ') || 'none'}
 
+AVAILABLE TOOLS THE WORKER CAN USE:
+${availableToolsContext}
+
 Generate a CLEAR, ACTIONABLE instruction that tells the Worker exactly what to do to fix the issues.
 The instruction should:
-- Be a direct command (e.g., "Use the run_process tool to execute 'du -sh ~/Library/Caches' and report the output")
-- Reference specific tools or actions the Worker should take
+- Be a direct command referencing specific available tools by name
 - Be concise (1-2 sentences)
 - NOT include validation jargon like "mustUseTools", "requirements", or "involvement level"
 - NOT be a generic statement like "retry the task" — be specific about WHAT to do
@@ -732,82 +680,113 @@ Respond ONLY with the correction instruction text, nothing else.`;
   }
 
   /**
-   * Validate file contents for common issues
+   * Validate file contents for common issues, using whichever MCP tool is available.
    */
   private async validateFileContents(filePath: string): Promise<{ valid: boolean; issue?: string }> {
-    try {
-      const content = await this.mcpClient.executeTool('filesystem__read_text_file', {
-        path: filePath,
-        head: 200,
-      });
+    const readTool = this.findTool('read_text_file', 'read_file', 'get_file_content');
+    const shellTool = this.findTool('shell_exec', 'run_command', 'bash', 'execute');
+    let contentStr: string | null = null;
 
-      const contentStr = typeof content === 'string' ? content : JSON.stringify(content);
+    if (readTool) {
+      try {
+        const content = await this.mcpClient.executeTool(readTool, { path: filePath, head: 200 });
+        contentStr = typeof content === 'string' ? content : JSON.stringify(content);
+      } catch (error) {
+        return { valid: false, issue: `Could not read file: ${error}` };
+      }
+    } else if (shellTool) {
+      try {
+        const content = await this.mcpClient.executeTool(shellTool, {
+          command: `head -200 "${filePath}" 2>&1`,
+        });
+        contentStr = String(content);
+      } catch (error) {
+        return { valid: false, issue: `Could not read file via shell: ${error}` };
+      }
+    }
 
-      // Check for HTML path mismatches
-      if (filePath.endsWith('.html')) {
-        const hrefMatches = contentStr.match(/href="([^"]+)"/g) || [];
-        const srcMatches = contentStr.match(/src="([^"]+)"/g) || [];
+    if (contentStr === null) {
+      return { valid: true }; // No read tool available; skip content check
+    }
 
-        for (const match of [...hrefMatches, ...srcMatches]) {
-          const pathMatch = match.match(/(?:href|src)="([^"]+)"/);
-          if (pathMatch) {
-            const referencedPath = pathMatch[1];
-            if (!referencedPath.startsWith('http') && !referencedPath.startsWith('data:')) {
-              const exists = await this.fileExists(referencedPath);
-              if (!exists) {
-                return {
-                  valid: false,
-                  issue: `HTML references non-existent file: ${referencedPath}. Fix file paths or create missing files.`
-                };
-              }
+    // Check path reference integrity in HTML files
+    if (filePath.endsWith('.html')) {
+      const hrefMatches = contentStr.match(/href="([^"]+)"/g) || [];
+      const srcMatches = contentStr.match(/src="([^"]+)"/g) || [];
+
+      for (const match of [...hrefMatches, ...srcMatches]) {
+        const pathMatch = match.match(/(?:href|src)="([^"]+)"/);
+        if (pathMatch) {
+          const referencedPath = pathMatch[1];
+          if (!referencedPath.startsWith('http') && !referencedPath.startsWith('data:')) {
+            const exists = await this.fileExists(referencedPath);
+            if (!exists) {
+              return {
+                valid: false,
+                issue: `HTML references non-existent file: ${referencedPath}. Fix file paths or create missing files.`,
+              };
             }
           }
         }
       }
-
-      return { valid: true };
-    } catch (error) {
-      return { valid: false, issue: `Could not read file: ${error}` };
     }
+
+    return { valid: true };
   }
 
   /**
-   * Validate HTML file in browser
+   * THOROUGH-level shell-based verification: runs lightweight, read-only shell
+   * commands to confirm work was actually done (file sizes, test output presence, etc.).
+   * Skips gracefully when no shell tool is available.
    */
-  private async validateInBrowser(htmlFile: string): Promise<{ valid: boolean; issue?: string }> {
-    try {
-      // Navigate to file
-      const workspaceDir = process.cwd();
-      const fileUrl = `file://${workspaceDir}/${htmlFile}`;
+  private async validateWithShell(
+    requirements: Requirement[],
+    workerResult: WorkerResult,
+  ): Promise<{ issues: string[] }> {
+    const issues: string[] = [];
+    const shellTool = this.findTool('shell_exec', 'run_command', 'bash', 'execute');
 
-      await this.mcpClient.executeTool('playwright__browser_navigate', {
-        url: fileUrl,
-      });
+    if (!shellTool) {
+      logger.debug('[Client] No shell tool available for THOROUGH shell validation — skipping');
+      return { issues };
+    }
 
-      // Check for console errors
-      const errors = await this.mcpClient.executeTool('playwright__browser_console_messages', {
-        level: 'error',
-      });
-
-      const errorStr = typeof errors === 'string' ? errors : JSON.stringify(errors);
-      if (errorStr && errorStr.length > 0 && !errorStr.includes('[]')) {
-        return {
-          valid: false,
-          issue: `Browser errors detected in ${htmlFile}: ${errorStr}. Fix these errors before delivery.`
-        };
+    for (const req of requirements) {
+      if ((req.type === 'file_creation' || req.type === 'file_modification') && req.filePath) {
+        try {
+          const result = await this.mcpClient.executeTool(shellTool, {
+            command: `wc -c "${req.filePath}" 2>&1`,
+          });
+          const resultStr = String(result);
+          if (resultStr.includes('No such file') || resultStr.includes('cannot access')) {
+            issues.push(`Shell verification failed: ${req.filePath} does not exist on disk.`);
+          } else {
+            const sizeMatch = resultStr.match(/^\s*(\d+)/);
+            if (sizeMatch && parseInt(sizeMatch[1], 10) === 0) {
+              issues.push(`File ${req.filePath} was created but is empty.`);
+            }
+          }
+        } catch (error) {
+          logger.debug(`[Client] Shell validation error for ${req.filePath}: ${error}`);
+        }
       }
 
-      return { valid: true };
-    } catch (error) {
-      logger.debug(`[Client] Browser validation error: ${error}`);
-      // Don't fail validation if browser test fails - might not have browser available
-      return { valid: true };
+      if (req.type === 'testing') {
+        const hasTestOutput = workerResult.result.match(
+          /passed|failed|error|PASS|FAIL|✓|✗|tests run|test suite/i
+        );
+        if (!hasTestOutput) {
+          logger.debug('[Client] THOROUGH: testing requirement but no test output detected in worker result');
+        }
+      }
     }
+
+    return { issues };
   }
 
-  /**
-   * Reset failure tracking (for new conversation/session)
-   */
+  // ─── Session Management ─────────────────────────────────────────────────────
+
+  /** Reset failure tracking (call at the start of each new conversation/session). */
   resetFailureTracking(): void {
     this.failureCount = 0;
   }

@@ -236,6 +236,16 @@ program
         logger.debug(`Filesystem server args set to: ${JSON.stringify(mcpServers['filesystem'].args)}`);
         logger.debug(`Allowed path: "${allowedPath}"`);
       }
+
+      // Ensure shell MCP server is always available
+      if (!mcpServers['mcp-shell-server']) {
+        mcpServers['mcp-shell-server'] = {
+          command: 'npx',
+          args: ['-y', '@mkusaka/mcp-shell-server'],
+          enabled: true,
+        };
+        logger.info('Adding default mcp-shell-server MCP server');
+      }
       // Initialize MCP servers with updated paths
       const mcpManager = new MCPServerManager();
       await mcpManager.initialize(mcpServers);
@@ -627,6 +637,16 @@ program
         ];
         logger.debug(`Filesystem server args set to: ${JSON.stringify(mcpServers['filesystem'].args)}`);
         logger.debug(`Allowed path: "${allowedPath}"`);
+      }
+
+      // Ensure shell MCP server is always available
+      if (!mcpServers['mcp-shell-server']) {
+        mcpServers['mcp-shell-server'] = {
+          command: 'npx',
+          args: ['-y', '@mkusaka/mcp-shell-server'],
+          enabled: true,
+        };
+        logger.info('Adding default mcp-shell-server MCP server');
       }
       // Initialize MCP servers with updated paths
       const mcpManager = new MCPServerManager();

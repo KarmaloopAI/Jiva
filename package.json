@@ -1,6 +1,6 @@
 {
   "name": "jiva-core",
-  "version": "0.3.2",
+  "version": "0.3.21",
   "description": "Versatile autonomous AI agent with three-agent architecture (Manager, Worker, Client) powered by gpt-oss-120b. Adaptive validation, full MCP support, and intelligent quality control.",
   "main": "dist/index.js",
   "bin": {
@@ -9,7 +9,6 @@
   "type": "module",
   "scripts": {
     "test:web": "playwright test",
-    "postinstall": "playwright install",
 
     "build": "tsc",
     "dev": "tsx src/interfaces/cli/index.ts",
@@ -64,7 +63,8 @@
     "unzipper": "^0.12.3",
     "ws": "^8.16.0",
     "yaml": "^2.6.1",
-    "zod": "^3.24.1"
+    "zod": "^3.24.1",
+    "@google-cloud/storage": "^7.0.0"
   },
   "devDependencies": {
     "ts-node": "^10.9.2",
@@ -80,13 +80,9 @@
     "typescript": "^5.7.2"
   },
   "peerDependencies": {
-    "@google-cloud/storage": "^7.0.0",
     "firebase-admin": "^12.0.0"
   },
   "peerDependenciesMeta": {
-    "@google-cloud/storage": {
-      "optional": true
-    },
     "firebase-admin": {
       "optional": true
     }

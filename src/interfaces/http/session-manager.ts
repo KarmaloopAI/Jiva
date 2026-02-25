@@ -165,16 +165,27 @@ export class SessionManager extends EventEmitter {
 
       // Initialize MCP servers per-session
       const mcpManager = new MCPServerManager();
-      
-      // Ensure base filesystem MCP server is always available
-      const allowedPath = process.platform === 'win32' ? 'C:\\Users' : '/Users';
-      const baseMcpServers: Record<string, any> = {
-        filesystem: {
+
+      // Resolve allowed filesystem paths from env var, falling back to platform default
+      const envAllowedPaths = process.env.MCP_FILESYSTEM_ALLOWED_PATHS;
+      const defaultAllowedPath = process.platform === 'win32' ? 'C:\\Users' : '/Users';
+      const allowedPaths = envAllowedPaths
+        ? envAllowedPaths.split(',').map(p => p.trim()).filter(Boolean)
+        : [defaultAllowedPath];
+
+      const mcpEnabled = process.env.ENABLE_MCP_SERVERS !== 'false';
+      const filesystemEnabled = process.env.MCP_FILESYSTEM_ENABLED !== 'false';
+
+      const baseMcpServers: Record<string, any> = {};
+
+      if (mcpEnabled && filesystemEnabled) {
+        baseMcpServers.filesystem = {
           command: 'npx',
-          args: ['-y', '@modelcontextprotocol/server-filesystem', allowedPath],
+          args: ['--no', '@modelcontextprotocol/server-filesystem', ...allowedPaths],
           enabled: true,
-        }
-      };
+        };
+        logger.info(`[SessionManager] Filesystem MCP paths: ${allowedPaths.join(', ')}`);
+      }
       
       // Load MCP server config from storage
       const mcpConfig = await this.config.storageProvider.getConfig<Array<{

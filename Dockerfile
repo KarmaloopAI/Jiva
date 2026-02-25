@@ -8,8 +8,8 @@ WORKDIR /app
 COPY package*.json ./
 COPY tsconfig.json ./
 
-# Install dependencies (including dev dependencies for build)
-RUN npm ci
+# Install dependencies (skip postinstall/playwright in CI environment)
+RUN npm ci --ignore-scripts
 
 # Copy source code
 COPY src ./src
@@ -28,16 +28,21 @@ RUN apk add --no-cache dumb-init
 # Copy package files
 COPY package*.json ./
 
-# Install production dependencies only
-RUN npm ci --omit=dev && npm cache clean --force
+# Install production dependencies only (skip postinstall/playwright)
+RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
+
+# Pre-install MCP servers globally so they don't need to be downloaded per-session
+RUN npm install -g @modelcontextprotocol/server-filesystem
 
 # Copy built application from builder
 COPY --from=builder /app/dist ./dist
 
-# Create non-root user
-RUN addgroup -g 1001 -S nodejs && \
+# Create workspace directory and set permissions
+RUN mkdir -p /workspace && \
+    addgroup -g 1001 -S nodejs && \
     adduser -S nodejs -u 1001 && \
-    chown -R nodejs:nodejs /app
+    chown -R nodejs:nodejs /app && \
+    chown nodejs:nodejs /workspace
 
 USER nodejs
 

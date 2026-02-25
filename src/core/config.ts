@@ -161,9 +161,14 @@ export class ConfigManager {
       });
     }
 
-    // Note: @modelcontextprotocol/server-commands does not exist in npm registry
-    // The official MCP servers are: filesystem, github, google-maps, slack, etc.
-    // Users can add custom MCP servers via `jiva config`
+    // Add shell server if not exists — gives agents the ability to run shell commands
+    if (!servers['mcp-shell-server']) {
+      this.addMCPServer('mcp-shell-server', {
+        command: 'npx',
+        args: ['-y', '@mkusaka/mcp-shell-server'],
+        enabled: true,
+      });
+    }
   }
 
   /**

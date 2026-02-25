@@ -133,7 +133,7 @@ export async function runSetupWizard(): Promise<void> {
 
   // MCP Servers Configuration
   console.log(chalk.bold('\nMCP Servers Configuration'));
-  console.log(chalk.gray('Setting up default MCP servers (filesystem, commands)...\n'));
+  console.log(chalk.gray('Setting up default MCP servers (filesystem, mcp-shell-server)...\n'));
 
   configManager.initializeDefaultServers();
   logger.success('Default MCP servers configured');

@@ -27,32 +27,10 @@ import {
   JivaState,
 } from './types.js';
 import { createHash } from 'crypto';
-
-// Type definitions for @google-cloud/storage
-interface GCSFile {
-  exists(): Promise<[boolean]>;
-  download(): Promise<[Buffer]>;
-  save(data: string, options?: { contentType?: string }): Promise<void>;
-  delete(): Promise<void>;
-  name: string;
-}
-
-interface GCSBucket {
-  file(name: string): GCSFile;
-  exists(): Promise<[boolean]>;
-  getFiles(options?: { prefix?: string }): Promise<[GCSFile[]]>;
-}
-
-interface GCSStorage {
-  bucket(name: string): GCSBucket;
-}
-
-interface GCSStorageConstructor {
-  new (options?: { projectId?: string; keyFilename?: string }): GCSStorage;
-}
+import { Storage, Bucket, File } from '@google-cloud/storage';
 
 export class GCPBucketProvider extends StorageProvider {
-  private bucket: GCSBucket | null = null;
+  private bucket: Bucket | null = null;
   private bucketName: string;
   private configCache: Map<string, Record<string, any>> = new Map(); // Per-tenant config cache
 
@@ -68,19 +46,6 @@ export class GCPBucketProvider extends StorageProvider {
   }
 
   async initialize(): Promise<void> {
-    // Dynamic import to avoid requiring the package when not used
-    let Storage: GCSStorageConstructor;
-    try {
-      // @ts-ignore - dynamic import of optional dependency
-      const gcs = await import('@google-cloud/storage');
-      Storage = gcs.Storage;
-    } catch (error) {
-      throw new Error(
-        'GCP Storage requires @google-cloud/storage package. Install with: npm install @google-cloud/storage'
-      );
-    }
-
-    // Initialize storage client
     const storageOptions: { projectId?: string; keyFilename?: string } = {};
     
     if (this.infraConfig.gcpProjectId) {
@@ -171,7 +136,7 @@ export class GCPBucketProvider extends StorageProvider {
     if (!this.bucket) throw new Error('Provider not initialized');
     
     const [files] = await this.bucket.getFiles({ prefix });
-    return files.map((f: GCSFile) => f.name);
+    return files.map((f: File) => f.name);
   }
 
   private hashWorkspacePath(workspacePath: string): string {

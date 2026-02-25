@@ -58,7 +58,7 @@ spec:
         
         # Storage configuration
         - name: JIVA_STORAGE_PROVIDER
-          value: "gcp"
+          value: "gcp-bucket"
         - name: JIVA_GCP_BUCKET
           value: "jiva-state-BUCKET_NAME"
         - name: JIVA_GCP_PROJECT
