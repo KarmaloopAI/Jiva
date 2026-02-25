@@ -1,6 +1,6 @@
 {
   "name": "jiva-core",
-  "version": "0.3.21",
+  "version": "0.3.22",
   "description": "Versatile autonomous AI agent with three-agent architecture (Manager, Worker, Client) powered by gpt-oss-120b. Adaptive validation, full MCP support, and intelligent quality control.",
   "main": "dist/index.js",
   "bin": {
@@ -89,5 +89,9 @@
   },
   "engines": {
     "node": ">=20.0.0"
+  },
+  "overrides": {
+    "glob": "^13.0.0",
+    "tr46": "^3.0.0"
   }
 }
