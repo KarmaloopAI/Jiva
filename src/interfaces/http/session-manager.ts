@@ -21,6 +21,7 @@ import { orchestrationLogger } from '../../utils/orchestration-logger.js';
 import { createKrutrimModel } from '../../models/krutrim.js';
 import { Message } from '../../models/base.js';
 import { PersonaManager } from '../../personas/persona-manager.js';
+import { getDefaultFilesystemAllowedPath } from '../../utils/platform.js';
 
 export interface SessionConfig {
   storageProvider: StorageProvider;
@@ -168,7 +169,7 @@ export class SessionManager extends EventEmitter {
 
       // Resolve allowed filesystem paths from env var, falling back to platform default
       const envAllowedPaths = process.env.MCP_FILESYSTEM_ALLOWED_PATHS;
-      const defaultAllowedPath = process.platform === 'win32' ? 'C:\\Users' : '/Users';
+      const defaultAllowedPath = getDefaultFilesystemAllowedPath();
       const allowedPaths = envAllowedPaths
         ? envAllowedPaths.split(',').map(p => p.trim()).filter(Boolean)
         : [defaultAllowedPath];
