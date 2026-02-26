@@ -21,6 +21,7 @@ import { readFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { createLocalProvider } from '../../storage/index.js';
+import { getDefaultFilesystemAllowedPath } from '../../utils/platform.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -214,9 +215,8 @@ program
       // The workspace is the default working area, but Jiva can access any files
       // subject to OS permissions
       // Note: The filesystem MCP server rejects "/" as a security measure
-      // Use /Users on macOS/Linux to allow access to all user directories
-      // Use C:\Users on Windows
-      const allowedPath = process.platform === 'win32' ? 'C:\\Users' : '/Users';
+      // Use /Users on macOS, /home on Linux, C:\Users on Windows
+      const allowedPath = getDefaultFilesystemAllowedPath();
       
       if (!mcpServers['filesystem']) {
         // Add default filesystem server if not configured
@@ -616,9 +616,8 @@ program
       // The workspace is the default working area, but Jiva can access any files
       // subject to OS permissions
       // Note: The filesystem MCP server rejects "/" as a security measure
-      // Use /Users on macOS/Linux to allow access to all user directories
-      // Use C:\Users on Windows
-      const allowedPath = process.platform === 'win32' ? 'C:\\Users' : '/Users';
+      // Use /Users on macOS, /home on Linux, C:\Users on Windows
+      const allowedPath = getDefaultFilesystemAllowedPath();
       
       if (!mcpServers['filesystem']) {
         // Add default filesystem server if not configured
