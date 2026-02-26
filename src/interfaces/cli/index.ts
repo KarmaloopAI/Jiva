@@ -216,25 +216,26 @@ program
       // subject to OS permissions
       // Note: The filesystem MCP server rejects "/" as a security measure
       // Use /Users on macOS, /home on Linux, C:\Users on Windows
-      const allowedPath = getDefaultFilesystemAllowedPath();
+      const defaultAllowedPath = getDefaultFilesystemAllowedPath();
+      const allowedPaths = [...new Set([defaultAllowedPath, workspaceDir].filter(Boolean))];
       
       if (!mcpServers['filesystem']) {
         // Add default filesystem server if not configured
         mcpServers['filesystem'] = {
           command: 'npx',
-          args: ['-y', '@modelcontextprotocol/server-filesystem', allowedPath],
+          args: ['-y', '@modelcontextprotocol/server-filesystem', ...allowedPaths],
           enabled: true,
         };
-        logger.info(`Adding default filesystem MCP server (${allowedPath})`);
+        logger.info(`Adding default filesystem MCP server (${allowedPaths.join(', ')})`);
       } else {
         // Update existing filesystem server args
         mcpServers['filesystem'].args = [
           '-y',
           '@modelcontextprotocol/server-filesystem',
-          allowedPath
+          ...allowedPaths
         ];
         logger.debug(`Filesystem server args set to: ${JSON.stringify(mcpServers['filesystem'].args)}`);
-        logger.debug(`Allowed path: "${allowedPath}"`);
+        logger.debug(`Allowed paths: "${allowedPaths.join('", "')}"`);
       }
 
       // Ensure shell MCP server is always available
@@ -617,25 +618,26 @@ program
       // subject to OS permissions
       // Note: The filesystem MCP server rejects "/" as a security measure
       // Use /Users on macOS, /home on Linux, C:\Users on Windows
-      const allowedPath = getDefaultFilesystemAllowedPath();
+      const defaultAllowedPath = getDefaultFilesystemAllowedPath();
+      const allowedPaths = [...new Set([defaultAllowedPath, workspaceDir].filter(Boolean))];
       
       if (!mcpServers['filesystem']) {
         // Add default filesystem server if not configured
         mcpServers['filesystem'] = {
           command: 'npx',
-          args: ['-y', '@modelcontextprotocol/server-filesystem', allowedPath],
+          args: ['-y', '@modelcontextprotocol/server-filesystem', ...allowedPaths],
           enabled: true,
         };
-        logger.info(`Adding default filesystem MCP server (${allowedPath})`);
+        logger.info(`Adding default filesystem MCP server (${allowedPaths.join(', ')})`);
       } else {
         // Update existing filesystem server args
         mcpServers['filesystem'].args = [
           '-y',
           '@modelcontextprotocol/server-filesystem',
-          allowedPath
+          ...allowedPaths
         ];
         logger.debug(`Filesystem server args set to: ${JSON.stringify(mcpServers['filesystem'].args)}`);
-        logger.debug(`Allowed path: "${allowedPath}"`);
+        logger.debug(`Allowed paths: "${allowedPaths.join('", "')}"`);
       }
 
       // Ensure shell MCP server is always available
