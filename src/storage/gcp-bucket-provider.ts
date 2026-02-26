@@ -27,7 +27,7 @@ import {
   JivaState,
 } from './types.js';
 import { createHash } from 'crypto';
-import { Storage, Bucket, File } from '@google-cloud/storage';
+import type { Bucket, File } from '@google-cloud/storage';
 
 export class GCPBucketProvider extends StorageProvider {
   private bucket: Bucket | null = null;
@@ -46,6 +46,7 @@ export class GCPBucketProvider extends StorageProvider {
   }
 
   async initialize(): Promise<void> {
+    const { Storage } = await import('@google-cloud/storage');
     const storageOptions: { projectId?: string; keyFilename?: string } = {};
     
     if (this.infraConfig.gcpProjectId) {
