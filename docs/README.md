@@ -39,8 +39,12 @@ Deep dives into Jiva's design:
 
 ## Release Notes
 
-- **[v0.3.1](release_notes/v0.3.1.md)** - Current release (Cloud deployment + three-agent architecture)
-- **[v0.2.1](release_notes/v0.2.1.md)** - Previous release
+- **[v0.3.23](release_notes/v0.3.23.md)** - Current release (Linux support fix + dependency updates)
+- **[v0.3.22](release_notes/v0.3.22.md)** - Security updates & CI automation
+- **[v0.3.21](release_notes/v0.3.21.md)** - Bug fixes
+- **[v0.3.2](release_notes/v0.3.2.md)** - Bug fixes & quality improvements
+- **[v0.3.1](release_notes/v0.3.1.md)** - Cloud deployment + three-agent architecture
+- **[v0.2.1](release_notes/v0.2.1.md)** - Dual-agent system
 
 ## Quick Links by Use Case
 
@@ -91,8 +95,12 @@ docs/
 │   ├── FILESYSTEM_ACCESS.md       # MCP filesystem details
 │   └── MAXTOKEN_FIX.md           # Token management
 └── release_notes/
-    ├── v0.3.1.md                  # Current release
-    └── v0.2.1.md                  # Previous release
+    ├── v0.3.23.md                 # Current release
+    ├── v0.3.22.md                 # Security updates & CI
+    ├── v0.3.21.md                 # Bug fixes
+    ├── v0.3.2.md                  # Bug fixes & quality
+    ├── v0.3.1.md                  # Cloud + three-agent
+    └── v0.2.1.md                  # Dual-agent system
 ```
 
 ## Feature Matrix
@@ -115,8 +123,8 @@ Legend: ✅ Supported | ⚠️ Partial | ➖ Not applicable | 🚧 In developmen
 
 ## Version Information
 
-**Current Version:** 0.3.1  
-**Release Date:** February 15, 2026  
+**Current Version:** 0.3.23  
+**Release Date:** February 27, 2026  
 **Node Version Required:** 20.0.0+
 
 ## Support
