@@ -68,6 +68,16 @@ jiva persona package-skill my-skill
 
 See **[Personas Guide](docs/guides/PERSONAS.md)** for complete documentation.
 
+### v0.3.23 Bug Fixes
+- **Linux Path Fix**: Resolved startup errors on Linux where Jiva was reading from the wrong directory — new `platform.ts` utility ensures correct path resolution across all platforms
+- **Punycode Deprecation**: Eliminated `[DEP0040] DeprecationWarning` by lazy-loading `@google-cloud/storage` so the deprecated built-in `punycode` module is never loaded during CLI-only sessions
+- **Type Safety**: Fixed a `mustUseTools` type error in the Client agent
+- **Dev Publishing**: Added CI workflow to auto-publish `dev`-tagged npm releases on every merge to `develop`
+
+### v0.3.22 Maintenance
+- **Security Updates**: Upgraded `glob` and `tr46` via npm `overrides` to resolve known vulnerabilities
+- **CI/CD**: Added GitHub Actions workflow to automatically publish releases to npm
+
 ### v0.3.2 Bug Fixes & Quality Improvements
 **Bug Fixes:**
 - **Persona Isolation**: Sub-agents now use ephemeral personas that don't overwrite parent agent configuration
