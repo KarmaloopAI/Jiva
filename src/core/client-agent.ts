@@ -44,6 +44,16 @@ export interface Requirement {
   mustUseTools?: string[]; // Tools that must be used for this requirement
 }
 
+/**
+ * Normalize the LLM-returned mustUseTools value to string[] | undefined.
+ * The LLM may return null, a string, or an array.
+ */
+function normalizeMustUseTools(value: unknown): string[] | undefined {
+  if (Array.isArray(value)) return value as string[];
+  if (typeof value === 'string' && value) return [value];
+  return undefined;
+}
+
 export interface ValidationResult {
   approved: boolean;
   requirementsMet: boolean;
@@ -212,7 +222,7 @@ CRITICAL RULES for requirements:
           type: req.type || 'other',
           description: req.description || 'General task completion',
           filePath: req.filePath || undefined,
-          mustUseTools: req.mustUseTools || undefined,
+          mustUseTools: normalizeMustUseTools(req.mustUseTools),
         }));
 
         // Ensure at least one requirement
