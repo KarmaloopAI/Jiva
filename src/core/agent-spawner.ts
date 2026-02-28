@@ -208,6 +208,9 @@ export class AgentSpawner {
 
       // Prepare task message with context
       // IMPORTANT: Always include workspace path for sub-agents
+      // Phase 1 convention: Manager should include relevant directive constraints
+      // and conversation summary in request.context when spawning sub-agents.
+      // Phase 2: Consider adding optional parentContext?: Partial<AgentContext> to spawnAgent().
       const workspacePath = this.workspace.getWorkspaceDir();
       let contextSection = `Project root: ${workspacePath}`;
       

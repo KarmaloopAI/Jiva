@@ -13,6 +13,7 @@ import { MCPServerManager } from '../mcp/server-manager.js';
 import { WorkspaceManager } from './workspace.js';
 import { PersonaManager } from '../personas/persona-manager.js';
 import { AgentSpawner } from './agent-spawner.js';
+import { AgentContext } from './types/agent-context.js';
 import { Message, MessageContent, ModelResponse, Tool } from '../models/base.js';
 import { formatToolResult } from '../models/harmony.js';
 import { logger } from '../utils/logger.js';
@@ -91,7 +92,7 @@ export class WorkerAgent {
   /**
    * Execute a subtask assigned by Manager
    */
-  async executeSubtask(subtask: WorkerSubtask): Promise<WorkerResult> {
+  async executeSubtask(subtask: WorkerSubtask, agentContext?: AgentContext): Promise<WorkerResult> {
     logger.info(`[Worker] Starting: "${subtask.instruction}"`);
     orchestrationLogger.logWorkerStart(subtask.instruction, subtask.context || '');
 
@@ -164,12 +165,19 @@ Available tools: ${this.mcpManager.getClient().getAllTools().map(t => t.name).jo
   * persona (required): Persona name - ${availablePersonas.join(', ')}
   * task (required): Specific task for the sub-agent
   * context (optional): Additional domain-specific context (workspace path is automatically included)
+- IMPORTANT: When spawning a sub-agent, include relevant directive constraints and a brief conversation summary in the context parameter so the sub-agent has sufficient background.
 - Example: spawn_agent({ persona: "code-reviewer", task: "Review the authentication code in src/auth/", context: "Focus on security vulnerabilities and best practices" })
 - The sub-agent will complete the task and return results to you`;
     }
 
     if (personaPrompt) {
       systemContent += `\n\n${personaPrompt}`;
+    }
+
+    // Inject directive into Worker prompt (fixes bug: Worker previously had no directive)
+    const directivePrompt = agentContext?.directive || this.workspace.getDirectivePrompt() || '';
+    if (directivePrompt) {
+      systemContent += `\n\n${directivePrompt}`;
     }
 
     // System prompt for Worker

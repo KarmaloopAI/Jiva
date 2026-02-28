@@ -12,6 +12,9 @@
 
 import { ModelOrchestrator } from '../models/orchestrator.js';
 import { MCPServerManager } from '../mcp/server-manager.js';
+import { AgentContext } from './types/agent-context.js';
+import { CompletionSignal } from './types/completion-signal.js';
+import { serializeAgentContext } from './utils/serialize-agent-context.js';
 import { logger } from '../utils/logger.js';
 import { orchestrationLogger } from '../utils/orchestration-logger.js';
 import { MCPClient } from '../mcp/client.js';
@@ -60,6 +63,7 @@ export interface ValidationResult {
   issues: string[];
   nextAction?: string;
   involvementLevel: InvolvementLevel;
+  completionSignal?: CompletionSignal;
 }
 
 export class ClientAgent {
@@ -135,17 +139,28 @@ export class ClientAgent {
    * Use LLM to analyze the task and determine involvement level + requirements.
    * Replaces keyword-based determineInvolvementLevel() and parseRequirements()
    * with semantic understanding that avoids false positives.
+   *
+   * NOTE: failureCount escalation has been removed. Involvement level is now
+   * determined purely by task type. Per-subtask correction is handled by
+   * CompletionSignal + DualAgent retry budget instead.
    */
   private async analyzeTaskRequirements(
     userMessage: string,
     subtasks: string[],
-    workerResult?: WorkerResult
+    workerResult?: WorkerResult,
+    agentContext?: AgentContext
   ): Promise<{ level: InvolvementLevel; requirements: Requirement[] }> {
     const workerContext = workerResult
       ? `\nWorker Result (first 500 chars): ${workerResult.result.substring(0, 500)}\nWorker Success: ${workerResult.success}\nTools Used: ${workerResult.toolsUsed.join(', ') || 'none'} (${workerResult.toolsUsed.length} total)`
       : '';
 
     const availableToolsContext = this.buildToolContextForPrompt();
+
+    // Include serialized agent context for richer analysis
+    const contextBlock = agentContext
+      ? `\nAGENT CONTEXT:\n${serializeAgentContext(agentContext, 'client')}`
+      : '';
+
     const analysisPrompt = `You are a task analyst for a software agent system. Analyze the user's request to determine:
 1. How deeply to validate the Worker's output (involvement level)
 2. What specific requirements the task implies
@@ -154,8 +169,7 @@ USER MESSAGE: ${userMessage}
 
 SUBTASKS: ${JSON.stringify(subtasks)}
 ${workerContext}
-
-PREVIOUS FAILURE COUNT: ${this.failureCount}
+${contextBlock}
 
 AVAILABLE TOOLS (what the Worker and Client can actually use):
 ${availableToolsContext}
@@ -175,7 +189,7 @@ Respond ONLY with valid JSON in this exact format (no other text):
 }
 
 CRITICAL RULES for involvementLevel:
-- THOROUGH: ONLY when the user EXPLICITLY asks to test or verify something, OR after previous failures (failureCount > 0), OR for complex multi-file operations (>3 subtasks)
+- THOROUGH: ONLY when the user EXPLICITLY asks to test or verify something, OR for complex multi-file operations (>3 subtasks)
 - MINIMAL: Information-only requests (listing files, explaining code, describing something, answering questions) where no files are created or modified
 - STANDARD: Default for creation, modification, or action tasks
 
@@ -212,11 +226,8 @@ CRITICAL RULES for requirements:
             level = InvolvementLevel.STANDARD;
         }
 
-        // Hard override: escalate to THOROUGH after failures
-        if (this.failureCount > 0 && level !== InvolvementLevel.THOROUGH) {
-          logger.debug(`[Client] Escalating to THOROUGH due to ${this.failureCount} previous failures`);
-          level = InvolvementLevel.THOROUGH;
-        }
+        // NOTE: failureCount escalation removed — involvement level is determined
+        // purely by task type. Per-subtask correction is handled by CompletionSignal.
 
         const requirements: Requirement[] = (analysis.requirements || []).map((req: any) => ({
           type: req.type || 'other',
@@ -239,9 +250,9 @@ CRITICAL RULES for requirements:
       logger.warn(`[Client] LLM task analysis failed: ${error}, falling back to STANDARD`);
     }
 
-    // Fallback: STANDARD with generic requirement
+    // Fallback: STANDARD with generic requirement (no failureCount escalation)
     return {
-      level: this.failureCount > 0 ? InvolvementLevel.THOROUGH : InvolvementLevel.STANDARD,
+      level: InvolvementLevel.STANDARD,
       requirements: [{ type: 'other', description: 'General task completion' }],
     };
   }
@@ -255,17 +266,18 @@ CRITICAL RULES for requirements:
     userMessage: string,
     subtasks: string[],
     workerResult: WorkerResult,
-    involvementLevel?: InvolvementLevel
+    involvementLevel?: InvolvementLevel,
+    agentContext?: AgentContext
   ): Promise<ValidationResult> {
     // Use LLM-based analysis instead of keyword matching
     const { level: analyzedLevel, requirements } = await this.analyzeTaskRequirements(
-      userMessage, subtasks, workerResult
+      userMessage, subtasks, workerResult, agentContext
     );
     let level = involvementLevel || analyzedLevel;
 
     // CRITICAL: Use LLM to check for unjustified failure claims BEFORE other validation
     // Even in MINIMAL mode, we must catch agents giving up without trying
-    const failureAnalysis = await this.analyzeForUnjustifiedFailure(userMessage, workerResult);
+    const failureAnalysis = await this.analyzeForUnjustifiedFailure(userMessage, workerResult, agentContext);
 
     if (failureAnalysis.claimsFailure && !failureAnalysis.hasEvidence) {
       logger.info(`[Client] Detected unjustified failure claim - escalating from ${level} to STANDARD`);
@@ -302,7 +314,7 @@ CRITICAL RULES for requirements:
 
     // Layer 0.5: Result-vs-Evidence Coherence Check (always done, catches hallucinated accomplishments)
     // This detects when the Worker claims to have done things its tool usage doesn't support
-    const coherenceAnalysis = await this.analyzeResultCoherence(userMessage, workerResult);
+    const coherenceAnalysis = await this.analyzeResultCoherence(userMessage, workerResult, agentContext);
     orchestrationLogger.logClientCoherenceCheck(
       coherenceAnalysis.isCoherent,
       coherenceAnalysis.unsupportedClaims,
@@ -346,12 +358,17 @@ CRITICAL RULES for requirements:
     if (!result.approved && result.issues.length > 0) {
       // Generate an actionable correction instruction via LLM instead of echoing raw validation issues
       result.nextAction = await this.generateCorrectionInstruction(
-        userMessage, subtasks.join('; '), result.issues, workerResult
+        userMessage, subtasks.join('; '), result.issues, workerResult, agentContext
       );
-      this.failureCount++;
+      this.failureCount++; // Telemetry only — no longer drives escalation
     } else {
-      this.failureCount = 0; // Reset on success
+      this.failureCount = 0;
     }
+
+    // Analyze CompletionSignal (LLM-based per-subtask assessment)
+    result.completionSignal = await this.analyzeCompletionSignal(
+      userMessage, workerResult, result.issues, agentContext
+    );
 
     // Log the validation outcome
     orchestrationLogger.logClientValidation(
@@ -367,14 +384,18 @@ CRITICAL RULES for requirements:
    */
   private async analyzeForUnjustifiedFailure(
     userMessage: string,
-    workerResult: WorkerResult
+    workerResult: WorkerResult,
+    agentContext?: AgentContext
   ): Promise<FailureAnalysis> {
     const toolCount = workerResult.toolsUsed.length;
     const toolList = workerResult.toolsUsed.join(', ') || 'none';
 
+    const contextBlock = agentContext ? `\n${serializeAgentContext(agentContext, 'client')}` : '';
+
     const analysisPrompt = `You are a quality control agent. Analyze the following Worker response to determine if it's claiming failure and whether that failure is justified.
 
 USER REQUEST: ${userMessage}
+${contextBlock}
 
 WORKER RESPONSE:
 ${workerResult.result}
@@ -435,7 +456,8 @@ Respond ONLY with the JSON, no other text.`;
    */
   private async analyzeResultCoherence(
     userMessage: string,
-    workerResult: WorkerResult
+    workerResult: WorkerResult,
+    agentContext?: AgentContext
   ): Promise<CoherenceAnalysis> {
     // Skip coherence check if Worker used no tools (caught by zero-tools guard)
     // or if Worker explicitly failed (caught by failure analysis)
@@ -446,10 +468,12 @@ Respond ONLY with the JSON, no other text.`;
     const toolList = workerResult.toolsUsed.join(', ');
     const uniqueTools = [...new Set(workerResult.toolsUsed)].join(', ');
     const availableToolsContext = this.buildToolContextForPrompt();
+    const contextBlock = agentContext ? `\n${serializeAgentContext(agentContext, 'client')}` : '';
 
     const coherencePrompt = `You are a strict quality auditor. Your job is to determine whether a Worker agent's result is SUPPORTED by the tools it actually used, or whether it fabricated/hallucinated claims.
 
 USER REQUEST: ${userMessage}
+${contextBlock}
 
 WORKER RESULT:
 ${workerResult.result.substring(0, 1000)}
@@ -641,9 +665,11 @@ Respond ONLY with valid JSON:
     userMessage: string,
     subtask: string,
     issues: string[],
-    workerResult: WorkerResult
+    workerResult: WorkerResult,
+    agentContext?: AgentContext
   ): Promise<string> {
     const availableToolsContext = this.buildToolContextForPrompt();
+    const contextBlock = agentContext ? `\nAGENT CONTEXT:\n${serializeAgentContext(agentContext, 'client')}` : '';
     const correctionPrompt = `You are generating a correction instruction for a Worker agent that failed to complete a task properly.
 
 ORIGINAL USER REQUEST: ${userMessage}
@@ -658,6 +684,7 @@ TOOLS WORKER USED: ${workerResult.toolsUsed.join(', ') || 'none'}
 
 AVAILABLE TOOLS THE WORKER CAN USE:
 ${availableToolsContext}
+${contextBlock}
 
 Generate a CLEAR, ACTIONABLE instruction that tells the Worker exactly what to do to fix the issues.
 The instruction should:
@@ -794,10 +821,104 @@ Respond ONLY with the correction instruction text, nothing else.`;
     return { issues };
   }
 
+  // ─── Completion Signal Analysis ──────────────────────────────────────────────
+
+  /**
+   * LLM-based per-subtask assessment of completion confidence, blocker type,
+   * and suggested corrective strategy. Called at the end of validate().
+   */
+  private async analyzeCompletionSignal(
+    userMessage: string,
+    workerResult: WorkerResult,
+    issues: string[],
+    agentContext?: AgentContext
+  ): Promise<CompletionSignal> {
+    // If approved with no issues, high confidence
+    if (issues.length === 0) {
+      return { confidence: 'high', progressMade: true };
+    }
+
+    const contextBlock = agentContext ? `\n${serializeAgentContext(agentContext, 'client')}` : '';
+    const signalPrompt = `You are analyzing a subtask execution to produce a CompletionSignal.
+
+USER REQUEST: ${userMessage}
+${contextBlock}
+
+WORKER RESULT (first 500 chars): ${workerResult.result.substring(0, 500)}
+WORKER SUCCESS: ${workerResult.success}
+TOOLS USED: ${workerResult.toolsUsed.join(', ') || 'none'} (${workerResult.toolsUsed.length} total)
+
+VALIDATION ISSUES:
+${issues.map((issue, i) => `${i + 1}. ${issue}`).join('\n')}
+
+Analyze and respond ONLY with valid JSON:
+{
+  "confidence": "<high | medium | low | none>",
+  "progressMade": <true if Worker made any measurable forward progress, false otherwise>,
+  "blockerType": "<tool_failure | hallucination | scope_drift | partial | loop | capability_gap | null>",
+  "suggestedStrategy": "<retry | rephrase | decompose | skip | escalate>"
+}
+
+RULES:
+- confidence "high": all issues are minor or cosmetic
+- confidence "medium": some progress but incomplete
+- confidence "low": significant issues, little useful work
+- confidence "none": no useful work done at all
+- blockerType "tool_failure": Worker tried but tool errored
+- blockerType "hallucination": Worker claimed work it didn't do
+- blockerType "scope_drift": Worker did something unrelated
+- blockerType "partial": Worker made progress but didn't finish
+- blockerType "loop": Worker is repeating the same action
+- blockerType "capability_gap": Task requires tools/capabilities not available
+- suggestedStrategy: recommend the best recovery approach`;
+
+    try {
+      const response = await this.orchestrator.chat({
+        messages: [
+          { role: 'system', content: 'You are a strict completion analyst. Respond only with valid JSON.' },
+          { role: 'user', content: signalPrompt },
+        ],
+        temperature: 0.1,
+      });
+
+      const jsonMatch = response.content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        return {
+          confidence: parsed.confidence || 'low',
+          progressMade: parsed.progressMade ?? false,
+          blockerType: parsed.blockerType === 'null' ? undefined : parsed.blockerType,
+          suggestedStrategy: parsed.suggestedStrategy,
+        };
+      }
+    } catch (error) {
+      logger.debug(`[Client] Failed to analyze completion signal: ${error}`);
+    }
+
+    // Fallback: conservative signal
+    return {
+      confidence: 'low',
+      progressMade: workerResult.toolsUsed.length > 0,
+      blockerType: 'partial',
+      suggestedStrategy: 'retry',
+    };
+  }
+
   // ─── Session Management ─────────────────────────────────────────────────────
 
-  /** Reset failure tracking (call at the start of each new conversation/session). */
-  resetFailureTracking(): void {
+  /**
+   * Reset session state (call at the start of each new conversation/session).
+   * Renamed from resetFailureTracking() for clarity — failureCount is now
+   * telemetry-only and does not drive involvement escalation.
+   */
+  resetSessionState(): void {
     this.failureCount = 0;
+  }
+
+  /**
+   * @deprecated Use resetSessionState() instead.
+   */
+  resetFailureTracking(): void {
+    this.resetSessionState();
   }
 }
