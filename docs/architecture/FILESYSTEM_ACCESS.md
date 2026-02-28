@@ -4,7 +4,7 @@
 
 Jiva now has **broad filesystem access to user directories** (subject to OS permissions). The workspace is your **default working area**, not a restriction.
 
-**Note:** The filesystem MCP server rejects "/" (root directory) as a security measure. Jiva uses `/Users` on macOS/Linux and `C:\Users` on Windows for broad access to all user files while protecting system directories.
+**Note:** The filesystem MCP server rejects "/" (root directory) as a security measure. Jiva uses `/Users` on macOS, `/home` on Linux, and `C:\Users` on Windows for broad access to all user files while protecting system directories.
 
 ## What Changed
 
@@ -37,7 +37,7 @@ Jiva has broad access to user directories:
 
 ```typescript
 // MCP filesystem server is configured with:
-allowedPath = "/Users" (macOS/Linux) or "C:\\Users" (Windows)
+allowedPath = "/Users" (macOS) or "/home" (Linux) or "C:\\Users" (Windows)
 ```
 
 This means Jiva can:
@@ -136,7 +136,8 @@ args: ['-y', '@modelcontextprotocol/server-filesystem', workspaceDir]
 
 **After:**
 ```typescript
-const allowedPath = process.platform === 'win32' ? 'C:\\Users' : '/Users';
+const allowedPath = getDefaultFilesystemAllowedPath();
+// macOS: "/Users", Linux: "/home", Windows: "C:\\Users"
 args: ['-y', '@modelcontextprotocol/server-filesystem', allowedPath]
 // Broad access to all user directories
 ```
@@ -174,7 +175,7 @@ Even with full filesystem access, the workspace is important for:
 | Platform | Root Path | Notes |
 |----------|-----------|-------|
 | macOS | `/Users` | All user home directories |
-| Linux | `/Users` or `/home` | All user home directories |
+| Linux | `/home` | All user home directories |
 | Windows | `C:\Users` | All user profiles |
 
 **Note:** To add additional directories, modify the MCP server configuration to include multiple allowed paths.

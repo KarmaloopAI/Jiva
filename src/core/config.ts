@@ -1,6 +1,7 @@
 import Conf from 'conf';
 import { z } from 'zod';
 import { ConfigurationError } from '../utils/errors.js';
+import { getDefaultFilesystemAllowedPath } from '../utils/platform.js';
 
 // Zod schemas for validation
 // Support both stdio-based and HTTP/SSE-based MCP servers
@@ -151,9 +152,9 @@ export class ConfigManager {
 
     // Add filesystem server if not exists (enabled by default)
     // Note: The filesystem MCP server rejects "/" as a security measure
-    // Use /Users on macOS/Linux, C:\Users on Windows for broad access to user files
+    // Use /Users on macOS, /home on Linux, C:\Users on Windows for broad access to user files
     if (!servers['filesystem']) {
-      const allowedPath = process.platform === 'win32' ? 'C:\\Users' : '/Users';
+      const allowedPath = getDefaultFilesystemAllowedPath();
       this.addMCPServer('filesystem', {
         command: 'npx',
         args: ['-y', '@modelcontextprotocol/server-filesystem', allowedPath],
