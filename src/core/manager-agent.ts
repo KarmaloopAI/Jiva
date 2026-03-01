@@ -13,6 +13,7 @@
 import { ModelOrchestrator } from '../models/orchestrator.js';
 import { WorkspaceManager } from './workspace.js';
 import { PersonaManager } from '../personas/persona-manager.js';
+import { AgentContext } from './types/agent-context.js';
 import { Message } from '../models/base.js';
 import { logger } from '../utils/logger.js';
 import { orchestrationLogger } from '../utils/orchestration-logger.js';
@@ -56,7 +57,7 @@ export class ManagerAgent {
   }
 
   private initializeSystemPrompt() {
-    const directivePrompt = this.workspace.getDirectivePrompt();
+    // Store base system prompt WITHOUT directive — directive is injected fresh per-call
     const personaPrompt = this.personaManager?.getSystemPromptAddition() || '';
 
     let systemContent = `You are the Manager Agent in a two-agent system.
@@ -90,10 +91,7 @@ IMPORTANT:
       systemContent += `\n${personaPrompt}\n`;
     }
 
-    if (directivePrompt) {
-      systemContent += `\n${directivePrompt}`;
-    }
-
+    // NOTE: Directive is NOT baked in here; it's injected fresh each call via getSystemMessages()
     this.conversationHistory.push({
       role: 'system',
       content: systemContent,
@@ -101,9 +99,37 @@ IMPORTANT:
   }
 
   /**
+   * Get system messages with fresh directive + optional AgentContext.
+   * Follows the per-call directive injection pattern from JivaAgent.getSystemMessages().
+   */
+  private getSystemMessages(agentContext?: AgentContext): Message[] {
+    const systemMessage = this.conversationHistory[0];
+
+    // Inject fresh directive per-call
+    const freshDirective = agentContext?.directive || this.workspace.getDirectivePrompt() || '';
+
+    const parts: string[] = [];
+    if (freshDirective) {
+      parts.push(freshDirective);
+    }
+
+    if (parts.length === 0) {
+      return [systemMessage];
+    }
+
+    return [
+      systemMessage,
+      {
+        role: 'developer' as any,
+        content: parts.join('\n'),
+      },
+    ];
+  }
+
+  /**
    * Create a plan for handling the user's request
    */
-  async createPlan(task: ManagerTask): Promise<ManagerPlan> {
+  async createPlan(task: ManagerTask, agentContext?: AgentContext): Promise<ManagerPlan> {
     logger.info('[Manager] Creating plan...');
     orchestrationLogger.logManagerCreatePlan(task.userRequest, task.context || '');
 
@@ -147,7 +173,7 @@ Respond ONLY with valid JSON in this exact format (no other text before or after
     });
 
     const response = await this.orchestrator.chat({
-      messages: this.conversationHistory,
+      messages: [...this.getSystemMessages(agentContext), ...this.conversationHistory.slice(1)],
       temperature: 0.1, // Low temperature for deterministic planning
     });
 
@@ -208,7 +234,7 @@ NEXT_ACTION: <what to do next, if CONTINUE>`;
     });
 
     const response = await this.orchestrator.chat({
-      messages: this.conversationHistory,
+      messages: [...this.getSystemMessages(), ...this.conversationHistory.slice(1)],
       temperature: 0.1, // Low temperature for deterministic decisions
     });
 
@@ -237,7 +263,7 @@ NEXT_ACTION: <what to do next, if CONTINUE>`;
   /**
    * Create final response for user
    */
-  async synthesizeResponse(allResults: { subtask: string; result: string }[]): Promise<string> {
+  async synthesizeResponse(allResults: { subtask: string; result: string }[], agentContext?: AgentContext): Promise<string> {
     logger.info('[Manager] Synthesizing final response...');
     orchestrationLogger.logManagerSynthesize(allResults.length);
 
@@ -255,7 +281,7 @@ Present information clearly with relevant details, code snippets, or examples as
     });
 
     const response = await this.orchestrator.chat({
-      messages: this.conversationHistory,
+      messages: [...this.getSystemMessages(agentContext), ...this.conversationHistory.slice(1)],
       temperature: 0.1, // Low temperature for deterministic synthesis
     });
 
