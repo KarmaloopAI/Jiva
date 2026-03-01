@@ -19,8 +19,9 @@ import { Message } from '../../models/base.js';
 const CHARS_PER_TOKEN = 4;
 const DIRECTIVE_TOKEN_LIMIT = 500;
 const SUMMARY_TOKEN_LIMIT = 300;
-const RECENT_MESSAGES_LIMIT = 6;
-const RECENT_MESSAGES_TOKEN_LIMIT = 800;
+// Recent messages are no longer truncated — the underlying LLM supports a 128k
+// context window and the conversation manager condenses history before this is
+// called, so there is no need for an artificial per-role cap here.
 const VALIDATION_CONTEXT_TOKEN_LIMIT = 400;
 
 /**
@@ -73,10 +74,9 @@ export function serializeAgentContext(
   }
 
   if (ctx.conversation.recentMessages.length > 0) {
-    const bounded = ctx.conversation.recentMessages.slice(-RECENT_MESSAGES_LIMIT);
-    const serialized = bounded.map(serializeMessage).join('\n');
+    const serialized = ctx.conversation.recentMessages.map(serializeMessage).join('\n');
     convParts.push(
-      '[Recent Messages]\n' + truncate(serialized, RECENT_MESSAGES_TOKEN_LIMIT)
+      '[Recent Messages]\n' + serialized
     );
   }
 

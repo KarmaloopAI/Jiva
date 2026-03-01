@@ -150,8 +150,10 @@ export class DualAgent {
       }
     }
 
-    // Bounded recent messages (last 6 of user/assistant/tool)
-    const recentMessages = allRoleMessages.slice(-6);
+    // Pass the full conversation history — the conversation manager already
+    // condenses history (at condensingThreshold) before this is called, so
+    // no artificial slice is needed here. The 128k context window handles the rest.
+    const recentMessages = allRoleMessages;
 
     // Persona context
     let persona: AgentContext['persona'];
@@ -361,12 +363,12 @@ VALIDATION GUIDANCE:
           );
 
           if (correction) {
-            // Deduplicate before adding
+            // Deduplicate against the pending queue only — NOT against results.
+            // Correction subtasks intentionally re-execute something that failed,
+            // so checking results would always flag a retry as a duplicate.
             const normalizedCorrection = correction.toLowerCase().trim();
             const isDuplicate = subtasksToExecute.some(existing =>
               existing.toLowerCase().trim() === normalizedCorrection
-            ) || results.some(r =>
-              r.subtask.toLowerCase().trim() === normalizedCorrection
             );
 
             if (isDuplicate) {
@@ -387,10 +389,10 @@ VALIDATION GUIDANCE:
           logger.info(`[Client] Requesting correction: ${validation.nextAction}`);
 
           const normalizedCorrection = validation.nextAction.toLowerCase().trim();
+          // Only deduplicate against the pending queue — corrections are intentional
+          // re-attempts, so matching against results would always skip them.
           const isDuplicate = subtasksToExecute.some(existing =>
             existing.toLowerCase().trim() === normalizedCorrection
-          ) || results.some(r =>
-            r.subtask.toLowerCase().trim() === normalizedCorrection
           );
 
           if (isDuplicate) {
