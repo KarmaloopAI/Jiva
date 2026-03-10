@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "skipLibCheck": true,
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowSyntheticDefaultImports": true,
+    "strict": true,
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "noEmit": false,
+    "outDir": "dist-electron"
+  },
+  "include": ["electron", "vite.config.ts"]
+}

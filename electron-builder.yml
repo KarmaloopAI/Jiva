@@ -1,0 +1,65 @@
+appId: ai.karmaloop.jivam
+productName: Jivam
+copyright: Copyright © 2026 Karmaloop AI
+
+directories:
+  output: release
+  buildResources: assets
+
+files:
+  - dist/**/*
+  - dist-electron/**/*
+  - package.json
+
+asar: true
+
+mac:
+  category: public.app-category.productivity
+  icon: assets/icon.icns
+  minimumSystemVersion: "13.0"
+  target:
+    - target: dmg
+      arch: universal
+    - target: zip
+      arch: universal
+  darkModeSupport: true
+
+dmg:
+  title: "Jivam ${version}"
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
+  window:
+    width: 540
+    height: 380
+
+win:
+  icon: assets/icon.png
+  target:
+    - target: nsis
+      arch:
+        - x64
+        - arm64
+    - target: portable
+      arch: x64
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+
+linux:
+  icon: assets/icon.png
+  category: Utility
+  target:
+    - target: AppImage
+      arch:
+        - x64
+        - arm64
+    - target: deb
+      arch: x64
