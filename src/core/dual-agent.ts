@@ -251,11 +251,12 @@ VALIDATION GUIDANCE:
         return null; // caller skips
 
       case 'escalate':
-        logger.warn(`[DualAgent] Escalating subtask to user — cannot auto-correct: ${subtask}`);
-        results.push({
-          subtask,
-          result: `⚠️ This subtask could not be completed automatically and requires user attention: ${signal.blockerType || 'unknown blocker'}`,
-        });
+        // Do NOT overwrite results[] here. The Worker's actual result (with
+        // specific tool error detail from failedTools) was already pushed into
+        // results[] before Client validation ran. The approved:false flag on
+        // that entry is enough for synthesizeResponse() to handle it honestly.
+        // Pushing a generic ⚠️ string would lose the specific error information.
+        logger.warn(`[DualAgent] Escalating subtask to user — evidence-backed failure, no retry: ${subtask}`);
         return null;
 
       default:
@@ -316,7 +317,7 @@ VALIDATION GUIDANCE:
     const executionStartTime = Date.now();
     orchestrationLogger.logPhaseStart('EXECUTION');
 
-    const results: { subtask: string; result: string }[] = [];
+    const results: { subtask: string; result: string; approved: boolean }[] = [];
     const subtasksToExecute = plan.subtasks.slice(0, this.maxSubtasks);
     const MAX_RETRIES_PER_SUBTASK = 2;
 
@@ -337,11 +338,6 @@ VALIDATION GUIDANCE:
       totalIterations += 1;
       allToolsUsed.push(...workerResult.toolsUsed);
 
-      results.push({
-        subtask,
-        result: workerResult.result,
-      });
-
       // Client validates Worker's result with shared context (adaptive involvement)
       const validation = await this.client.validate(
         userMessage,
@@ -351,16 +347,33 @@ VALIDATION GUIDANCE:
         agentContext
       );
 
+      // Record result alongside Client's approval verdict.
+      // The synthesis phase uses this to produce an honest response when
+      // some subtasks were not completed successfully.
+      results.push({
+        subtask,
+        result: workerResult.result,
+        approved: validation.approved,
+      });
+
       if (!validation.approved) {
         const signal = validation.completionSignal;
         const retryCount = subtaskRetryCounts.get(subtask) || 0;
 
+        // Build a context-correction prefix so the Worker isn't misled by prior
+        // conversation turns that claimed success for the same task.
+        const contextCorrectionPrefix = `CONTEXT CORRECTION: Previous conversation messages claiming this task was already completed are INCORRECT — those claims were not validated. You MUST execute the required actions now using the appropriate tools. Do NOT produce a text-only response.
+
+`;
+
         if (signal) {
           logger.info(`[DualAgent] CompletionSignal: confidence=${signal.confidence}, blocker=${signal.blockerType || 'none'}, strategy=${signal.suggestedStrategy || 'none'}, progress=${signal.progressMade}`);
 
-          const correction = this.applyCorrectionStrategy(
+          const rawCorrection = this.applyCorrectionStrategy(
             signal, subtask, retryCount, MAX_RETRIES_PER_SUBTASK, subtasksToExecute, results
           );
+
+          const correction = rawCorrection ? `${contextCorrectionPrefix}${rawCorrection}` : null;
 
           if (correction) {
             // Deduplicate against the pending queue only — NOT against results.
@@ -374,9 +387,11 @@ VALIDATION GUIDANCE:
             if (isDuplicate) {
               logger.warn(`[DualAgent] Skipping duplicate correction subtask`);
             } else if (subtasksToExecute.length < this.maxSubtasks) {
-              subtasksToExecute.push(correction);
+              // Insert correction immediately after current position so it runs
+              // BEFORE any subsequent subtasks that may depend on this one.
+              subtasksToExecute.splice(i + 1, 0, correction);
               subtaskRetryCounts.set(subtask, retryCount + 1);
-              logger.info(`[DualAgent] Added correction subtask via ${signal.suggestedStrategy} (${subtasksToExecute.length} total, retry ${retryCount + 1}/${MAX_RETRIES_PER_SUBTASK})`);
+              logger.info(`[DualAgent] Inserted correction at position ${i + 2} via ${signal.suggestedStrategy} (${subtasksToExecute.length} total, retry ${retryCount + 1}/${MAX_RETRIES_PER_SUBTASK})`);
             } else {
               logger.warn(`[DualAgent] Cannot add correction — maxSubtasks (${this.maxSubtasks}) reached`);
             }
@@ -388,7 +403,8 @@ VALIDATION GUIDANCE:
           logger.info(`[Client] Validation failed: ${validation.issues.join(', ')}`);
           logger.info(`[Client] Requesting correction: ${validation.nextAction}`);
 
-          const normalizedCorrection = validation.nextAction.toLowerCase().trim();
+          const correction = `${contextCorrectionPrefix}${validation.nextAction}`;
+          const normalizedCorrection = correction.toLowerCase().trim();
           // Only deduplicate against the pending queue — corrections are intentional
           // re-attempts, so matching against results would always skip them.
           const isDuplicate = subtasksToExecute.some(existing =>
@@ -398,8 +414,10 @@ VALIDATION GUIDANCE:
           if (isDuplicate) {
             logger.warn(`[Client] Skipping duplicate correction subtask`);
           } else if (subtasksToExecute.length < this.maxSubtasks) {
-            subtasksToExecute.push(validation.nextAction);
-            logger.info(`[Client] Added correction subtask (${subtasksToExecute.length} total)`);
+            // Insert correction immediately after current position so it runs
+            // BEFORE any subsequent subtasks that may depend on this one.
+            subtasksToExecute.splice(i + 1, 0, correction);
+            logger.info(`[Client] Inserted correction at position ${i + 2} (${subtasksToExecute.length} total)`);
           } else {
             logger.warn(`[Client] Cannot add correction - maxSubtasks (${this.maxSubtasks}) reached`);
           }
@@ -457,31 +475,17 @@ VALIDATION GUIDANCE:
 
   private async synthesizeResponse(
     plan: { subtasks: string[]; reasoning: string },
-    results: { subtask: string; result: string }[],
+    results: { subtask: string; result: string; approved: boolean }[],
     agentContext?: AgentContext
   ): Promise<string> {
-    // If only one subtask and it's a short success message, return directly
-    // But ALWAYS synthesize if result indicates failure or incomplete work
-    if (results.length === 1 && results[0].result.length < 500) {
-      const result = results[0].result;
-
-      // Check if this is a failure/incomplete message
-      const isFailure = result.includes('could not be completed') ||
-                       result.includes('failed') ||
-                       result.includes('error') ||
-                       result.toLowerCase().includes('unable to');
-
-      // If it's a failure, always let Manager synthesize to provide proper context
-      if (isFailure) {
-        logger.info('[DualAgent] Result indicates failure, invoking Manager synthesis');
-        return await this.manager.synthesizeResponse(results, agentContext);
-      }
-
-      // Otherwise, short successful result can be returned directly
-      return result;
-    }
-
-    // Multiple subtasks or long result - ask Manager to synthesize
+    // Always have the Manager synthesize a final response.
+    //
+    // The previous short-circuit (returning Worker's raw result when it was a
+    // single short subtask) caused the user to see Worker-internal operational
+    // strings like "Task work completed (1 operations performed). Max iterations
+    // reached but all tool operations succeeded." as their final answer.  The
+    // Manager synthesis step is cheap (one LLM call) and guarantees the user
+    // always receives a properly formatted, contextually accurate response.
     return await this.manager.synthesizeResponse(results, agentContext);
   }
 
@@ -515,6 +519,9 @@ VALIDATION GUIDANCE:
     this.userConversationHistory = [];
     this.manager.resetConversation();
     this.client.resetSessionState();
+    // Null out the conversation ID so the next autoSave generates a fresh file
+    // rather than continuing to append to the previous conversation's storage entry.
+    this.conversationManager?.setCurrentConversationId(null);
     logger.info('[*] Conversation reset');
   }
 

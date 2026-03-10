@@ -546,7 +546,10 @@ Respond ONLY with valid JSON:
 
     // Zero-tools guard: if Worker used no tools at all and this is not a purely
     // informational/conversational task, reject immediately
-    if (workerResult.toolsUsed.length === 0 && involvementLevel !== InvolvementLevel.MINIMAL) {
+    // Exception: if the Worker has structured failedTools, it DID try — the
+    // tools simply errored. Raising a "no tools used" issue on top of real
+    // failures creates a misleading retry loop rather than an honest exit.
+    if (workerResult.toolsUsed.length === 0 && workerResult.failedTools.length === 0 && involvementLevel !== InvolvementLevel.MINIMAL) {
       const isConversational = requirements.every(r => r.type === 'information' || r.type === 'other');
       if (!isConversational) {
         issues.push(
@@ -574,8 +577,12 @@ Respond ONLY with valid JSON:
       }
     }
 
-    // Check if Worker succeeded
-    if (!workerResult.success) {
+    // Check if Worker succeeded.
+    // If failedTools is non-empty the Worker already proved it tried — the failure
+    // is evidence-backed. Raising a generic "retry with appropriate tool usage"
+    // issue would just queue another pointless attempt. Let it through; synthesis
+    // will report the specific failures to the user.
+    if (!workerResult.success && workerResult.failedTools.length === 0) {
       issues.push(
         'Worker did not complete the task successfully. The task needs to be retried with appropriate tool usage.'
       );
@@ -836,6 +843,23 @@ Respond ONLY with the correction instruction text, nothing else.`;
     // If approved with no issues, high confidence
     if (issues.length === 0) {
       return { confidence: 'high', progressMade: true };
+    }
+
+    // Data-driven short-circuit: if the Worker reported structured tool failures,
+    // we know exactly what happened — no LLM inference needed.
+    // suggestedStrategy is 'escalate' because rephrasing the instruction cannot
+    // fix a tool that is fundamentally erroring (wrong path, permissions, etc.).
+    if (workerResult.failedTools.length > 0) {
+      const failureSummary = workerResult.failedTools
+        .map(f => `${f.toolName} (${f.attempts} attempt${f.attempts !== 1 ? 's' : ''}) — ${f.lastError}`)
+        .join('; ');
+      logger.info(`[Client] Data-driven CompletionSignal: tool_failure — ${failureSummary}`);
+      return {
+        confidence: 'none',
+        progressMade: false,
+        blockerType: 'tool_failure',
+        suggestedStrategy: 'escalate',
+      };
     }
 
     const contextBlock = agentContext ? `\n${serializeAgentContext(agentContext, 'client')}` : '';

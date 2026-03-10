@@ -12,38 +12,72 @@ import { ModelError } from '../utils/errors.js';
 export interface OrchestratorConfig {
   reasoningModel: KrutrimModel;
   multimodalModel?: KrutrimModel;
+  /**
+   * Optional dedicated tool-calling LLM.
+   * When configured this model is used as the *primary* model for all tool
+   * calls (it reliably serialises tool arguments as standard OpenAI JSON).
+   * The reasoning model then serves as the secondary fallback.
+   * If not configured the reasoning model is the only model used for tool calls.
+   */
+  toolCallingModel?: KrutrimModel;
 }
 
 export class ModelOrchestrator {
   private reasoningModel: KrutrimModel;
   private multimodalModel?: KrutrimModel;
+  private toolCallingModel?: KrutrimModel;
 
   constructor(config: OrchestratorConfig) {
     this.reasoningModel = config.reasoningModel;
     this.multimodalModel = config.multimodalModel;
+    this.toolCallingModel = config.toolCallingModel;
   }
 
   /**
    * Process a chat completion with automatic model selection
    */
   async chat(options: ChatCompletionOptions): Promise<ModelResponse> {
+    return this.chatWithFallback(options, false);
+  }
+
+  /**
+   * Process a chat completion, selecting the model based on `useFallback`.
+   *   useFallback=true  → use tool-calling model (primary when configured)
+   *   useFallback=false → use reasoning model (primary when no tool-calling model configured)
+   * Images are always pre-processed by the multimodal model prior to routing.
+   */
+  async chatWithFallback(options: ChatCompletionOptions, useFallback: boolean): Promise<ModelResponse> {
     // Check if request contains images
     const hasImages = this.hasImageContent(options.messages);
 
     if (hasImages && this.multimodalModel) {
-      // Use multimodal model to process images first, then reasoning model
-      return await this.handleMultimodalRequest(options);
-    } else {
-      // Use reasoning model directly
-      return await this.reasoningModel.chat(options);
+      // Use multimodal model to process images first, then primary/fallback model
+      return await this.handleMultimodalRequest(options, useFallback);
     }
+
+    // Use tool-calling model when requested and available
+    if (useFallback && this.toolCallingModel) {
+      logger.info('  [Orchestrator] Using tool-calling model');
+      return await this.toolCallingModel.chat(options);
+    }
+
+    // Default: use reasoning model
+    return await this.reasoningModel.chat(options);
+  }
+
+  /**
+   * Check if a dedicated tool-calling model is configured.
+   */
+  hasToolCallingModel(): boolean {
+    return !!this.toolCallingModel;
   }
 
   /**
    * Handle requests with image content
    */
   private async handleMultimodalRequest(
-    options: ChatCompletionOptions
+    options: ChatCompletionOptions,
+    useFallback: boolean = false
   ): Promise<ModelResponse> {
     if (!this.multimodalModel) {
       throw new ModelError(
@@ -81,6 +115,15 @@ export class ModelOrchestrator {
       options.messages,
       imageDescriptions
     );
+
+    // Now use primary/fallback model with text-only messages
+    if (useFallback && this.toolCallingModel) {
+      logger.info('  [Orchestrator] Forwarding to tool-calling model (fallback mode)...');
+      return await this.toolCallingModel.chat({
+        ...options,
+        messages: messagesWithDescriptions,
+      });
+    }
 
     // Now use reasoning model with text-only messages
     logger.info('Forwarding to reasoning model...');
@@ -168,6 +211,13 @@ export class ModelOrchestrator {
    */
   getMultimodalModel(): KrutrimModel | undefined {
     return this.multimodalModel;
+  }
+
+  /**
+   * Get tool-calling model instance if configured
+   */
+  getToolCallingModel(): KrutrimModel | undefined {
+    return this.toolCallingModel;
   }
 
   /**

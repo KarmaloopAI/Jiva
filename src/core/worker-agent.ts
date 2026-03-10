@@ -40,10 +40,18 @@ export interface WorkerSubtask {
   context?: string;
 }
 
+export interface ToolFailure {
+  toolName: string;
+  args: Record<string, any>;
+  lastError: string;
+  attempts: number;
+}
+
 export interface WorkerResult {
   success: boolean;
   result: string;
   toolsUsed: string[];
+  failedTools: ToolFailure[];
   reasoning: string;
 }
 
@@ -104,7 +112,42 @@ export class WorkerAgent {
 
     const conversationHistory: Message[] = [];
     const toolsUsed: string[] = [];
+    // Tracks every exact tool-call signature (toolName + serialized args) executed
+    // during this subtask. Used to prevent the same call from being repeated in a
+    // later iteration — e.g. reading the same file twice in consecutive turns.
+    const executedToolSignatures = new Set<string>();
+    // Tracks consecutive failures per (toolName:args) signature.
+    // Drives the per-tool circuit breaker: warn at 2, hard-stop at 3.
+    const toolFailureCounts = new Map<string, { count: number; lastError: string }>();
     let iterationCount = 0;
+
+    // ── 2+2 API-level JSON parse failure strategy ─────────────────────────────
+    // Priority: if a dedicated tool-calling LLM is configured, use it from the
+    // very first iteration (it reliably serialises tool args as standard JSON).
+    // The reasoning model then serves as the phase-2 fallback.
+    // If no tool-calling model is configured the roles are reversed: reasoning
+    // model is phase 1 and there is no phase-2 fallback.
+    //
+    // Flow when tool-calling model IS configured:
+    //   Phase 1 – tool-calling model  (up to API_PARSE_FAIL_THRESHOLD=2 failures)
+    //   Phase 2 – reasoning model     (up to SECONDARY_MODEL_ATTEMPTS=2 failures)
+    //   → hard-stop after 4 total failures; failedTools is non-empty so the
+    //     Client's data-driven CompletionSignal fires (prevents infinite retries)
+    //
+    // Flow when NO tool-calling model is configured:
+    //   Phase 1 – reasoning model     (up to API_PARSE_FAIL_THRESHOLD=2 failures)
+    //   → hard-stop immediately (no secondary model available)
+    const API_PARSE_FAIL_THRESHOLD = 2;      // phase-1 failures before switching phases
+    const SECONDARY_MODEL_ATTEMPTS = 2;      // extra attempts on the phase-2 model
+    let apiJsonParseFailures = 0;            // total JSON-parse failures so far
+    // toolCallingIsMain: true when the tool-calling model is the primary model for this run
+    const toolCallingIsMain = this.orchestrator.hasToolCallingModel();
+    // useToolCallingFallback: flag passed to orchestrator.chatWithFallback()
+    //   true  → use the tool-calling model
+    //   false → use the reasoning model
+    let useToolCallingFallback = toolCallingIsMain; // start with tool-calling model if available
+    let phaseSwitched = false;               // true once we have swapped phases
+    const API_JSON_PARSE_FAILURE_SIG = 'api_json_parse:{}'; // key in toolFailureCounts
 
     // Build system prompt for Worker
     const personaPrompt = this.personaManager?.getSystemPromptAddition() || '';
@@ -252,24 +295,132 @@ Please complete this subtask and report your findings.`,
       let response: ModelResponse;
 
       try {
-        response = await this.orchestrator.chat({
+        response = await this.orchestrator.chatWithFallback({
           messages: conversationHistory,
           tools: tools.length > 0 ? tools : undefined,
           temperature: 0.1, // Low temperature for deterministic tool execution
-        });
+        }, useToolCallingFallback);
       } catch (error) {
         // API error (e.g., invalid tool call parameters)
         const errorMsg = error instanceof Error ? error.message : String(error);
         logger.warn(`  [Worker] API error - ${errorMsg.substring(0, 100)}...`);
 
-        // Check if we've used up our retries
+        // Detect the specific "Failed to parse tool call arguments as JSON" pattern.
+        // These 400 errors originate from the model generating malformed JSON for
+        // tool call arguments (e.g. large content with special Unicode characters).
+        // A generic "retry with error feedback" loop cannot fix this — the same model
+        // will keep producing the same malformed output. We need a different approach.
+        const isJsonParseError =
+          errorMsg.includes('Failed to parse tool call arguments as JSON') ||
+          errorMsg.includes('tool_use_failed');
+
+        if (isJsonParseError) {
+          apiJsonParseFailures++;
+          // Record in toolFailureCounts so failedTools is always non-empty on exit.
+          // This ensures the Client's data-driven CompletionSignal fires (strategy=escalate)
+          // rather than the LLM-based path that would return strategy=retry, causing an
+          // infinite correction-subtask loop.
+          toolFailureCounts.set(API_JSON_PARSE_FAILURE_SIG, {
+            count: apiJsonParseFailures,
+            lastError: errorMsg,
+          });
+
+          const totalBudget = API_PARSE_FAIL_THRESHOLD + SECONDARY_MODEL_ATTEMPTS;
+
+          if (!phaseSwitched && apiJsonParseFailures >= API_PARSE_FAIL_THRESHOLD) {
+            // Phase 1 exhausted — attempt a phase switch
+            phaseSwitched = true;
+
+            if (toolCallingIsMain) {
+              // Tool-calling model (primary) failed → fall back to reasoning model
+              useToolCallingFallback = false;
+              logger.warn(
+                `  [Worker] Tool-calling model failed JSON tool-call serialisation ` +
+                `${apiJsonParseFailures} time(s) — switching to reasoning model for ` +
+                `up to ${SECONDARY_MODEL_ATTEMPTS} more attempt(s)`
+              );
+              conversationHistory.push({
+                role: 'user',
+                content:
+                  `NOTE: The previous model had trouble formatting its tool call as valid JSON. ` +
+                  `A different model is now being used. Please re-attempt the task — ` +
+                  `use the same tools but ensure all argument values are valid JSON ` +
+                  `(avoid raw special characters inside string values; escape them if needed).`,
+              });
+              continue; // retry with reasoning model
+            } else if (this.orchestrator.hasToolCallingModel()) {
+              // Reasoning model (primary) failed → switch to tool-calling model
+              useToolCallingFallback = true;
+              logger.warn(
+                `  [Worker] Reasoning model failed JSON tool-call serialisation ` +
+                `${apiJsonParseFailures} time(s) — switching to tool-calling LLM for ` +
+                `up to ${SECONDARY_MODEL_ATTEMPTS} more attempt(s)`
+              );
+              conversationHistory.push({
+                role: 'user',
+                content:
+                  `NOTE: The previous model had trouble formatting its tool call as valid JSON. ` +
+                  `A different model is now being used. Please re-attempt the task — ` +
+                  `use the same tools but ensure all argument values are valid JSON ` +
+                  `(avoid raw special characters inside string values; escape them if needed).`,
+              });
+              continue; // retry with fallback model active
+            } else {
+              // No secondary model configured — hard-stop immediately
+              logger.error(
+                `  [Worker] JSON serialisation failure — no secondary model configured. ` +
+                `Hard-stopping after ${apiJsonParseFailures} attempt(s).`
+              );
+              finalResult =
+                `Task failed: The reasoning model could not generate valid tool-call JSON ` +
+                `after ${apiJsonParseFailures} attempt(s). ` +
+                `Error: ${errorMsg}. ` +
+                `Tip: configure a tool-calling LLM in Jiva settings to enable automatic fallback.`;
+              break;
+            }
+          } else if (apiJsonParseFailures >= totalBudget) {
+            // Phase 2 also exhausted — hard-stop
+            const primaryLabel = toolCallingIsMain ? 'tool-calling' : 'reasoning';
+            const secondaryLabel = toolCallingIsMain ? 'reasoning' : 'tool-calling';
+            logger.error(
+              `  [Worker] Both ${primaryLabel} and ${secondaryLabel} models failed JSON serialisation. ` +
+              `Hard-stopping after ${apiJsonParseFailures} total attempt(s).`
+            );
+            finalResult =
+              `Task failed: Both the ${primaryLabel} model and the ${secondaryLabel} fallback model ` +
+              `could not generate valid tool-call JSON after ${apiJsonParseFailures} total attempt(s). ` +
+              `Error: ${errorMsg}.`;
+            break;
+          }
+
+          // Still within budget — add informative error and let the (possibly switched) model retry
+          logger.info(
+            `  [Worker] JSON parse failure ${apiJsonParseFailures}/${totalBudget} — ` +
+            `retrying with ${useToolCallingFallback ? 'tool-calling model' : 'reasoning model'} ` +
+            `(attempt ${iteration + 2}/${this.maxIterations})`
+          );
+          conversationHistory.push({
+            role: 'user',
+            content:
+              `ERROR: The model produced a tool call with invalid JSON arguments.\n` +
+              `Specific error: ${errorMsg}\n\n` +
+              `This usually happens with large file content containing special characters. ` +
+              `To fix this:\n` +
+              `1. Escape all special characters in string values (\\n, \\t, \\\\, etc.)\n` +
+              `2. Wrap Unicode symbols as plain ASCII equivalents (e.g. use [ ] instead of ☐)\n` +
+              `3. If the content is very long, write it to the file in smaller chunks\n` +
+              `Please retry the tool call with corrected arguments.`,
+          });
+          continue;
+        }
+
+        // Non-JSON-parse API error — regular retry with error feedback
         if (iteration >= this.maxIterations - 1) {
           logger.error(`  [Worker] Max retries reached after API errors`);
           finalResult = `Failed to complete subtask due to repeated errors: ${errorMsg}`;
           break;
         }
 
-        // Add error feedback to conversation so Worker can correct itself
         logger.info(`  [Worker] Retrying with error feedback (attempt ${iteration + 2}/${this.maxIterations})`);
         conversationHistory.push({
           role: 'user',
@@ -294,25 +445,29 @@ Please complete this subtask and report your findings.`,
           return `${tc.function.name}:${JSON.stringify(args)}`;
         });
         
-        // Check if we're about to repeat the same tool call
+        // Check if we're about to repeat the same tool call (name-only check)
         const lastToolCalls = toolsUsed.slice(-2);
         const isRepetitive = proposedTools.some(proposed => {
           const toolName = proposed.split(':')[0];
           return lastToolCalls.filter(t => t === toolName).length >= 2;
         });
 
-        if (isRepetitive && iteration >= 2) {
+        // Exact-signature check: catches same tool + same args within a subtask.
+        // This catches the case where the model reads the same file twice in
+        // consecutive iterations before the name-only check triggers.
+        const exactDuplicate = proposedTools.some(sig => executedToolSignatures.has(sig));
+
+        if ((isRepetitive && iteration >= 2) || exactDuplicate) {
           logger.warn(`  [Worker] Detected repetitive tool usage - interrupting loop`);
           conversationHistory.push({
             role: 'user',
-            content: `STOP: You are repeating the same action multiple times. This tool has already succeeded. 
+            content: `STOP: You are calling the same tool with the same arguments repeatedly. Do NOT repeat it again.
 
-For browser tasks:
-1. You already created a new tab - do NOT create another one
-2. Now use playwright__browser_navigate to go to the actual URL
-3. If navigation is already done, the task is COMPLETE - just provide your summary
+You have two choices:
+1. If there is a DIFFERENT next step required to complete the subtask, take it now using the appropriate tool.
+2. If all required work is genuinely complete, respond with a thorough description of everything accomplished — do NOT call any more tools.
 
-Do NOT call the same tool again. Either move to the NEXT required step, or if the task is complete, provide your final summary WITHOUT any tool calls.`,
+Do not assume the task is complete just because one step succeeded. Review what the subtask requires and check whether you have actually finished all of it.`,
           });
           continue; // Skip executing the repetitive tools, let model reconsider
         }
@@ -321,8 +476,13 @@ Do NOT call the same tool again. Either move to the NEXT required step, or if th
           const toolName = toolCall.function.name;
           logger.info(`  [Worker] Tool: ${toolName}`);
 
+          // Parse args outside the try block so the catch block can reference
+          // them for the failure signature (circuit breaker key).
+          let args: Record<string, any> = {};
+          try { args = JSON.parse(toolCall.function.arguments); } catch { /* use empty */ }
+          const failureSig = `${toolName}:${JSON.stringify(args)}`;
+
           try {
-            const args = JSON.parse(toolCall.function.arguments);
             orchestrationLogger.logWorkerToolCall(toolName, args);
 
             // Handle spawn_agent specially
@@ -340,6 +500,7 @@ Do NOT call the same tool again. Either move to the NEXT required step, or if th
               });
 
               toolsUsed.push(toolName);
+              executedToolSignatures.add(`${toolName}:${JSON.stringify(args)}`);
 
               const resultText = `Sub-agent spawned with persona '${spawnResult.persona}' completed the task.
 
@@ -362,6 +523,7 @@ Tools used: ${spawnResult.toolsUsed.join(', ')}`;
             const result = await this.mcpManager.getClient().executeTool(toolName, args);
 
             toolsUsed.push(toolName);
+            executedToolSignatures.add(`${toolName}:${JSON.stringify(args)}`);
 
             // Check if tool returned images (multimodal support)
             let toolResultText: string;
@@ -386,15 +548,40 @@ Tools used: ${spawnResult.toolsUsed.join(', ')}`;
 
             logger.debug(`  ✓ [Worker] Tool ${toolName} completed`);
           } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error);
             logger.error(`  ✗ [Worker] Tool ${toolName} failed:`, error);
             orchestrationLogger.logWorkerToolResult(toolName, false, false);
 
+            // Always push the raw tool error so the LLM sees what happened
             conversationHistory.push({
               role: 'tool',
               name: toolName,
               tool_call_id: toolCall.id,
-              content: `Error: ${error instanceof Error ? error.message : String(error)}`,
+              content: `Error: ${errorMsg}`,
             });
+
+            // Per-tool circuit breaker: track failure count by exact (tool, args) signature
+            const prev = toolFailureCounts.get(failureSig) || { count: 0, lastError: '' };
+            const newCount = prev.count + 1;
+            toolFailureCounts.set(failureSig, { count: newCount, lastError: errorMsg });
+
+            if (newCount === 2) {
+              // Second failure: explicit warning to the LLM to change approach
+              conversationHistory.push({
+                role: 'user',
+                content: `WARNING: Tool \`${toolName}\` has now failed twice with the same arguments.\nError: ${errorMsg}\n\nDo NOT call this tool with the same arguments again. Try a different approach, different arguments, or a completely different tool to achieve the same goal.`,
+              });
+              logger.warn(`  [Worker] Tool ${toolName} has failed twice — warning injected`);
+            } else if (newCount >= 3) {
+              // Third failure: hard stop — block the tool and force honest exit
+              // Add to executedToolSignatures so the exact-dedup guard prevents further calls
+              executedToolSignatures.add(failureSig);
+              conversationHistory.push({
+                role: 'user',
+                content: `HARD STOP: Tool \`${toolName}\` has failed ${newCount} times and will NOT succeed with these arguments.\nFinal error: ${errorMsg}\n\nYou MUST stop attempting this tool. Respond now with an honest report of what you tried and why it failed. Do not call any more tools — just describe the failure clearly so the user can be informed.`,
+              });
+              logger.warn(`  [Worker] Tool ${toolName} circuit breaker triggered after ${newCount} failures`);
+            }
           }
         }
 
@@ -426,7 +613,6 @@ Tools used: ${spawnResult.toolsUsed.join(', ')}`;
         // After processing tool calls, check if we should prompt for completion
         // This helps Worker recognize when task is done instead of over-iterating
         const shouldPromptCompletion = this.shouldPromptForCompletion(
-          subtask.instruction,
           toolsUsed,
           iteration
         );
@@ -435,7 +621,14 @@ Tools used: ${spawnResult.toolsUsed.join(', ')}`;
           logger.debug(`  [Worker] Prompting for task completion check`);
           conversationHistory.push({
             role: 'user',
-            content: `You have successfully executed the required tools. Please confirm if the subtask is now complete and provide a summary of what was accomplished. If complete, do not call any more tools - just respond with your summary.`,
+            content: `Your most recent tools have run. Review the subtask instruction and the tool results above.
+
+Is the subtask fully complete?
+
+- If YES (all required work is done): respond with a thorough, detailed account of exactly what was accomplished — include file paths, content written, commands run, outputs observed, and any other relevant facts. Do NOT call any more tools.
+- If NO (more work remains): continue immediately with the next required tool call. Do not stop early.
+
+IMPORTANT: Do not claim completion unless the core deliverable (e.g. the file written, the data fetched, the action performed) is confirmed done. A directory being created is NOT the same as the file inside it being written.`,
           });
         }
 
@@ -465,28 +658,54 @@ Tools used: ${spawnResult.toolsUsed.join(', ')}`;
       });
 
       if (hasSuccessfulTools && !hasToolFailures) {
-        // Tools executed successfully, just model didn't stop naturally
-        finalResult = `Task work completed (${toolsUsed.length} operations performed). Max iterations reached but all tool operations succeeded.`;
-        logger.info(`[Worker] Max iterations reached, but ${toolsUsed.length} tools executed successfully`);
+        // Tools ran but the model never produced a conclusive text response.
+        // Report the actual tools used so the Client coherence check can verify
+        // whether the right work was done — do NOT claim overall success here.
+        finalResult = `Max iterations reached. Tools executed (${toolsUsed.length}): ${toolsUsed.join(', ')}. The model did not produce a final confirmation. Validation required.`;
+        logger.warn(`[Worker] Max iterations reached after ${toolsUsed.length} tool(s) — no conclusive response from model`);
       } else if (hasToolFailures) {
-        finalResult = 'Subtask encountered errors and could not be completed within iteration limit.';
-        logger.warn(`[Worker] Max iterations reached with tool failures`);
+        // Build a specific failure summary from the circuit breaker data
+        const failureSummary = [...toolFailureCounts.entries()]
+          .filter(([, v]) => v.count > 0)
+          .map(([sig, v]) => {
+            const name = sig.split(':')[0];
+            return `${name} (${v.count} attempt${v.count > 1 ? 's' : ''}) — ${v.lastError}`;
+          })
+          .join('; ');
+        finalResult = `Subtask could not be completed. Tool failures: ${failureSummary || 'see errors above'}.`;
+        logger.warn(`[Worker] Max iterations reached with tool failures: ${failureSummary}`);
       } else {
         finalResult = 'Subtask could not be completed within iteration limit.';
         logger.warn(`[Worker] Max iterations reached with no work done`);
       }
     }
 
-    // Determine success: true if we got a result and it doesn't indicate failure
+    // Build structured failedTools list from the circuit breaker map.
+    // Include all failures (count >= 1) so even a single failed attempt is
+    // visible to Client and synthesis — not just those that hit the 3-attempt cap.
+    const failedTools: ToolFailure[] = [...toolFailureCounts.entries()].map(([sig, v]) => {
+      const colonIdx = sig.indexOf(':');
+      const tName = sig.substring(0, colonIdx);
+      let tArgs: Record<string, any> = {};
+      try { tArgs = JSON.parse(sig.substring(colonIdx + 1)); } catch { /* ignore */ }
+      return { toolName: tName, args: tArgs, lastError: v.lastError, attempts: v.count };
+    });
+
+    // Determine success: only true when the model produced a natural conclusive
+    // response (broke out of the loop normally). The max-iterations fallback
+    // paths are all treated as non-success so the Client validates properly.
     const success = !!finalResult &&
                    !finalResult.includes('could not be completed') &&
-                   !finalResult.includes('encountered errors');
+                   !finalResult.includes('encountered errors') &&
+                   !finalResult.includes('Max iterations reached') &&
+                   !finalResult.includes('Validation required');
     orchestrationLogger.logWorkerComplete(success, toolsUsed, iterationCount);
 
     return {
       success,
       result: finalResult,
       toolsUsed,
+      failedTools,
       reasoning: reasoning || 'Task executed',
     };
   }
@@ -502,7 +721,6 @@ Tools used: ${spawnResult.toolsUsed.join(', ')}`;
    * This helps prevent over-iteration by asking Worker to confirm task is done
    */
   private shouldPromptForCompletion(
-    instruction: string,
     toolsUsed: string[],
     currentIteration: number
   ): boolean {
@@ -530,30 +748,20 @@ Tools used: ${spawnResult.toolsUsed.join(', ')}`;
       return false;
     }
 
-    // Check if this looks like a completion-oriented task
-    const completionIndicators = [
-      'create', 'write', 'generate', 'build', 'make',
-      'read', 'list', 'find', 'search', 'get',
-      'update', 'modify', 'edit', 'change',
-      'delete', 'remove', 'open', 'navigate', 'browse',
-    ];
-
-    const instructionLower = instruction.toLowerCase();
-    const hasCompletionIndicator = completionIndicators.some(indicator =>
-      instructionLower.includes(indicator)
-    );
-
-    // Prompt if we've seen successful file/content or browser operations
+    // Prompt only when genuinely substantive operations have completed.
+    // 'create_directory' is intentionally excluded — it is a setup step, not
+    // evidence that the main deliverable (e.g. file content) has been written.
+    // Pure tool-free responses (e.g. "explain X") never reach this point because
+    // no tools means hasSignificantOperations is false.
     const hasSignificantOperations = toolsUsed.some(tool =>
       tool.includes('write') ||
-      tool.includes('create') ||
       tool.includes('edit') ||
       tool.includes('read') ||
       tool.includes('browser') ||
-      tool.includes('navigate')
+      tool.includes('navigate') ||
+      (tool.includes('create') && !tool.includes('directory') && !tool.includes('dir'))
     );
 
-    // Prompt if we have completion indicators and significant operations
-    return hasCompletionIndicator && hasSignificantOperations && toolsUsed.length >= 2;
+    return hasSignificantOperations && toolsUsed.length >= 2;
   }
 }

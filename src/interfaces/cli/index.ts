@@ -82,6 +82,13 @@ program
           console.log();
         }
         
+        if (config.models?.toolCalling) {
+          console.log(chalk.bold('Tool-Calling Model:'), chalk.green('(primary for tool calls)'));
+          console.log(chalk.gray('  Endpoint:'), config.models.toolCalling.endpoint);
+          console.log(chalk.gray('  Model:'), config.models.toolCalling.defaultModel);
+          console.log();
+        }
+        
         const mcpServers = configManager.getMCPServers();
         if (Object.keys(mcpServers).length > 0) {
           console.log(chalk.bold('MCP Servers:'));
@@ -140,6 +147,7 @@ program
         modelConfig = {
           reasoning: configManager.getReasoningModel(),
           multimodal: configManager.getMultimodalModel(),
+          toolCalling: configManager.getToolCallingModel(),
         };
         mcpServers = configManager.getMCPServers();
       }
@@ -175,6 +183,20 @@ program
         });
       }
 
+      // Tool-calling LLM: optional fallback for when the reasoning model generates
+      // invalid JSON tool-call arguments (400 "Failed to parse tool call arguments as JSON")
+      let toolCallingModel;
+      const toolCallingModelConfig = modelConfig.toolCalling;
+      if (toolCallingModelConfig) {
+        toolCallingModel = createKrutrimModel({
+          endpoint: toolCallingModelConfig.endpoint,
+          apiKey: toolCallingModelConfig.apiKey,
+          model: toolCallingModelConfig.defaultModel,
+          type: 'tool-calling',
+          useHarmonyFormat: toolCallingModelConfig.useHarmonyFormat,
+        });
+      }
+
       // Test model connectivity before proceeding
       console.log(chalk.gray('Testing model connectivity...\n'));
 
@@ -200,12 +222,24 @@ program
         }
       }
 
+      if (toolCallingModel) {
+        const toolCallingTest = await toolCallingModel.testConnectivity();
+        if (!toolCallingTest.success) {
+          console.log(chalk.yellow('⚠ Tool-calling model connection failed (continuing without dedicated tool-call model)'));
+          console.log(chalk.gray(`  Error: ${toolCallingTest.error}`));
+          toolCallingModel = undefined;
+        } else {
+          console.log(chalk.green(`✓ Tool-calling model connected (${toolCallingTest.latency}ms) — primary for tool calls`));
+        }
+      }
+
       console.log(''); // Empty line for spacing
 
       // Create orchestrator
       const orchestrator = new ModelOrchestrator({
         reasoningModel,
         multimodalModel,
+        toolCallingModel,
       });
 
       // Determine workspace directory first
@@ -542,6 +576,7 @@ program
         modelConfig = {
           reasoning: configManager.getReasoningModel(),
           multimodal: configManager.getMultimodalModel(),
+          toolCalling: configManager.getToolCallingModel(),
         };
         mcpServers = configManager.getMCPServers();
       }
@@ -577,6 +612,20 @@ program
         });
       }
 
+      // Tool-calling LLM: optional fallback for when the reasoning model generates
+      // invalid JSON tool-call arguments (400 "Failed to parse tool call arguments as JSON")
+      let toolCallingModel;
+      const toolCallingModelCfg = configManager.getToolCallingModel();
+      if (toolCallingModelCfg) {
+        toolCallingModel = createKrutrimModel({
+          endpoint: toolCallingModelCfg.endpoint,
+          apiKey: toolCallingModelCfg.apiKey,
+          model: toolCallingModelCfg.defaultModel,
+          type: 'tool-calling',
+          useHarmonyFormat: toolCallingModelCfg.useHarmonyFormat,
+        });
+      }
+
       // Test model connectivity before proceeding
       console.log(chalk.gray('Testing model connectivity...\n'));
 
@@ -602,12 +651,24 @@ program
         }
       }
 
+      if (toolCallingModel) {
+        const toolCallingTest = await toolCallingModel.testConnectivity();
+        if (!toolCallingTest.success) {
+          console.log(chalk.yellow('⚠ Tool-calling model connection failed (continuing without dedicated tool-call model)'));
+          console.log(chalk.gray(`  Error: ${toolCallingTest.error}`));
+          toolCallingModel = undefined;
+        } else {
+          console.log(chalk.green(`✓ Tool-calling model connected (${toolCallingTest.latency}ms) — primary for tool calls`));
+        }
+      }
+
       console.log(''); // Empty line for spacing
 
       // Create orchestrator
       const orchestrator = new ModelOrchestrator({
         reasoningModel,
         multimodalModel,
+        toolCallingModel,
       });
 
       // Determine workspace directory first

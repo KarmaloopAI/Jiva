@@ -25,7 +25,7 @@ const ModelConfigSchema = z.object({
   name: z.string(),
   endpoint: z.string().url(),
   apiKey: z.string(),
-  type: z.enum(['reasoning', 'multimodal']),
+  type: z.enum(['reasoning', 'multimodal', 'tool-calling']),
   defaultModel: z.string(),
   useHarmonyFormat: z.boolean().optional(),
 });
@@ -34,6 +34,7 @@ const JivaConfigSchema = z.object({
   models: z.object({
     reasoning: ModelConfigSchema.optional(),
     multimodal: ModelConfigSchema.optional(),
+    toolCalling: ModelConfigSchema.optional(),
   }),
   mcpServers: z.record(MCPServerConfigSchema).optional(),
   workspace: z.object({
@@ -89,6 +90,15 @@ export class ConfigManager {
 
   getMultimodalModel(): ModelConfig | undefined {
     return this.store.get('models.multimodal');
+  }
+
+  setToolCallingModel(config: ModelConfig) {
+    const validated = ModelConfigSchema.parse(config);
+    this.store.set('models.toolCalling', validated);
+  }
+
+  getToolCallingModel(): ModelConfig | undefined {
+    return this.store.get('models.toolCalling');
   }
 
   addMCPServer(name: string, config: MCPServerConfig) {

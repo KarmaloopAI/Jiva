@@ -263,17 +263,28 @@ NEXT_ACTION: <what to do next, if CONTINUE>`;
   /**
    * Create final response for user
    */
-  async synthesizeResponse(allResults: { subtask: string; result: string }[], agentContext?: AgentContext): Promise<string> {
+  async synthesizeResponse(allResults: { subtask: string; result: string; approved?: boolean }[], agentContext?: AgentContext): Promise<string> {
     logger.info('[Manager] Synthesizing final response...');
     orchestrationLogger.logManagerSynthesize(allResults.length);
 
-    const synthesisPrompt = `Based on all the work completed, create a final response for the user.
+    const approvedResults = allResults.filter(r => r.approved !== false);
+    const failedResults = allResults.filter(r => r.approved === false);
 
-Completed Work:
-${allResults.map((r, i) => `${i + 1}. ${r.subtask}\nResult: ${r.result}`).join('\n\n')}
+    const completedSection = approvedResults.length > 0
+      ? `Validated Completed Work:\n${approvedResults.map((r, i) => `${i + 1}. ${r.subtask}\nResult: ${r.result}`).join('\n\n')}`
+      : 'No subtasks were validated as successfully completed.';
 
-Create a clear, helpful response that directly answers the user's original request.
-Present information clearly with relevant details, code snippets, or examples as appropriate.`;
+    const failedSection = failedResults.length > 0
+      ? `\n\nSubtasks That Did NOT Complete Successfully (Client validation rejected these):\n${failedResults.map((r, i) => `${i + 1}. ${r.subtask}\nWorker output (unvalidated): ${r.result}`).join('\n\n')}`
+      : '';
+
+    const synthesisPrompt = `Based on the work below, create a final response for the user.
+
+IMPORTANT: Some subtasks may not have been completed successfully — the Client validation agent explicitly rejected them. You MUST be honest about what was and was not accomplished. Do NOT claim files were created, actions were performed, or results were produced if the corresponding subtask is listed as failed.
+
+${completedSection}${failedSection}
+
+Create a clear, honest response that accurately reflects what was accomplished and what was not. If work failed, explain what happened and what the user should expect.`;
 
     this.conversationHistory.push({
       role: 'user',
