@@ -4,15 +4,15 @@
   "description": "Jivam - Desktop UI for the Jiva autonomous AI agent",
   "main": "dist-electron/main.js",
   "scripts": {
-    "dev": "NODE_OPTIONS='' vite",
-    "build": "NODE_OPTIONS='' vite build",
-    "package": "NODE_OPTIONS='' npm run build && electron-builder",
-    "dist:mac": "NODE_OPTIONS='' npm run build && electron-builder --mac",
-    "dist:win": "NODE_OPTIONS='' npm run build && electron-builder --win",
-    "dist:linux": "NODE_OPTIONS='' npm run build && electron-builder --linux",
-    "dist:all": "NODE_OPTIONS='' npm run build && electron-builder --mac --win --linux",
+    "dev": "cross-env NODE_OPTIONS= vite",
+    "build": "cross-env NODE_OPTIONS= vite build",
+    "package": "cross-env NODE_OPTIONS= npm run build && electron-builder",
+    "dist:mac": "cross-env NODE_OPTIONS= npm run build && electron-builder --mac",
+    "dist:win": "cross-env NODE_OPTIONS= npm run build && electron-builder --win",
+    "dist:linux": "cross-env NODE_OPTIONS= npm run build && electron-builder --linux",
+    "dist:all": "cross-env NODE_OPTIONS= npm run build && electron-builder --mac --win --linux",
     "preview": "vite preview",
-    "start": "NODE_OPTIONS='' VITE_DEV_SERVER_URL=http://localhost:5173 electron ."
+    "start": "cross-env NODE_OPTIONS= VITE_DEV_SERVER_URL=http://localhost:5173 electron .",
   },
   "keywords": [],
   "author": "Karmaloop AI",
@@ -43,6 +43,7 @@
     "typescript": "^5.9.3",
     "vite": "^5.4.21",
     "vite-plugin-electron": "^0.28.8",
-    "vite-plugin-electron-renderer": "^0.14.6"
+    "vite-plugin-electron-renderer": "^0.14.6",
+    "cross-env": "^7.0.3"
   }
 }
