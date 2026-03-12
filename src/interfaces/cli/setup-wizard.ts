@@ -131,6 +131,64 @@ export async function runSetupWizard(): Promise<void> {
     logger.success('Multimodal model configured');
   }
 
+  // ── Tool-Calling Model ────────────────────────────────────────────────────
+  console.log(chalk.bold('\nTool-Calling Model Configuration (Optional)'));
+  console.log(chalk.gray('A dedicated model that reliably formats tool calls as standard JSON.'));
+  console.log(chalk.gray('When configured it is used as the PRIMARY model for tool execution,'));
+  console.log(chalk.gray('with the reasoning model acting as a secondary fallback.\n'));
+
+  const { configureToolCalling } = await inquirer.prompt([
+    {
+      type: 'confirm',
+      name: 'configureToolCalling',
+      message: 'Would you like to configure a tool-calling model?',
+      default: false,
+    },
+  ]);
+
+  if (configureToolCalling) {
+    const toolCallingAnswers = await inquirer.prompt([
+      {
+        type: 'input',
+        name: 'endpoint',
+        message: 'Tool-Calling API Endpoint URL:',
+        default: 'https://cloud.olakrutrim.com/v1/chat/completions',
+        validate: (input: string) => {
+          try {
+            new URL(input);
+            return true;
+          } catch {
+            return 'Please enter a valid URL';
+          }
+        },
+      },
+      {
+        type: 'password',
+        name: 'apiKey',
+        message: 'Tool-Calling API Key:',
+        default: reasoningAnswers.apiKey,
+        validate: (input: string) => input.length > 0 || 'API key is required',
+      },
+      {
+        type: 'input',
+        name: 'model',
+        message: 'Tool-Calling model name:',
+        default: 'gpt-4o-mini',
+      },
+    ]);
+
+    configManager.setToolCallingModel({
+      name: 'tool-calling',
+      endpoint: toolCallingAnswers.endpoint,
+      apiKey: toolCallingAnswers.apiKey,
+      type: 'tool-calling',
+      defaultModel: toolCallingAnswers.model,
+      useHarmonyFormat: false,
+    });
+
+    logger.success('Tool-calling model configured');
+  }
+
   // MCP Servers Configuration
   console.log(chalk.bold('\nMCP Servers Configuration'));
   console.log(chalk.gray('Setting up default MCP servers (filesystem, mcp-shell-server)...\n'));
@@ -170,6 +228,7 @@ export async function updateConfiguration(): Promise<void> {
       choices: [
         { name: 'Reasoning Model', value: 'reasoning' },
         { name: 'Multimodal Model', value: 'multimodal' },
+        { name: 'Tool-Calling Model', value: 'tool-calling' },
         { name: 'MCP Servers', value: 'mcp' },
         { name: 'Debug Mode', value: 'debug' },
         { name: 'View Configuration', value: 'view' },
@@ -185,6 +244,9 @@ export async function updateConfiguration(): Promise<void> {
       break;
     case 'multimodal':
       await updateMultimodalModel();
+      break;
+    case 'tool-calling':
+      await updateToolCallingModel();
       break;
     case 'mcp':
       await manageMCPServers();
@@ -294,6 +356,45 @@ async function updateMultimodalModel() {
   });
 
   logger.success('Multimodal model updated');
+}
+
+async function updateToolCallingModel() {
+  const current = configManager.getToolCallingModel();
+
+  console.log(chalk.gray('\nA dedicated tool-calling model is used as the PRIMARY model for tool'));
+  console.log(chalk.gray('execution. The reasoning model acts as the secondary fallback.\n'));
+
+  const answers = await inquirer.prompt([
+    {
+      type: 'input',
+      name: 'endpoint',
+      message: 'Tool-Calling API Endpoint URL:',
+      default: current?.endpoint || 'https://cloud.olakrutrim.com/v1/chat/completions',
+    },
+    {
+      type: 'password',
+      name: 'apiKey',
+      message: 'Tool-Calling API Key:',
+      default: current?.apiKey,
+    },
+    {
+      type: 'input',
+      name: 'model',
+      message: 'Tool-Calling model name:',
+      default: current?.defaultModel || 'gpt-4o-mini',
+    },
+  ]);
+
+  configManager.setToolCallingModel({
+    name: 'tool-calling',
+    endpoint: answers.endpoint,
+    apiKey: answers.apiKey,
+    type: 'tool-calling',
+    defaultModel: answers.model,
+    useHarmonyFormat: false,
+  });
+
+  logger.success('Tool-calling model updated');
 }
 
 async function manageMCPServers() {

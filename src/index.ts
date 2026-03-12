@@ -27,3 +27,8 @@ export { logger, LogLevel } from './utils/logger.js';
 export * from './utils/errors.js';
 export * from './models/base.js';
 export * from './models/harmony.js';
+
+// Agent context and completion signal types
+export type { AgentContext } from './core/types/agent-context.js';
+export type { CompletionSignal } from './core/types/completion-signal.js';
+export { serializeAgentContext } from './core/utils/serialize-agent-context.js';

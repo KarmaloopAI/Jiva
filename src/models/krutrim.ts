@@ -19,7 +19,7 @@ export interface KrutrimConfig {
   endpoint: string;
   apiKey: string;
   model: string;
-  type: 'reasoning' | 'multimodal';
+  type: 'reasoning' | 'multimodal' | 'tool-calling';
   useHarmonyFormat?: boolean; // Use Harmony format for tools (Krutrim-specific), defaults to false
 }
 
@@ -35,12 +35,13 @@ export class KrutrimModel implements IModel {
   }
 
   supportsToolCalling(): boolean {
-    // Only reasoning model (gpt-oss-120b) supports tool calling
-    return this.config.type === 'reasoning';
+    // Both the reasoning model and dedicated tool-calling model support tool calling
+    return this.config.type === 'reasoning' || this.config.type === 'tool-calling';
   }
 
   async chat(options: ChatCompletionOptions): Promise<ModelResponse> {
-    const isReasoningModel = this.config.type === 'reasoning';
+    // 'tool-calling' models are treated as reasoning models for tool-call formatting purposes
+    const isReasoningModel = this.config.type === 'reasoning' || this.config.type === 'tool-calling';
 
     // Retry logic for transient errors (WAF/rate limiting/server errors)
     const maxRetries = 3;

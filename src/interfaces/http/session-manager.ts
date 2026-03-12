@@ -159,9 +159,28 @@ export class SessionManager extends EventEmitter {
         useHarmonyFormat: true, // gpt-oss-120b requires Harmony format
       });
 
+      // Tool-calling model: when configured, serves as the PRIMARY model for tool-call
+      // execution (reliable standard-JSON tool formatting). The reasoning model acts as
+      // the secondary fallback.
+      // Configure via JIVA_TOOL_CALLING_MODEL_BASE_URL / JIVA_TOOL_CALLING_MODEL_API_KEY /
+      // JIVA_TOOL_CALLING_MODEL_NAME environment variables.
+      const tcEndpoint = process.env.JIVA_TOOL_CALLING_MODEL_BASE_URL;
+      const tcApiKey   = process.env.JIVA_TOOL_CALLING_MODEL_API_KEY;
+      const tcModel    = process.env.JIVA_TOOL_CALLING_MODEL_NAME;
+      const toolCallingModel = (tcEndpoint && tcApiKey && tcModel)
+        ? createKrutrimModel({
+            endpoint: tcEndpoint,
+            apiKey: tcApiKey,
+            model: tcModel,
+            type: 'tool-calling',
+            useHarmonyFormat: false, // standard OpenAI format for tool-calling LLMs
+          })
+        : undefined;
+
       const orchestrator = new ModelOrchestrator({
         reasoningModel,
         multimodalModel: undefined,
+        toolCallingModel,
       });
 
       // Initialize MCP servers per-session
