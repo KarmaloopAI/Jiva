@@ -54,6 +54,14 @@ export interface ChatCompletionOptions {
   temperature?: number;
   maxTokens?: number;
   stream?: boolean;
+  /**
+   * Controls how much reasoning the model applies before responding.
+   * Supported by gpt-oss-120b and other reasoning-class models.
+   * "low"    — fast, minimal reasoning (good for connectivity tests / simple tasks)
+   * "medium" — balanced (good for tool-execution workers)
+   * "high"   — most thorough (best for planning, complex code changes, orchestration)
+   */
+  reasoningEffort?: 'low' | 'medium' | 'high';
 }
 
 export interface IModel {

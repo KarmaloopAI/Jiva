@@ -110,23 +110,40 @@ CORRECT - Do this:
 }
 
 /**
- * Formats messages into Harmony format
+ * Formats messages into Harmony format.
+ *
+ * Key transformations:
+ * - developer message: tool definitions are appended once (if not already present)
+ * - role:'tool' messages: converted to role:'user' since Harmony has no native tool-result role;
+ *   the model understands tool results as user messages providing output context
+ * - assistant messages: passed through unchanged (they may contain <|call|> tokens)
  */
 export function formatMessagesForHarmony(
   messages: HarmonyMessage[],
   tools?: HarmonyToolDefinition[]
 ): HarmonyMessage[] {
   const formattedMessages: HarmonyMessage[] = [];
+  let toolsInjected = false;
 
   // Process messages based on role hierarchy
   for (const msg of messages) {
-    if (msg.role === 'developer' && tools && tools.length > 0) {
-      // Inject tool definitions into developer message
+    if (msg.role === 'developer' && tools && tools.length > 0 && !toolsInjected) {
+      // Inject tool definitions into the first developer/system message (only once)
       const toolSection = formatToolsForHarmony(tools);
       const existingContent = typeof msg.content === 'string' ? msg.content : '';
       formattedMessages.push({
         ...msg,
         content: `${existingContent}\n\n${toolSection}`,
+      });
+      toolsInjected = true;
+    } else if (msg.role === 'tool') {
+      // In Harmony format there is no native tool-result message role.
+      // Convert to a user message so the model sees the tool output as conversation context.
+      const toolName = msg.name || 'tool';
+      const resultText = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+      formattedMessages.push({
+        role: 'user',
+        content: `<tool_result name="${toolName}">\n${resultText}\n</tool_result>`,
       });
     } else {
       formattedMessages.push(msg);

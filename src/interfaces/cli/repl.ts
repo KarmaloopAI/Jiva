@@ -9,13 +9,21 @@ import { DualAgent } from '../../core/dual-agent.js';
 import { logger } from '../../utils/logger.js';
 import { orchestrationLogger } from '../../utils/orchestration-logger.js';
 import { formatForCLI } from '../../utils/markdown.js';
+import type { IAgent } from '../../core/agent-interface.js';
+
+export type { IAgent };
 
 export interface REPLOptions {
-  agent: DualAgent;
+  agent: IAgent;
+  /**
+   * When true (code mode + --plan flag), each user message triggers a plan-then-approve
+   * flow before the agent executes. Only effective when the agent implements `plan()`.
+   */
+  planMode?: boolean;
 }
 
 export async function startREPL(options: REPLOptions): Promise<void> {
-  const { agent } = options;
+  const { agent, planMode = false } = options;
 
   console.log(chalk.bold.cyan('\n∞ Jiva Agent - Interactive Mode\n'));
   console.log(chalk.gray('Type your message and press Enter. Type /help for commands or /exit to quit.\n'));
@@ -120,11 +128,52 @@ export async function startREPL(options: REPLOptions): Promise<void> {
       continue;
     }
 
-    // Process message with agent
+    // ── Plan-then-approve flow (code mode + --plan flag) ───────────────────
+    let messageToSend = trimmedMessage;
+
+    if (planMode && typeof (agent as any).plan === 'function') {
+      const planSpinner = ora('Exploring codebase and generating plan...').start();
+      let planText = '';
+      try {
+        planText = await (agent as any).plan(trimmedMessage);
+        planSpinner.stop();
+      } catch (e) {
+        planSpinner.stop();
+        console.log(chalk.red('\n✗ Planning failed:'), e instanceof Error ? e.message : String(e));
+        console.log('');
+        continue;
+      }
+
+      console.log(chalk.bold.cyan('\n── Implementation Plan ──────────────────────────────────────────\n'));
+      console.log(formatForCLI(planText));
+      console.log(chalk.bold.cyan('─────────────────────────────────────────────────────────────────\n'));
+
+      const { approved } = await inquirer.prompt([{
+        type: 'confirm',
+        name: 'approved',
+        message: chalk.bold('Implement this plan?'),
+        default: true,
+        prefix: '',
+      }]);
+
+      if (!approved) {
+        console.log(chalk.gray('\nCancelled. Refine your request and try again.\n'));
+        continue;
+      }
+
+      // Inject the approved plan so the agent knows what to implement
+      messageToSend =
+        `${trimmedMessage}\n\n` +
+        `[The following implementation plan was reviewed and approved by the user. ` +
+        `Implement it exactly as described.]\n\n${planText}`;
+      console.log('');
+    }
+
+    // ── Execute ─────────────────────────────────────────────────────────────
     const spinner = ora('Thinking...').start();
 
     try {
-      const response = await agent.chat(trimmedMessage);
+      const response = await agent.chat(messageToSend);
 
       spinner.stop();
 
@@ -161,7 +210,7 @@ function showHelp() {
   console.log('');
 }
 
-function showHistory(agent: DualAgent) {
+function showHistory(agent: IAgent) {
   const history = agent.getConversationHistory();
 
   console.log(chalk.bold('\nConversation History:'));
@@ -183,7 +232,7 @@ function showHistory(agent: DualAgent) {
   console.log('');
 }
 
-function showTools(agent: DualAgent) {
+function showTools(agent: IAgent) {
   const tools = agent.getMCPManager().getClient().getAllTools();
 
   console.log(chalk.bold(`\nAvailable Tools (${tools.length}):`));
@@ -199,7 +248,7 @@ function showTools(agent: DualAgent) {
   console.log('');
 }
 
-function showServers(agent: DualAgent) {
+function showServers(agent: IAgent) {
   const serverStatus = agent.getMCPManager().getServerStatus();
 
   console.log(chalk.bold('\nMCP Servers:'));
@@ -218,7 +267,7 @@ function showServers(agent: DualAgent) {
   console.log('');
 }
 
-async function handleSaveConversation(agent: DualAgent) {
+async function handleSaveConversation(agent: IAgent) {
   const conversationManager = agent.getConversationManager();
 
   if (!conversationManager) {
@@ -237,7 +286,7 @@ async function handleSaveConversation(agent: DualAgent) {
   }
 }
 
-async function handleLoadConversation(agent: DualAgent) {
+async function handleLoadConversation(agent: IAgent) {
   const conversationManager = agent.getConversationManager();
 
   if (!conversationManager) {
@@ -292,7 +341,7 @@ async function handleLoadConversation(agent: DualAgent) {
   }
 }
 
-async function handleListConversations(agent: DualAgent) {
+async function handleListConversations(agent: IAgent) {
   const conversationManager = agent.getConversationManager();
 
   if (!conversationManager) {

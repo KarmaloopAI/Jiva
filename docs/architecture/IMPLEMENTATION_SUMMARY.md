@@ -88,27 +88,25 @@ src/
 
 ### Dual-Agent System
 
-**New in v0.2.1:** Jiva now uses a two-agent architecture for better separation of concerns:
+**Updated in v0.3.4:** Jiva uses a streamlined two-agent architecture:
 
 1. **DualAgent** (`src/core/dual-agent.ts`)
    - Orchestrates Manager and Worker agents
    - Implements three-phase execution: Planning → Execution → Synthesis
+   - Routes simple conversational messages directly (no Worker subtasks)
    - Manages conversation history and auto-save
-   - Coordinates task breakdown and result aggregation
 
 2. **ManagerAgent** (`src/core/manager-agent.ts`)
-   - **Role:** High-level planning and coordination
-   - Creates execution plans by breaking down user requests
-   - Reviews Worker results and decides next actions
+   - **Role:** High-level planning, coordination, and synthesis
+   - Creates execution plans by decomposing user requests into subtasks
    - Synthesizes final responses from all subtask results
+   - Answers simple conversational messages directly (without Worker)
    - Does NOT execute tools directly
 
 3. **WorkerAgent** (`src/core/worker-agent.ts`)
    - **Role:** Focused tool execution
    - Executes specific subtasks assigned by Manager
-   - Uses MCP tools to gather information
-   - Limited to 5 iterations per subtask (prevents wandering)
-   - Includes automatic error recovery and retry logic
+   - Uses MCP tools to gather information and perform actions
    - Reports results back to Manager
 
 ### Supporting Components

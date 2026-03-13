@@ -1,12 +1,15 @@
 /**
- * Session Manager - Lifecycle management for DualAgent sessions
- * 
+ * Session Manager - Lifecycle management for agent sessions
+ *
  * Responsibilities:
- * - Create/destroy DualAgent instances per session
+ * - Create/destroy agent instances per session
  * - Track active sessions and enforce limits
  * - Handle idle timeouts
  * - Per-session MCP server initialization
  * - State persistence on shutdown
+ *
+ * When JIVA_CODE_MODE=true, sessions use CodeAgent (single-loop, in-process tools, LSP).
+ * Otherwise the default DualAgent (Manager→Worker→Client) is used.
  */
 
 import { EventEmitter } from 'events';
@@ -22,6 +25,7 @@ import { createKrutrimModel } from '../../models/krutrim.js';
 import { Message } from '../../models/base.js';
 import { PersonaManager } from '../../personas/persona-manager.js';
 import { getDefaultFilesystemAllowedPath } from '../../utils/platform.js';
+import type { IAgent } from '../../core/agent-interface.js';
 
 export interface SessionConfig {
   storageProvider: StorageProvider;
@@ -39,7 +43,7 @@ export interface SessionInfo {
 }
 
 interface ActiveSession {
-  agent: DualAgent;
+  agent: IAgent;
   mcpManager: MCPServerManager;
   workspace: WorkspaceManager;
   conversationManager: ConversationManager;
@@ -61,7 +65,7 @@ export class SessionManager extends EventEmitter {
   /**
    * Get or create a session
    */
-  async getOrCreateSession(tenantId: string, sessionId: string): Promise<DualAgent> {
+  async getOrCreateSession(tenantId: string, sessionId: string): Promise<IAgent> {
     const key = this.getSessionKey(tenantId, sessionId);
 
     // Return existing session
@@ -86,7 +90,8 @@ export class SessionManager extends EventEmitter {
 
     // Create new session
     logger.info(`[SessionManager] Creating session: ${key}`);
-    const session = await this.createSession(tenantId, sessionId);
+    const codeModeEnabled = process.env.JIVA_CODE_MODE === 'true';
+    const session = await this.createSession(tenantId, sessionId, codeModeEnabled);
     this.sessions.set(key, session);
     this.resetIdleTimer(key);
 
@@ -101,7 +106,7 @@ export class SessionManager extends EventEmitter {
   /**
    * Create a new session with all components
    */
-  private async createSession(tenantId: string, sessionId: string): Promise<ActiveSession> {
+  private async createSession(tenantId: string, sessionId: string, codeModeEnabled: boolean): Promise<ActiveSession> {
     const info: SessionInfo = {
       sessionId,
       tenantId,
@@ -157,6 +162,7 @@ export class SessionManager extends EventEmitter {
         model: modelConfig.reasoning.model,
         type: 'reasoning',
         useHarmonyFormat: true, // gpt-oss-120b requires Harmony format
+        defaultReasoningEffort: 'high',
       });
 
       // Tool-calling model: when configured, serves as the PRIMARY model for tool-call
@@ -174,6 +180,7 @@ export class SessionManager extends EventEmitter {
             model: tcModel,
             type: 'tool-calling',
             useHarmonyFormat: false, // standard OpenAI format for tool-calling LLMs
+            defaultReasoningEffort: 'medium',
           })
         : undefined;
 
@@ -266,17 +273,31 @@ export class SessionManager extends EventEmitter {
         logger.info(`[SessionManager] Restored conversation: ${conversationHistory.length} messages`);
       }
 
-      // Create DualAgent
-      const agent = new DualAgent({
-        orchestrator,
-        mcpManager,
-        workspace,
-        conversationManager,
-        personaManager,
-        maxSubtasks: 20,
-        maxIterations: 10,
-        autoSave: true, // Always auto-save in cloud mode
-      });
+      // Create agent — CodeAgent for code mode, DualAgent for general mode
+      let agent: IAgent;
+      if (codeModeEnabled) {
+        const { CodeAgent } = await import('../../code/agent.js');
+        const lspEnabled = process.env.JIVA_CODE_LSP !== 'false';
+        agent = new CodeAgent({
+          orchestrator,
+          workspace,
+          conversationManager,
+          maxIterations: 50,
+          lspEnabled,
+        });
+        logger.info('[SessionManager] Using CodeAgent (code mode)');
+      } else {
+        agent = new DualAgent({
+          orchestrator,
+          mcpManager,
+          workspace,
+          conversationManager,
+          personaManager,
+          maxSubtasks: 20,
+          maxIterations: 10,
+          autoSave: true,
+        });
+      }
 
       info.status = 'active';
 
@@ -339,6 +360,9 @@ export class SessionManager extends EventEmitter {
 
       // Clean up session-specific logger context
       logger.clearSessionContext(sessionId);
+
+      // Cleanup agent (shuts down LSP servers in code mode)
+      await session.agent.cleanup();
 
       // Cleanup MCP servers
       await session.mcpManager.cleanup();

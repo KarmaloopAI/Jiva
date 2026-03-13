@@ -15,6 +15,7 @@ import { ConversationManager } from '../../core/conversation-manager.js';
 import { DualAgent } from '../../core/dual-agent.js';
 import { runSetupWizard, updateConfiguration } from './setup-wizard.js';
 import { startREPL } from './repl.js';
+import type { IAgent } from '../../core/agent-interface.js';
 import { logger, LogLevel } from '../../utils/logger.js';
 import { orchestrationLogger } from '../../utils/orchestration-logger.js';
 import { readFileSync } from 'fs';
@@ -123,6 +124,9 @@ program
   .option('--debug', 'Enable debug mode')
   .option('-t, --temperature <value>', 'Model temperature (0-1)', parseFloat)
   .option('--max-iterations <number>', 'Maximum agent iterations', parseInt)
+  .option('--code', 'Enable code mode (single-loop agent + LSP integration)')
+  .option('--no-lsp', 'Disable LSP in code mode')
+  .option('--plan', 'Generate an implementation plan for approval before executing (code mode only)')
   .action(async (options) => {
     try {
       // Load configuration from file if provided
@@ -170,6 +174,7 @@ program
         model: reasoningModelConfig.defaultModel,
         type: 'reasoning',
         useHarmonyFormat: reasoningModelConfig.useHarmonyFormat,
+        defaultReasoningEffort: 'high',
       });
 
       let multimodalModel;
@@ -180,6 +185,7 @@ program
           apiKey: multimodalModelConfig.apiKey,
           model: multimodalModelConfig.defaultModel,
           type: 'multimodal',
+          // reasoning_effort not applicable for multimodal models
         });
       }
 
@@ -194,6 +200,7 @@ program
           model: toolCallingModelConfig.defaultModel,
           type: 'tool-calling',
           useHarmonyFormat: toolCallingModelConfig.useHarmonyFormat,
+          defaultReasoningEffort: 'medium',
         });
       }
 
@@ -317,21 +324,46 @@ program
         }
       }
 
-      // Create agent (dual-agent architecture)
-      const agent = new DualAgent({
-        orchestrator,
-        mcpManager,
-        workspace,
-        conversationManager,
-        personaManager,
-        maxSubtasks: 20, // Manager's subtask limit (separate from Worker iterations)
-        maxIterations: options.maxIterations || 10, // Worker's iteration limit per subtask
-        autoSave: true,
-        condensingThreshold: options.condensingThreshold ?? 30,
-      });
+      // Determine if code mode should be used
+      const codeModeConfig = configManager.getCodeMode();
+      const useCodeMode = options.code || (codeModeConfig?.enabled ?? false);
+
+      let agent: IAgent;
+
+      if (useCodeMode) {
+        const { CodeAgent } = await import('../../code/agent.js');
+        const lspEnabled = options.lsp !== false && (codeModeConfig?.lsp?.enabled ?? true);
+        const maxIter = options.maxIterations || codeModeConfig?.maxIterations || 50;
+        const codeAgent = new CodeAgent({
+          orchestrator,
+          workspace,
+          conversationManager,
+          maxIterations: maxIter,
+          lspEnabled,
+        });
+        console.log(chalk.cyan(`\n${CodeAgent.indicator} Code mode active (LSP: ${lspEnabled ? 'on' : 'off'})\n`));
+        agent = codeAgent;
+      } else {
+        // Create agent (dual-agent architecture)
+        agent = new DualAgent({
+          orchestrator,
+          mcpManager,
+          workspace,
+          conversationManager,
+          personaManager,
+          maxSubtasks: 20, // Manager's subtask limit (separate from Worker iterations)
+          maxIterations: options.maxIterations || 20, // Worker's iteration limit per subtask
+          autoSave: true,
+          condensingThreshold: options.condensingThreshold ?? 30,
+        });
+      }
 
       // Start REPL
-      await startREPL({ agent });
+      const planMode = useCodeMode && !!options.plan;
+      if (planMode) {
+        console.log(chalk.cyan('Plan mode active: implementation plans will be shown for approval before execution.\n'));
+      }
+      await startREPL({ agent, planMode });
 
       // Cleanup
       await agent.cleanup();
@@ -342,6 +374,16 @@ program
       if (logPath) {
         logger.info(`\nOrchestration log saved to: ${logPath}`);
       }
+
+      // Restore terminal state and exit. Two reasons:
+      // 1. LSP child-process streams keep the event loop alive after cleanup.
+      // 2. inquirer leaves stdin in raw mode; pausing it restores cooked mode
+      //    so no extra keypress is needed after /exit.
+      if (typeof (process.stdin as any).setRawMode === 'function') {
+        (process.stdin as any).setRawMode(false);
+      }
+      process.stdin.pause();
+      process.exit(0);
     } catch (error) {
       logger.error('Chat session failed', error);
       orchestrationLogger.close();
@@ -554,6 +596,9 @@ program
   .option('--debug', 'Enable debug mode')
   .option('-t, --temperature <value>', 'Model temperature (0-1)', parseFloat)
   .option('--max-iterations <number>', 'Maximum agent iterations', parseInt)
+  .option('--code', 'Enable code mode (single-loop agent + LSP integration)')
+  .option('--no-lsp', 'Disable LSP in code mode')
+  .option('--plan', 'Generate an implementation plan for approval before executing (code mode only)')
   .action(async (prompt, options) => {
     try {
       // Load configuration from file if provided
@@ -599,6 +644,7 @@ program
         model: reasoningModelConfig.defaultModel,
         type: 'reasoning',
         useHarmonyFormat: reasoningModelConfig.useHarmonyFormat,
+        defaultReasoningEffort: 'high',
       });
 
       let multimodalModel;
@@ -623,6 +669,7 @@ program
           model: toolCallingModelCfg.defaultModel,
           type: 'tool-calling',
           useHarmonyFormat: toolCallingModelCfg.useHarmonyFormat,
+          defaultReasoningEffort: 'medium',
         });
       }
 
@@ -746,18 +793,38 @@ program
         }
       }
 
-      // Create agent (dual-agent architecture)
-      const agent = new DualAgent({
-        orchestrator,
-        mcpManager,
-        workspace,
-        conversationManager,
-        personaManager,
-        maxSubtasks: 20, // Manager's subtask limit (separate from Worker iterations)
-        maxIterations: options.maxIterations || 10, // Worker's iteration limit per subtask
-        autoSave: true,
-        condensingThreshold: options.condensingThreshold ?? 30,
-      });
+      // Determine if code mode should be used
+      const codeModeConfigRun = configManager.getCodeMode();
+      const useCodeModeRun = options.code || (codeModeConfigRun?.enabled ?? false);
+
+      let agent: IAgent;
+
+      if (useCodeModeRun) {
+        const { CodeAgent } = await import('../../code/agent.js');
+        const lspEnabledRun = options.lsp !== false && (codeModeConfigRun?.lsp?.enabled ?? true);
+        const maxIterRun = options.maxIterations || codeModeConfigRun?.maxIterations || 50;
+        agent = new CodeAgent({
+          orchestrator,
+          workspace,
+          conversationManager,
+          maxIterations: maxIterRun,
+          lspEnabled: lspEnabledRun,
+        });
+        console.log(chalk.cyan(`\n[CODE MODE] Code mode active (LSP: ${lspEnabledRun ? 'on' : 'off'})\n`));
+      } else {
+        // Create agent (dual-agent architecture)
+        agent = new DualAgent({
+          orchestrator,
+          mcpManager,
+          workspace,
+          conversationManager,
+          personaManager,
+          maxSubtasks: 20, // Manager's subtask limit (separate from Worker iterations)
+          maxIterations: options.maxIterations || 20, // Worker's iteration limit per subtask
+          autoSave: true,
+          condensingThreshold: options.condensingThreshold ?? 30,
+        });
+      }
 
       // Execute prompt
       logger.info('Executing prompt...');

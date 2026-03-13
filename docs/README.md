@@ -31,7 +31,7 @@ Step-by-step guides for common tasks:
 
 Deep dives into Jiva's design:
 
-- **[Three-Agent Architecture](architecture/NEW_FEATURES.md)** - Manager, Worker, and Client agents
+- **[Architecture Overview](architecture/NEW_FEATURES.md)** - Manager and Worker agents
 - **[Implementation Summary](architecture/IMPLEMENTATION_SUMMARY.md)** - Core design decisions
 - **[Improvements Summary](architecture/IMPROVEMENTS_SUMMARY.md)** - Evolution of the architecture
 - **[Filesystem Access](architecture/FILESYSTEM_ACCESS.md)** - MCP filesystem server details
@@ -39,11 +39,12 @@ Deep dives into Jiva's design:
 
 ## Release Notes
 
-- **[v0.3.23](release_notes/v0.3.23.md)** - Current release (Linux support fix + dependency updates)
+- **[v0.3.4](release_notes/v0.3.4.md)** - Code mode + two-agent system
+- **[v0.3.23](release_notes/v0.3.23.md)** - Linux support fix + dependency updates (legacy)
 - **[v0.3.22](release_notes/v0.3.22.md)** - Security updates & CI automation
 - **[v0.3.21](release_notes/v0.3.21.md)** - Bug fixes
 - **[v0.3.2](release_notes/v0.3.2.md)** - Bug fixes & quality improvements
-- **[v0.3.1](release_notes/v0.3.1.md)** - Cloud deployment + three-agent architecture
+- **[v0.3.1](release_notes/v0.3.1.md)** - Cloud deployment + three-agent (legacy)
 - **[v0.2.1](release_notes/v0.2.1.md)** - Dual-agent system
 
 ## Quick Links by Use Case
@@ -68,8 +69,9 @@ Deep dives into Jiva's design:
 → [GitHub Issues](https://github.com/KarmaloopAI/Jiva/issues)
 
 #### Understand the Architecture
-→ [Three-Agent Architecture](architecture/NEW_FEATURES.md)  
-→ [Implementation Summary](architecture/IMPLEMENTATION_SUMMARY.md)  
+→ [Architecture Overview](architecture/NEW_FEATURES.md)
+→ [Code Mode Architecture](architecture/CODE_MODE.md)
+→ [Implementation Summary](architecture/IMPLEMENTATION_SUMMARY.md)
 → [Cloud Run Implementation](deployment/CLOUD_RUN_IMPLEMENTATION.md)
 
 ## Documentation Structure
@@ -89,17 +91,19 @@ docs/
 │   ├── CLOUD_RUN_IMPLEMENTATION.md      # Technical implementation
 │   └── CLOUD_RUN_DEPLOYMENT_SUMMARY.md  # Example deployment
 ├── architecture/
-│   ├── NEW_FEATURES.md            # Three-agent architecture
+│   ├── CODE_MODE.md               # Code mode architecture
+│   ├── NEW_FEATURES.md            # General mode architecture (Manager + Worker)
 │   ├── IMPLEMENTATION_SUMMARY.md  # Design overview
 │   ├── IMPROVEMENTS_SUMMARY.md    # Evolution history
 │   ├── FILESYSTEM_ACCESS.md       # MCP filesystem details
 │   └── MAXTOKEN_FIX.md           # Token management
 └── release_notes/
-    ├── v0.3.23.md                 # Current release
+    ├── v0.3.4.md                  # Current release (code mode + two-agent)
+    ├── v0.3.23.md                 # Linux support fix
     ├── v0.3.22.md                 # Security updates & CI
     ├── v0.3.21.md                 # Bug fixes
     ├── v0.3.2.md                  # Bug fixes & quality
-    ├── v0.3.1.md                  # Cloud + three-agent
+    ├── v0.3.1.md                  # Cloud + three-agent (legacy)
     └── v0.2.1.md                  # Dual-agent system
 ```
 
@@ -110,7 +114,8 @@ docs/
 | Interactive Chat | ✅ | ✅ | Stable |
 | Conversation Saving | ✅ | ✅ | Stable |
 | MCP Server Support | ✅ | ✅ | Stable |
-| Three-Agent Architecture | ✅ | ✅ | Stable |
+| Two-Agent System (Manager + Worker) | ✅ | ✅ | Stable |
+| Code Mode (single-loop + LSP) | ✅ | ✅ | Stable |
 | Local File Storage | ✅ | ⚠️ | Stable |
 | GCS Storage | ➖ | ✅ | Beta |
 | WebSocket API | ➖ | ✅ | Stable |
@@ -123,8 +128,8 @@ Legend: ✅ Supported | ⚠️ Partial | ➖ Not applicable | 🚧 In developmen
 
 ## Version Information
 
-**Current Version:** 0.3.23  
-**Release Date:** February 27, 2026  
+**Current Version:** 0.3.4
+**Release Date:** March 2026
 **Node Version Required:** 20.0.0+
 
 ## Support

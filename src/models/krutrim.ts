@@ -19,8 +19,36 @@ export interface KrutrimConfig {
   endpoint: string;
   apiKey: string;
   model: string;
+  defaultModel?: string; // Alias used in config store; model takes precedence
   type: 'reasoning' | 'multimodal' | 'tool-calling';
   useHarmonyFormat?: boolean; // Use Harmony format for tools (Krutrim-specific), defaults to false
+  /**
+   * Default reasoning effort for all calls made through this model instance.
+   * Can be overridden per-call via ChatCompletionOptions.reasoningEffort.
+   * Sensible defaults: 'high' for reasoning models, 'medium' for tool-calling models.
+   */
+  defaultReasoningEffort?: 'low' | 'medium' | 'high';
+  /**
+   * How to communicate reasoning effort to the model.
+   *
+   * 'api_param'     — send only as the `reasoning_effort` request body field.
+   *                   Works natively on Groq; may be silently dropped elsewhere.
+   * 'system_prompt' — inject only as a leading system message: "Reasoning: <level>".
+   *                   Understood by gpt-oss-120b on any provider.
+   * 'both'          — do both (recommended default). The API param is used when the
+   *                   provider supports it; the system message is a universal fallback
+   *                   for Krutrim/self-hosted endpoints that strip unknown params.
+   *
+   * Default: 'both'
+   */
+  reasoningEffortStrategy?: 'api_param' | 'system_prompt' | 'both';
+  /**
+   * Request reasoning tokens in the response body (Groq-specific: `include_reasoning`).
+   * When true, the model's thinking tokens are logged at debug level.
+   * Has no effect on providers that do not support the field.
+   * Default: false (suppressing reasoning tokens saves output tokens).
+   */
+  includeReasoning?: boolean;
 }
 
 export class KrutrimModel implements IModel {
@@ -44,14 +72,12 @@ export class KrutrimModel implements IModel {
     const isReasoningModel = this.config.type === 'reasoning' || this.config.type === 'tool-calling';
 
     // Retry logic for transient errors (WAF/rate limiting/server errors)
-    const maxRetries = 3;
+    const maxRetries = 4;
     let lastError: Error | null = null;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       if (attempt > 0) {
-        const waitTime = Math.pow(2, attempt) * 1000; // Exponential backoff: 2s, 4s, 8s
-        logger.warn(`Retrying after ${waitTime}ms (attempt ${attempt + 1}/${maxRetries + 1})...`);
-        await new Promise(resolve => setTimeout(resolve, waitTime));
+        await new Promise(resolve => setTimeout(resolve, this._lastRetryWait ?? 2000));
       }
 
       try {
@@ -61,9 +87,10 @@ export class KrutrimModel implements IModel {
 
         // Retry on transient errors: 403 (WAF), 429 (rate limit), 500/502/503/504 (server errors)
         if (error instanceof ModelError) {
+          const is429 = error.message.includes('(429)');
           const shouldRetry =
             error.message.includes('(403)') ||  // WAF blocking
-            error.message.includes('(429)') ||  // Rate limiting
+            is429 ||                            // Rate limiting
             error.message.includes('(500)') ||  // Internal server error
             error.message.includes('(502)') ||  // Bad gateway
             error.message.includes('(503)') ||  // Service unavailable
@@ -76,13 +103,26 @@ export class KrutrimModel implements IModel {
           // Log the error type for debugging
           let errorType = 'Unknown error';
           if (error.message.includes('(403)')) errorType = '403 Access Denied (WAF)';
-          else if (error.message.includes('(429)')) errorType = '429 Rate Limited';
+          else if (is429) errorType = '429 Rate Limited';
           else if (error.message.includes('(500)')) errorType = '500 Internal Server Error';
           else if (error.message.includes('(502)')) errorType = '502 Bad Gateway';
           else if (error.message.includes('(503)')) errorType = '503 Service Unavailable';
           else if (error.message.includes('(504)')) errorType = '504 Gateway Timeout';
 
-          logger.warn(`Got ${errorType}, will retry...`);
+          // For 429s, parse the actual retry-after time from the error message.
+          // Groq returns: "Please try again in 8.53s."
+          if (is429) {
+            const match = error.message.match(/try again in (\d+(?:\.\d+)?)\s*s/i);
+            const retryAfterMs = match ? Math.ceil(parseFloat(match[1]) * 1000) + 500 : null;
+            // Use parsed time, falling back to capped exponential backoff
+            const exponential = Math.min(Math.pow(2, attempt) * 1000, 30_000);
+            this._lastRetryWait = retryAfterMs ?? exponential;
+            logger.warn(`Got ${errorType}, will retry in ${(this._lastRetryWait / 1000).toFixed(1)}s (attempt ${attempt + 1}/${maxRetries + 1})...`);
+          } else {
+            const waitTime = Math.min(Math.pow(2, attempt) * 1000, 30_000);
+            this._lastRetryWait = waitTime;
+            logger.warn(`Got ${errorType}, will retry in ${waitTime / 1000}s (attempt ${attempt + 1}/${maxRetries + 1})...`);
+          }
         } else {
           throw error;
         }
@@ -91,6 +131,9 @@ export class KrutrimModel implements IModel {
 
     throw lastError!;
   }
+
+  /** Retry wait time in ms, set dynamically based on API hint or exponential backoff. */
+  private _lastRetryWait?: number;
 
   private async attemptChat(options: ChatCompletionOptions, isReasoningModel: boolean): Promise<ModelResponse> {
     try {
@@ -122,12 +165,25 @@ export class KrutrimModel implements IModel {
 
       // All OpenAI-compatible APIs support standard roles: system, user, assistant, tool
       // Convert 'developer' role to 'system' for API compatibility
-      const apiMessages = messages.map((msg: any) => {
+      const apiMessages: any[] = messages.map((msg: any) => {
         if (msg.role === 'developer') {
           return { ...msg, role: 'system' };
         }
         return msg;
       });
+
+      // ── Reasoning effort ────────────────────────────────────────────────────
+      // Per-call value takes precedence over model-level default.
+      const effort = options.reasoningEffort ?? this.config.defaultReasoningEffort;
+      const strategy = this.config.reasoningEffortStrategy ?? 'both';
+
+      // System-prompt injection: prepend "Reasoning: <level>" as the very first
+      // system message. gpt-oss-120b understands this on any provider — it's the
+      // official fallback for Krutrim/self-hosted endpoints that strip unknown
+      // request body params.
+      if (effort && isReasoningModel && (strategy === 'system_prompt' || strategy === 'both')) {
+        apiMessages.unshift({ role: 'system', content: `Reasoning: ${effort}` });
+      }
 
       const requestBody: any = {
         model: options.model || this.config.model,
@@ -138,6 +194,18 @@ export class KrutrimModel implements IModel {
       if (options.maxTokens) {
         requestBody.max_tokens = options.maxTokens;
       }
+
+      // API param: native Groq support; silently ignored by providers that don't implement it.
+      if (effort && isReasoningModel && (strategy === 'api_param' || strategy === 'both')) {
+        requestBody.reasoning_effort = effort;
+      }
+
+      // include_reasoning: request thinking tokens in the response (Groq-specific).
+      // When present, tokens appear in choice.message.reasoning and are logged below.
+      if (this.config.includeReasoning && isReasoningModel) {
+        requestBody.include_reasoning = true;
+      }
+      // ────────────────────────────────────────────────────────────────────────
 
       // Send tools in standard OpenAI format if not using Harmony
       if (!useHarmony && isReasoningModel && options.tools && options.tools.length > 0) {
@@ -203,6 +271,13 @@ export class KrutrimModel implements IModel {
 
       const choice = data.choices[0];
       const messageContent = choice.message?.content || '';
+
+      // Log reasoning tokens when include_reasoning=true (Groq returns them in
+      // choice.message.reasoning). Useful for debugging model "thinking" quality.
+      const reasoningTokens: string | undefined = choice.message?.reasoning;
+      if (reasoningTokens) {
+        logger.debug(`[Model reasoning] ${reasoningTokens.substring(0, 2000)}${reasoningTokens.length > 2000 ? '…' : ''}`);
+      }
 
       // Parse response based on format used
       if (useHarmony && isReasoningModel && options.tools && options.tools.length > 0) {
@@ -295,11 +370,12 @@ export class KrutrimModel implements IModel {
     try {
       logger.debug(`Testing connectivity to ${this.config.endpoint}...`);
 
-      // Simple test request with minimal tokens
+      // Simple test request with minimal tokens and low reasoning effort (it's just a ping)
       const testResponse = await this.chat({
         messages: [{ role: 'user', content: 'test' }],
         temperature: 0,
         maxTokens: 5,
+        reasoningEffort: 'low',
       });
 
       const latency = Date.now() - startTime;

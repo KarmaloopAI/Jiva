@@ -164,9 +164,12 @@ export class ConversationManager {
   }
 
   /**
-   * Condense conversation history using the model
+   * Condense conversation history using the model.
    *
    * This reduces token usage while preserving important context.
+   * Uses a structured opencode-style template (Goal / Instructions / Discoveries /
+   * Accomplished / Relevant files) that makes the summary actionable for the next agent turn.
+   *
    * Strategy: Keep system/developer messages (WITHOUT directive - agent will add fresh directive),
    * condense middle messages, keep recent messages.
    *
@@ -201,37 +204,64 @@ export class ConversationManager {
     }
 
     try {
-      // Create a summary of the middle section
+      // Create a summary of the middle section using opencode's structured template
       const conversationText = middleMessages
         .map(msg => {
-          const role = msg.role === 'assistant' ? 'Assistant' : 'User';
-          return `${role}: ${msg.content}`;
+          if (msg.role === 'tool') {
+            const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+            return `[Tool result]: ${content.substring(0, 300)}${content.length > 300 ? '...' : ''}`;
+          }
+          const role = msg.role === 'assistant' ? 'Assistant' : msg.role === 'user' ? 'User' : msg.role;
+          const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+          return `${role}: ${content}`;
         })
         .join('\n\n');
 
-      const summaryPrompt = `Please provide a concise summary of this conversation that preserves:
-1. Key decisions and actions taken
-2. Important information discovered
-3. Tools used and their results
-4. Any unresolved issues or pending tasks
+      // Structured compaction prompt (ported from opencode's compaction.ts)
+      const summaryPrompt = `Provide a detailed summary for continuing our conversation. The summary will be used so another agent can read it and continue the work.
 
-Keep the summary focused and under 500 words.
+When constructing the summary, follow this template:
 
-Conversation to summarize:
-${conversationText}`;
+## Goal
+
+[What goal(s) is the user trying to accomplish?]
+
+## Instructions
+
+- [What important instructions did the user give that are still relevant]
+- [If there is a plan or spec, include information about it so the next agent can continue using it]
+
+## Discoveries
+
+[What notable things were learned during this conversation that would be useful for the next agent to know when continuing the work]
+
+## Accomplished
+
+[What work has been completed, what work is still in progress, and what work is left?]
+
+## Relevant files / directories
+
+[Construct a structured list of relevant files that have been read, edited, or created that pertain to the task at hand. If all the files in a directory are relevant, include the path to the directory.]
+
+---
+
+Conversation to summarise:
+${conversationText}
+
+Keep the summary focused and complete — include file paths, function names, and specific changes made.`;
 
       const response = await orchestrator.chat({
         messages: [
           { role: 'user', content: summaryPrompt }
         ],
-        temperature: 0.1, // Low temperature for deterministic summarization
-        maxTokens: 1000,
+        temperature: 0.1, // Low temperature for deterministic summarisation
+        maxTokens: 1500,
       });
 
-      // Create condensed message
+      // Create condensed message (role: 'user' so it's valid in all API formats)
       const condensedMessage: Message = {
-        role: 'system',
-        content: `[Previous conversation summary]\n\n${response.content}\n\n[Continuing conversation...]`,
+        role: 'user',
+        content: `[Context compacted — previous conversation history summarised]\n\n${response.content}\n\n[Continuing conversation...]`,
       };
 
       // Return: system + developer + condensed summary + recent messages

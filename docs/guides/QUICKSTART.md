@@ -52,11 +52,17 @@ You'll be prompted for:
 ### Start Using
 
 ```bash
-# Interactive mode
+# Interactive mode (general-purpose)
 jiva chat
+
+# Code mode — optimized for software engineering tasks
+jiva chat --code
 
 # Single command
 jiva run "What files are in this directory?"
+
+# Single command in code mode
+jiva run "Refactor the auth module to use async/await" --code
 
 # With custom workspace
 jiva chat --workspace ~/myproject
@@ -133,13 +139,15 @@ npm link
 
 ---
 
-## 📋 Common Commands
+## Common Commands
 
 | Task | Command |
 |------|---------|
 | Setup Jiva | `jiva setup` |
 | Interactive chat | `jiva chat` |
+| Code mode (software tasks) | `jiva chat --code` |
 | Run single prompt | `jiva run "your prompt"` |
+| Run prompt in code mode | `jiva run "refactor X" --code` |
 | Update config | `jiva config` |
 | Debug mode | `jiva chat --debug` |
 | Custom workspace | `jiva chat --workspace /path` |

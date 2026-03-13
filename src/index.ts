@@ -6,10 +6,13 @@
 
 export { JivaAgent } from './core/agent.js';
 export { DualAgent } from './core/dual-agent.js';
+export { CodeAgent } from './code/agent.js';
+export { LspManager } from './code/lsp/manager.js';
 export { ManagerAgent } from './core/manager-agent.js';
 export { WorkerAgent } from './core/worker-agent.js';
 export { ClientAgent } from './core/client-agent.js';
 export { configManager, ConfigManager } from './core/config.js';
+export type { IAgent, AgentChatResponse } from './core/agent-interface.js';
 export { WorkspaceManager } from './core/workspace.js';
 export { ConversationManager } from './core/conversation-manager.js';
 
