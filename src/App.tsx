@@ -17,6 +17,7 @@ type SetupChecks = {
 export type ActiveTab = 'chat' | 'cowork' | 'code' | 'files'
 
 function SplashScreen({ status }: { status: string }) {
+  const { lastError } = useJivaStore()
   const messages: Record<string, string> = {
     stopped: 'Initializing Jiva...',
     starting: 'Starting Jiva agent...',
@@ -48,6 +49,9 @@ function SplashScreen({ status }: { status: string }) {
         <div className="text-center">
           <h1 className="text-2xl font-semibold gradient-text mb-2">Jivam</h1>
           <p className="text-sm text-[var(--text-muted)]">{message}</p>
+          {status === 'error' && lastError && (
+            <p className="text-xs text-red-400 mt-2 max-w-xs">{lastError}</p>
+          )}
         </div>
 
         <div className="flex items-center gap-1.5">
@@ -86,10 +90,16 @@ function App() {
 
     // Listen for runner status changes from main process
     if (window.electron?.jiva?.onStatusChange) {
-      window.electron.jiva.onStatusChange((status) => {
+      window.electron.jiva.onStatusChange((status, data) => {
         if (status === 'running') setServerStatus('running')
         else if (status === 'stopped') setServerStatus('stopped')
-        else if (status === 'error') setServerStatus('error')
+        else if (status === 'error') {
+          setServerStatus('error')
+          const errorData = data as { error?: string } | undefined
+          if (errorData?.error) {
+            useJivaStore.getState().setLastError(errorData.error)
+          }
+        }
       })
     }
 

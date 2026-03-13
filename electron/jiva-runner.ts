@@ -3,6 +3,7 @@ import { execSync } from 'child_process'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { pathToFileURL } from 'url'
 import { writeDirective } from './directive-manager'
 
 /**
@@ -24,7 +25,19 @@ function resolveJivaCoreEntryPath(): string {
     }
   } catch {}
 
-  // Known fallback path
+  // Try to find in common Windows locations
+  if (process.platform === 'win32') {
+    const possiblePaths = [
+      path.join(process.env.APPDATA ?? '', 'npm', 'node_modules', 'jiva-core', 'dist', 'index.js'),
+      path.join(process.env.LOCALAPPDATA ?? '', 'npm', 'node_modules', 'jiva-core', 'dist', 'index.js'),
+      'C:\\Program Files\\nodejs\\node_modules\\jiva-core\\dist\\index.js',
+    ]
+    for (const known of possiblePaths) {
+      if (fs.existsSync(known)) return known
+    }
+  }
+
+  // Known macOS/Linux fallback path
   const known = '/Users/abidev/.npm-global/lib/node_modules/jiva-core/dist/index.js'
   if (fs.existsSync(known)) return known
 
@@ -97,7 +110,8 @@ export class JivaRunner extends EventEmitter {
       console.log(`[JivaRunner] Loading jiva-core from: ${jivaCoreEntry}`)
 
       // Dynamic ESM import — the only way to load "type":"module" packages from CJS
-      const jiva = await import(jivaCoreEntry as string)
+      // Must use file:// URL on Windows for ESM compatibility
+      const jiva = await import(pathToFileURL(jivaCoreEntry).href)
 
       const {
         configManager,
@@ -205,8 +219,9 @@ export class JivaRunner extends EventEmitter {
       // PersonaManager is not exported from the main index — use dynamic path import
       const jivaCoreDir = path.dirname(jivaCoreEntry)  // dist/
       const jivaCoreRoot = path.dirname(jivaCoreDir)   // jiva-core root
+      const personaManagerPath = path.join(jivaCoreRoot, 'dist', 'personas', 'persona-manager.js')
       const { PersonaManager } = await import(
-        path.join(jivaCoreRoot, 'dist', 'personas', 'persona-manager.js') as string
+        pathToFileURL(personaManagerPath).href
       ) as { PersonaManager: new () => {
         initialize(persona?: string): Promise<void>
         getPersonaMCPServers(): Record<string, unknown>
