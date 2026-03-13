@@ -1,10 +1,9 @@
 /**
- * Dual Agent System - Coordinates Manager, Worker, and Client agents
+ * Dual Agent System - Coordinates Manager and Worker agents
  *
- * Three-agent architecture:
- * - Manager: High-level planning and coordination
+ * Two-agent architecture:
+ * - Manager: High-level planning, review, and synthesis
  * - Worker: Task execution with tools
- * - Client: Adaptive validation and quality control
  */
 
 import { ModelOrchestrator } from '../models/orchestrator.js';
@@ -15,9 +14,7 @@ import { PersonaManager } from '../personas/persona-manager.js';
 import { AgentSpawner } from './agent-spawner.js';
 import { ManagerAgent } from './manager-agent.js';
 import { WorkerAgent } from './worker-agent.js';
-import { ClientAgent } from './client-agent.js';
 import { AgentContext } from './types/agent-context.js';
-import { CompletionSignal } from './types/completion-signal.js';
 import { serializeAgentContext } from './utils/serialize-agent-context.js';
 import { logger } from '../utils/logger.js';
 import { orchestrationLogger } from '../utils/orchestration-logger.js';
@@ -56,7 +53,6 @@ export class DualAgent {
 
   private manager: ManagerAgent;
   private worker: WorkerAgent;
-  private client: ClientAgent;
 
   private maxSubtasks: number;
   private maxIterations: number;
@@ -74,15 +70,14 @@ export class DualAgent {
     this.personaManager = config.personaManager || null;
 
     this.maxSubtasks = config.maxSubtasks || 10;
-    this.maxIterations = config.maxIterations || 10;
+    this.maxIterations = config.maxIterations || 20;
     this.maxAgentDepth = config.maxAgentDepth ?? 1; // Default: only Manager can spawn
     this.autoSave = config.autoSave !== false;
     this.condensingThreshold = config.condensingThreshold || 30;
 
-    // Initialize agents (three-agent architecture)
+    // Initialize agents (Manager + Worker architecture)
     this.manager = new ManagerAgent(this.orchestrator, this.workspace, this.personaManager || undefined);
     this.worker = new WorkerAgent(this.orchestrator, this.mcpManager, this.workspace, this.maxIterations, this.personaManager || undefined);
-    this.client = new ClientAgent(this.orchestrator, this.mcpManager);
 
     // Initialize AgentSpawner - always available as a baseline tool
     // Create a PersonaManager if one wasn't provided
@@ -108,7 +103,7 @@ export class DualAgent {
     );
     this.worker.setAgentSpawner(this.agentSpawner);
 
-    logger.info('[*] Three-agent system initialized (Manager + Worker + Client)');
+    logger.info('[*] Two-agent system initialized (Manager + Worker)');
     logger.info(`[*] Agent spawn depth limit: ${this.maxAgentDepth} (${this.maxAgentDepth === 1 ? 'only Manager can spawn' : `${this.maxAgentDepth} levels deep`})`);
     
     if (this.personaManager) {
@@ -210,61 +205,6 @@ VALIDATION GUIDANCE:
   }
 
   /**
-   * Determine corrective strategy for a subtask based on CompletionSignal.
-   * Returns a description of the action taken, or null if no correction needed.
-   */
-  private applyCorrectionStrategy(
-    signal: CompletionSignal,
-    subtask: string,
-    retryCount: number,
-    maxRetries: number,
-    subtasksToExecute: string[],
-    results: { subtask: string; result: string }[]
-  ): string | null {
-    if (signal.confidence === 'high') return null;
-
-    const strategy = signal.suggestedStrategy || 'retry';
-
-    // Budget exhausted
-    if (retryCount >= maxRetries) {
-      if (signal.progressMade) {
-        logger.info(`[DualAgent] Retry budget exhausted but progress was made — continuing to synthesis`);
-        return null;
-      }
-      logger.warn(`[DualAgent] Retry budget exhausted with no progress — skipping subtask`);
-      return null; // handled by caller
-    }
-
-    switch (strategy) {
-      case 'retry':
-        return subtask; // re-queue same instruction
-
-      case 'rephrase':
-        return `[CLARIFIED] ${subtask} — Please ensure the correct tools and approach are used. Avoid scope drift.`;
-
-      case 'decompose':
-        // Manager would ideally split this; we approximate by re-queuing with guidance
-        return `[DECOMPOSE] Break this task into smaller concrete steps and execute them: ${subtask}`;
-
-      case 'skip':
-        logger.warn(`[DualAgent] Strategy=skip for subtask: ${subtask}`);
-        return null; // caller skips
-
-      case 'escalate':
-        // Do NOT overwrite results[] here. The Worker's actual result (with
-        // specific tool error detail from failedTools) was already pushed into
-        // results[] before Client validation ran. The approved:false flag on
-        // that entry is enough for synthesizeResponse() to handle it honestly.
-        // Pushing a generic ⚠️ string would lose the specific error information.
-        logger.warn(`[DualAgent] Escalating subtask to user — evidence-backed failure, no retry: ${subtask}`);
-        return null;
-
-      default:
-        return subtask;
-    }
-  }
-
-  /**
    * Process user message using dual-agent architecture
    */
   async chat(userMessage: string): Promise<DualAgentResponse> {
@@ -310,6 +250,35 @@ VALIDATION GUIDANCE:
 
     orchestrationLogger.logPhaseEnd('PLANNING', Date.now() - phaseStartTime);
 
+    // Conversational short-circuit: skip execution entirely for greetings, thank-yous, etc.
+    if (plan.conversational) {
+      logger.info('[DualAgent] Conversational message — returning direct reply');
+      const directReply = await this.manager.directReply(
+        this.userConversationHistory,
+        agentContext,
+      );
+      this.userConversationHistory.push({ role: 'assistant', content: directReply });
+
+      if (this.autoSave && this.conversationManager) {
+        await this.conversationManager.autoSave(
+          this.userConversationHistory,
+          this.workspace.getWorkspaceDir(),
+          this.orchestrator,
+        );
+      }
+
+      logger.info('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      logger.info('[+] Complete: 1 iteration, 0 tools used (conversational)');
+      logger.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+
+      return {
+        content: directReply,
+        iterations: 1,
+        toolsUsed: [],
+        plan: { subtasks: [], reasoning: plan.reasoning },
+      };
+    }
+
     // PHASE 2: Execute subtasks with per-subtask retry budget
     logger.info('\n[PHASE 2: Execution]');
     logger.info('─────────────────────────────────────────');
@@ -317,11 +286,10 @@ VALIDATION GUIDANCE:
     const executionStartTime = Date.now();
     orchestrationLogger.logPhaseStart('EXECUTION');
 
-    const results: { subtask: string; result: string; approved: boolean }[] = [];
+    const results: { subtask: string; result: string; accepted: boolean }[] = [];
     const subtasksToExecute = plan.subtasks.slice(0, this.maxSubtasks);
-    const MAX_RETRIES_PER_SUBTASK = 2;
-
-    // Track per-subtask retry counts (keyed by original subtask text)
+    // Max 1 retry per original subtask — keyed by original subtask text (not correction text)
+    const MAX_RETRIES_PER_SUBTASK = 1;
     const subtaskRetryCounts = new Map<string, number>();
 
     for (let i = 0; i < subtasksToExecute.length; i++) {
@@ -338,92 +306,31 @@ VALIDATION GUIDANCE:
       totalIterations += 1;
       allToolsUsed.push(...workerResult.toolsUsed);
 
-      // Client validates Worker's result with shared context (adaptive involvement)
-      const validation = await this.client.validate(
-        userMessage,
-        plan.subtasks,
-        workerResult,
-        undefined, // let Client determine involvement level
-        agentContext
-      );
+      // Manager reviews Worker's result — fast-path for common cases, LLM only for edge cases
+      const review = await this.manager.reviewSubtaskResult(subtask, workerResult, userMessage);
 
-      // Record result alongside Client's approval verdict.
-      // The synthesis phase uses this to produce an honest response when
-      // some subtasks were not completed successfully.
       results.push({
         subtask,
         result: workerResult.result,
-        approved: validation.approved,
+        accepted: review.accepted,
       });
 
-      if (!validation.approved) {
-        const signal = validation.completionSignal;
-        const retryCount = subtaskRetryCounts.get(subtask) || 0;
+      if (!review.accepted && review.specificCorrection) {
+        // Determine the original subtask key for retry counting.
+        // Correction subtasks always start fresh — map them back to the original via
+        // their position in the queue vs the original plan length.
+        const originalSubtask = plan.subtasks[Math.min(i, plan.subtasks.length - 1)] || subtask;
+        const retryCount = subtaskRetryCounts.get(originalSubtask) || 0;
 
-        // Build a context-correction prefix so the Worker isn't misled by prior
-        // conversation turns that claimed success for the same task.
-        const contextCorrectionPrefix = `CONTEXT CORRECTION: Previous conversation messages claiming this task was already completed are INCORRECT — those claims were not validated. You MUST execute the required actions now using the appropriate tools. Do NOT produce a text-only response.
-
-`;
-
-        if (signal) {
-          logger.info(`[DualAgent] CompletionSignal: confidence=${signal.confidence}, blocker=${signal.blockerType || 'none'}, strategy=${signal.suggestedStrategy || 'none'}, progress=${signal.progressMade}`);
-
-          const rawCorrection = this.applyCorrectionStrategy(
-            signal, subtask, retryCount, MAX_RETRIES_PER_SUBTASK, subtasksToExecute, results
-          );
-
-          const correction = rawCorrection ? `${contextCorrectionPrefix}${rawCorrection}` : null;
-
-          if (correction) {
-            // Deduplicate against the pending queue only — NOT against results.
-            // Correction subtasks intentionally re-execute something that failed,
-            // so checking results would always flag a retry as a duplicate.
-            const normalizedCorrection = correction.toLowerCase().trim();
-            const isDuplicate = subtasksToExecute.some(existing =>
-              existing.toLowerCase().trim() === normalizedCorrection
-            );
-
-            if (isDuplicate) {
-              logger.warn(`[DualAgent] Skipping duplicate correction subtask`);
-            } else if (subtasksToExecute.length < this.maxSubtasks) {
-              // Insert correction immediately after current position so it runs
-              // BEFORE any subsequent subtasks that may depend on this one.
-              subtasksToExecute.splice(i + 1, 0, correction);
-              subtaskRetryCounts.set(subtask, retryCount + 1);
-              logger.info(`[DualAgent] Inserted correction at position ${i + 2} via ${signal.suggestedStrategy} (${subtasksToExecute.length} total, retry ${retryCount + 1}/${MAX_RETRIES_PER_SUBTASK})`);
-            } else {
-              logger.warn(`[DualAgent] Cannot add correction — maxSubtasks (${this.maxSubtasks}) reached`);
-            }
-          } else if (!signal.progressMade && retryCount >= MAX_RETRIES_PER_SUBTASK) {
-            logger.warn(`[DualAgent] No progress after ${MAX_RETRIES_PER_SUBTASK} retries — skipping subtask`);
-          }
-        } else if (validation.nextAction) {
-          // Fallback to legacy correction if no signal present
-          logger.info(`[Client] Validation failed: ${validation.issues.join(', ')}`);
-          logger.info(`[Client] Requesting correction: ${validation.nextAction}`);
-
-          const correction = `${contextCorrectionPrefix}${validation.nextAction}`;
-          const normalizedCorrection = correction.toLowerCase().trim();
-          // Only deduplicate against the pending queue — corrections are intentional
-          // re-attempts, so matching against results would always skip them.
-          const isDuplicate = subtasksToExecute.some(existing =>
-            existing.toLowerCase().trim() === normalizedCorrection
-          );
-
-          if (isDuplicate) {
-            logger.warn(`[Client] Skipping duplicate correction subtask`);
-          } else if (subtasksToExecute.length < this.maxSubtasks) {
-            // Insert correction immediately after current position so it runs
-            // BEFORE any subsequent subtasks that may depend on this one.
-            subtasksToExecute.splice(i + 1, 0, correction);
-            logger.info(`[Client] Inserted correction at position ${i + 2} (${subtasksToExecute.length} total)`);
-          } else {
-            logger.warn(`[Client] Cannot add correction - maxSubtasks (${this.maxSubtasks}) reached`);
-          }
+        if (retryCount < MAX_RETRIES_PER_SUBTASK && subtasksToExecute.length < this.maxSubtasks) {
+          subtasksToExecute.splice(i + 1, 0, review.specificCorrection);
+          subtaskRetryCounts.set(originalSubtask, retryCount + 1);
+          logger.info(`[DualAgent] Inserted targeted retry at position ${i + 2} (retry ${retryCount + 1}/${MAX_RETRIES_PER_SUBTASK})`);
+        } else {
+          logger.warn(`[DualAgent] Retry budget exhausted or queue full — accepting partial result`);
         }
       } else {
-        logger.info(`[Client] Validation passed (${validation.involvementLevel} level)`);
+        logger.info(`[Manager] Subtask accepted`);
       }
     }
 
@@ -475,7 +382,7 @@ VALIDATION GUIDANCE:
 
   private async synthesizeResponse(
     plan: { subtasks: string[]; reasoning: string },
-    results: { subtask: string; result: string; approved: boolean }[],
+    results: { subtask: string; result: string; accepted: boolean }[],
     agentContext?: AgentContext
   ): Promise<string> {
     // Always have the Manager synthesize a final response.
@@ -518,7 +425,6 @@ VALIDATION GUIDANCE:
   resetConversation() {
     this.userConversationHistory = [];
     this.manager.resetConversation();
-    this.client.resetSessionState();
     // Null out the conversation ID so the next autoSave generates a fresh file
     // rather than continuing to append to the previous conversation's storage entry.
     this.conversationManager?.setCurrentConversationId(null);

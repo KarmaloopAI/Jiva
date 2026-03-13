@@ -30,6 +30,15 @@ const ModelConfigSchema = z.object({
   useHarmonyFormat: z.boolean().optional(),
 });
 
+const CodeModeConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  lsp: z.object({
+    enabled: z.boolean().default(true),
+  }).optional(),
+  maxIterations: z.number().default(50),
+  includeMcp: z.boolean().default(false),
+});
+
 const JivaConfigSchema = z.object({
   models: z.object({
     reasoning: ModelConfigSchema.optional(),
@@ -42,10 +51,12 @@ const JivaConfigSchema = z.object({
   }).optional(),
   activePersona: z.string().optional(),
   debug: z.boolean().default(false),
+  codeMode: CodeModeConfigSchema.optional(),
 });
 
 export type MCPServerConfig = z.infer<typeof MCPServerConfigSchema>;
 export type ModelConfig = z.infer<typeof ModelConfigSchema>;
+export type CodeModeConfig = z.infer<typeof CodeModeConfigSchema>;
 export type JivaConfig = z.infer<typeof JivaConfigSchema>;
 
 export class ConfigManager {
@@ -144,6 +155,15 @@ export class ConfigManager {
 
   getActivePersona(): string | undefined {
     return this.store.get('activePersona');
+  }
+
+  getCodeMode(): CodeModeConfig | undefined {
+    return this.store.get('codeMode');
+  }
+
+  setCodeModeEnabled(enabled: boolean) {
+    const current = this.store.get('codeMode') || {};
+    this.store.set('codeMode', { ...current, enabled });
   }
 
   reset() {

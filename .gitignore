@@ -25,3 +25,6 @@ Thumbs.db
 # Config (may contain API keys)
 config.json
 .npmrc
+
+# Local development files
+oc-dev/

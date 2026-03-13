@@ -539,6 +539,58 @@ cp ~/.config/jiva-nodejs/config.json ./my-config-template.json
 nano my-config-template.json
 ```
 
+## Code Mode Configuration
+
+Code mode activates a single-loop `CodeAgent` optimized for software engineering tasks. It replaces the Manager/Worker/Client chain with direct tool execution and optional LSP integration.
+
+### Activating Code Mode
+
+**Via CLI flag (per-session):**
+```bash
+jiva chat --code
+jiva run "refactor auth.ts" --code
+jiva chat --code --no-lsp    # disable LSP servers
+```
+
+**Via config file (persistent):**
+```json
+{
+  "codeMode": {
+    "enabled": true,
+    "lsp": { "enabled": true },
+    "maxIterations": 50
+  }
+}
+```
+
+**Via environment variable (cloud/container deployments):**
+```bash
+JIVA_CODE_MODE=true          # activate code mode
+JIVA_CODE_LSP=false          # optional: disable LSP
+```
+
+### LSP Language Servers
+
+Code mode optionally starts language servers (from PATH) after each file edit to surface compiler errors in the tool result. Servers are started lazily and silently skipped if not installed.
+
+```bash
+# TypeScript / JavaScript
+npm install -g typescript-language-server typescript
+
+# Python
+pip install python-lsp-server
+
+# Go
+go install golang.org/x/tools/gopls@latest
+
+# Rust
+rustup component add rust-analyzer
+```
+
+For the full reference see [Code Mode Architecture](../architecture/CODE_MODE.md).
+
+---
+
 ## Cloud Run Configuration
 
 For Cloud Run deployments, configuration is loaded dynamically from GCS bucket using the StorageProvider. See [CLOUD_RUN_DEPLOYMENT.md](./CLOUD_RUN_DEPLOYMENT.md) for details.

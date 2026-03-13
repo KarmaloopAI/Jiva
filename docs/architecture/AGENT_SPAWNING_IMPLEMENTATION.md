@@ -277,7 +277,7 @@ Watch logs for:
 
 **Memory Usage:**
 - Each spawned agent: ~50-100MB
-- 3-agent collaboration: ~200-300MB total
+- 2-agent collaboration: ~100-200MB total
 
 **Iteration Budget:**
 - Parent: configurable maxIterations

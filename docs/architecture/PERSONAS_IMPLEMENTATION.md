@@ -63,9 +63,6 @@ A complete Skills and Personas system with 100% compatibility with Claude's Skil
 - Sees available skills during execution
 - Reads SKILL.md files on demand via `view` tool
 
-**Client Agent:**
-- No direct persona integration (focuses on validation)
-
 ### CLI Commands
 
 ```bash

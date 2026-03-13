@@ -14,6 +14,7 @@ import { ModelOrchestrator } from '../models/orchestrator.js';
 import { WorkspaceManager } from './workspace.js';
 import { PersonaManager } from '../personas/persona-manager.js';
 import { AgentContext } from './types/agent-context.js';
+import { WorkerResult } from './worker-agent.js';
 import { Message } from '../models/base.js';
 import { logger } from '../utils/logger.js';
 import { orchestrationLogger } from '../utils/orchestration-logger.js';
@@ -26,6 +27,8 @@ export interface ManagerTask {
 export interface ManagerPlan {
   subtasks: string[];
   reasoning: string;
+  /** True when the user's message is purely conversational — no task execution needed. */
+  conversational?: boolean;
 }
 
 export interface ManagerDecision {
@@ -158,9 +161,15 @@ Guidelines:
 - Trust Worker to handle file operations, error checking, and iteration
 - Each subtask MUST be a clear, actionable instruction - NOT prose, advice, or explanation
 
+CONVERSATIONAL MESSAGES:
+- If the message is purely conversational (greeting, thank-you, compliment, acknowledgment, small talk) with NO actionable task embedded, return:
+  {"conversational": true, "subtasks": [], "reasoning": "Conversational message — no task required"}
+- Do NOT invent tasks from prior conversation context just because a topic was mentioned earlier.
+
 Respond ONLY with valid JSON in this exact format (no other text before or after):
 {
   "reasoning": "<brief explanation of your high-level approach>",
+  "conversational": false,
   "subtasks": [
     "<subtask 1 - a clear, actionable instruction>",
     "<subtask 2 - only if truly necessary>"
@@ -193,16 +202,22 @@ Respond ONLY with valid JSON in this exact format (no other text before or after
       plan = await this.cleanPlanWithLLM(response.content);
     }
 
-    // Validate subtasks - filter out garbage entries
-    plan.subtasks = this.validateSubtasks(plan.subtasks);
+    const isConversational = !!(plan as any).conversational;
 
-    logger.info(`[Manager] Reasoning: ${plan.reasoning}`);
-    logger.info(`[Manager] Plan: ${plan.subtasks.length} subtasks`);
-    plan.subtasks.forEach((task, i) => logger.info(`  ${i + 1}. ${task}`));
+    // Validate subtasks - filter out garbage entries (allow empty list for conversational)
+    plan.subtasks = this.validateSubtasks(plan.subtasks, isConversational);
+
+    if (isConversational) {
+      logger.info('[Manager] Conversational message detected — skipping task execution');
+    } else {
+      logger.info(`[Manager] Reasoning: ${plan.reasoning}`);
+      logger.info(`[Manager] Plan: ${plan.subtasks.length} subtasks`);
+      plan.subtasks.forEach((task, i) => logger.info(`  ${i + 1}. ${task}`));
+    }
 
     orchestrationLogger.logManagerPlanCreated(plan.subtasks, plan.reasoning);
 
-    return { subtasks: plan.subtasks, reasoning: plan.reasoning };
+    return { subtasks: plan.subtasks, reasoning: plan.reasoning, conversational: isConversational };
   }
 
   /**
@@ -261,30 +276,100 @@ NEXT_ACTION: <what to do next, if CONTINUE>`;
   }
 
   /**
+   * Review a Worker's subtask result and decide whether to accept it or request a retry.
+   *
+   * Rules (fast-path first — avoids an LLM call for the common case):
+   * - AUTO-ACCEPT:  tools were used AND the result is substantive (>100 chars)
+   * - AUTO-REJECT:  no tools were used at all (pure hallucination / text-only response)
+   * - LLM REVIEW:  tools were used but result is suspiciously short (<100 chars)
+   *
+   * Returns { accepted: true } or { accepted: false, specificCorrection: "…" }.
+   * The specificCorrection is a clean, targeted instruction — NOT a stacked prefix.
+   */
+  async reviewSubtaskResult(
+    subtask: string,
+    workerResult: WorkerResult,
+    originalRequest: string,
+  ): Promise<{ accepted: boolean; specificCorrection?: string }> {
+    // Fast-path accept: tools were used and result has substance
+    if (workerResult.toolsUsed.length > 0 && workerResult.result.length >= 100) {
+      logger.info(`[Manager] Auto-accepted subtask (${workerResult.toolsUsed.length} tools used, ${workerResult.result.length} chars)`);
+      return { accepted: true };
+    }
+
+    // Fast-path reject: no tools at all — pure text-only response (hallucination)
+    if (workerResult.toolsUsed.length === 0) {
+      logger.warn(`[Manager] Auto-rejected subtask — Worker used no tools`);
+      const correction = `You produced a text-only response without using any tools. You MUST use the available tools to complete this task. Do not fabricate or infer data — call the appropriate tools now.\n\nOriginal task: ${subtask}`;
+      return { accepted: false, specificCorrection: correction };
+    }
+
+    // Edge case: tools used but result is very short — ask LLM to judge
+    logger.info(`[Manager] LLM review: tools=${workerResult.toolsUsed.length}, result length=${workerResult.result.length}`);
+    const reviewPrompt = `You are reviewing whether a Worker agent's result satisfactorily completes a subtask.
+
+Original user request: ${originalRequest}
+
+Subtask assigned to Worker: ${subtask}
+
+Tools used by Worker: ${workerResult.toolsUsed.join(', ')}
+
+Worker's result:
+${workerResult.result}
+
+DECISION RULES:
+- ACCEPT if the Worker gathered real data and provided a substantive result, even if partial
+- REJECT only if the result is clearly empty, fabricated, or completely off-task
+
+Respond with ONLY one of:
+ACCEPT
+REJECT: <one sentence explaining what specific data is still missing>`;
+
+    const response = await this.orchestrator.chat({
+      messages: [
+        { role: 'system', content: 'You are a task reviewer. Reply with ACCEPT or REJECT: <reason>.' },
+        { role: 'user', content: reviewPrompt },
+      ],
+      temperature: 0.1,
+    });
+
+    const verdict = response.content.trim();
+    if (verdict.startsWith('REJECT')) {
+      const reason = verdict.replace(/^REJECT:?\s*/i, '').trim();
+      logger.warn(`[Manager] LLM rejected subtask: ${reason}`);
+      const correction = `The previous attempt was insufficient: ${reason}\n\nRetry the subtask using the appropriate tools: ${subtask}`;
+      return { accepted: false, specificCorrection: correction };
+    }
+
+    logger.info(`[Manager] LLM accepted subtask`);
+    return { accepted: true };
+  }
+
+  /**
    * Create final response for user
    */
-  async synthesizeResponse(allResults: { subtask: string; result: string; approved?: boolean }[], agentContext?: AgentContext): Promise<string> {
+  async synthesizeResponse(allResults: { subtask: string; result: string; accepted?: boolean }[], agentContext?: AgentContext): Promise<string> {
     logger.info('[Manager] Synthesizing final response...');
     orchestrationLogger.logManagerSynthesize(allResults.length);
 
-    const approvedResults = allResults.filter(r => r.approved !== false);
-    const failedResults = allResults.filter(r => r.approved === false);
+    const acceptedResults = allResults.filter(r => r.accepted !== false);
+    const failedResults = allResults.filter(r => r.accepted === false);
 
-    const completedSection = approvedResults.length > 0
-      ? `Validated Completed Work:\n${approvedResults.map((r, i) => `${i + 1}. ${r.subtask}\nResult: ${r.result}`).join('\n\n')}`
-      : 'No subtasks were validated as successfully completed.';
+    const completedSection = acceptedResults.length > 0
+      ? `Completed Work:\n${acceptedResults.map((r, i) => `${i + 1}. ${r.subtask}\nResult: ${r.result}`).join('\n\n')}`
+      : 'No subtasks completed successfully.';
 
     const failedSection = failedResults.length > 0
-      ? `\n\nSubtasks That Did NOT Complete Successfully (Client validation rejected these):\n${failedResults.map((r, i) => `${i + 1}. ${r.subtask}\nWorker output (unvalidated): ${r.result}`).join('\n\n')}`
+      ? `\n\nSubtasks That Could Not Be Completed:\n${failedResults.map((r, i) => `${i + 1}. ${r.subtask}\nWorker output: ${r.result}`).join('\n\n')}`
       : '';
 
     const synthesisPrompt = `Based on the work below, create a final response for the user.
 
-IMPORTANT: Some subtasks may not have been completed successfully — the Client validation agent explicitly rejected them. You MUST be honest about what was and was not accomplished. Do NOT claim files were created, actions were performed, or results were produced if the corresponding subtask is listed as failed.
+IMPORTANT: Be honest about what was and was not accomplished. Do NOT claim results were produced if the corresponding subtask is listed as failed.
 
 ${completedSection}${failedSection}
 
-Create a clear, honest response that accurately reflects what was accomplished and what was not. If work failed, explain what happened and what the user should expect.`;
+Create a clear, honest response that accurately reflects what was accomplished. If any work failed, explain briefly what happened.`;
 
     this.conversationHistory.push({
       role: 'user',
@@ -303,6 +388,27 @@ Create a clear, honest response that accurately reflects what was accomplished a
 
     logger.info('[Manager] Final response created');
 
+    return response.content;
+  }
+
+  /**
+   * Respond directly to a conversational message — no planning or tool execution.
+   * Used when `createPlan()` signals `conversational: true`.
+   *
+   * @param userConversationHistory - The full user-facing conversation so far
+   *   (already includes the current user message at the tail).
+   * @param agentContext - Current agent context for directive injection.
+   */
+  async directReply(
+    userConversationHistory: Message[],
+    agentContext?: AgentContext,
+  ): Promise<string> {
+    const systemMessages = this.getSystemMessages(agentContext);
+    const response = await this.orchestrator.chat({
+      messages: [...systemMessages, ...userConversationHistory],
+      temperature: 0.7, // Slightly higher for natural conversation
+    });
+    logger.info('[Manager] Direct conversational reply produced');
     return response.content;
   }
 
@@ -368,8 +474,10 @@ Return ONLY valid JSON in this exact format (no other text):
   /**
    * Validate that each subtask is a reasonable, actionable instruction.
    * Removes garbage entries like separators, prose fragments, or empty strings.
+   *
+   * @param isConversational - When true, allow an empty list (no min-1 enforcement).
    */
-  private validateSubtasks(subtasks: string[]): string[] {
+  private validateSubtasks(subtasks: string[], isConversational = false): string[] {
     const validated = subtasks.filter(task => {
       const trimmed = task.trim();
       // Reject empty or too-short entries
@@ -381,8 +489,9 @@ Return ONLY valid JSON in this exact format (no other text):
       return true;
     });
 
-    // Ensure at least one subtask
-    if (validated.length === 0) {
+    // Enforce at least one subtask for real task plans.
+    // For conversational messages the LLM intentionally returns subtasks: [] — allow that.
+    if (validated.length === 0 && !isConversational) {
       logger.warn('[Manager] All subtasks filtered out, preserving first original');
       return subtasks.length > 0 ? [subtasks[0]] : ['Complete the user request'];
     }

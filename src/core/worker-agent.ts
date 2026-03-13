@@ -68,7 +68,7 @@ export class WorkerAgent {
     orchestrator: ModelOrchestrator,
     mcpManager: MCPServerManager,
     workspace: WorkspaceManager,
-    maxIterations: number = 5,
+    maxIterations: number = 20,
     personaManager?: PersonaManager
   ) {
     this.orchestrator = orchestrator;
@@ -439,35 +439,28 @@ Please complete this subtask and report your findings.`,
       if (response.toolCalls && response.toolCalls.length > 0) {
         logger.info(`  [Worker] Using ${response.toolCalls.length} tool(s)`);
 
-        // Detect repetitive tool calls BEFORE executing
+        // Detect repetitive tool calls BEFORE executing.
+        // Only block exact-same (tool + args) duplicates — calling the same tool
+        // with DIFFERENT arguments (e.g. yfinance_get_ticker_info for MSFT then NVDA)
+        // is intentional and must NOT be blocked.
         const proposedTools = response.toolCalls.map(tc => {
           const args = JSON.parse(tc.function.arguments);
           return `${tc.function.name}:${JSON.stringify(args)}`;
         });
-        
-        // Check if we're about to repeat the same tool call (name-only check)
-        const lastToolCalls = toolsUsed.slice(-2);
-        const isRepetitive = proposedTools.some(proposed => {
-          const toolName = proposed.split(':')[0];
-          return lastToolCalls.filter(t => t === toolName).length >= 2;
-        });
 
-        // Exact-signature check: catches same tool + same args within a subtask.
-        // This catches the case where the model reads the same file twice in
-        // consecutive iterations before the name-only check triggers.
         const exactDuplicate = proposedTools.some(sig => executedToolSignatures.has(sig));
 
-        if ((isRepetitive && iteration >= 2) || exactDuplicate) {
+        if (exactDuplicate) {
+          const dupSig = proposedTools.find(sig => executedToolSignatures.has(sig)) || '';
+          const dupToolName = dupSig.split(':')[0];
           logger.warn(`  [Worker] Detected repetitive tool usage - interrupting loop`);
           conversationHistory.push({
             role: 'user',
-            content: `STOP: You are calling the same tool with the same arguments repeatedly. Do NOT repeat it again.
+            content: `STOP: You already called \`${dupToolName}\` with these exact arguments in a previous step. Do NOT repeat the same call.
 
 You have two choices:
-1. If there is a DIFFERENT next step required to complete the subtask, take it now using the appropriate tool.
-2. If all required work is genuinely complete, respond with a thorough description of everything accomplished — do NOT call any more tools.
-
-Do not assume the task is complete just because one step succeeded. Review what the subtask requires and check whether you have actually finished all of it.`,
+1. If more work remains (e.g. other symbols, other queries), call the tool with DIFFERENT arguments now.
+2. If all required work is genuinely complete, respond with a thorough description of everything accomplished — do NOT call any more tools.`,
           });
           continue; // Skip executing the repetitive tools, let model reconsider
         }
@@ -658,11 +651,32 @@ IMPORTANT: Do not claim completion unless the core deliverable (e.g. the file wr
       });
 
       if (hasSuccessfulTools && !hasToolFailures) {
-        // Tools ran but the model never produced a conclusive text response.
-        // Report the actual tools used so the Client coherence check can verify
-        // whether the right work was done — do NOT claim overall success here.
-        finalResult = `Max iterations reached. Tools executed (${toolsUsed.length}): ${toolsUsed.join(', ')}. The model did not produce a final confirmation. Validation required.`;
-        logger.warn(`[Worker] Max iterations reached after ${toolsUsed.length} tool(s) — no conclusive response from model`);
+        // Tools ran successfully but the model never produced a conclusive text
+        // response.  All the gathered data is in conversationHistory — make one
+        // final LLM call with NO tools so the model is forced to synthesise a
+        // text answer from what it already has rather than calling more tools.
+        logger.warn(`[Worker] Max iterations reached after ${toolsUsed.length} tool(s) — forcing synthesis response`);
+        try {
+          conversationHistory.push({
+            role: 'user',
+            content:
+              'You have already gathered all the data above. ' +
+              'NOW write your final comprehensive response using ONLY what you have already collected — ' +
+              'do not call any more tools. Summarise all findings clearly and completely.',
+          });
+          const synthResponse = await this.orchestrator.chatWithFallback(
+            { messages: conversationHistory }, // no `tools` field → forces text-only reply
+            useToolCallingFallback,
+          );
+          finalResult =
+            synthResponse.content ||
+            `Max iterations reached. Tools executed (${toolsUsed.length}): ${toolsUsed.join(', ')}.`;
+          logger.info(`[Worker] Forced synthesis produced ${finalResult.length} chars`);
+        } catch (synthError) {
+          const errMsg = synthError instanceof Error ? synthError.message : String(synthError);
+          logger.warn(`[Worker] Forced synthesis failed: ${errMsg}`);
+          finalResult = `Max iterations reached. Tools executed (${toolsUsed.length}): ${toolsUsed.join(', ')}.`;
+        }
       } else if (hasToolFailures) {
         // Build a specific failure summary from the circuit breaker data
         const failureSummary = [...toolFailureCounts.entries()]
@@ -717,51 +731,31 @@ IMPORTANT: Do not claim completion unless the core deliverable (e.g. the file wr
   }
 
   /**
-   * Determine if we should prompt Worker to check for completion
-   * This helps prevent over-iteration by asking Worker to confirm task is done
+   * Determine if we should prompt Worker to check for completion.
+   * Fires every 3 successful tool calls (regardless of tool type) so research
+   * tasks (yfinance, brave-search, etc.) get a "are you done?" nudge just like
+   * file-operation tasks do.  Also fires when we are approaching the iteration
+   * cap so the model has a chance to synthesise before hitting the hard limit.
    */
   private shouldPromptForCompletion(
     toolsUsed: string[],
     currentIteration: number
   ): boolean {
-    // Don't prompt on first iteration - let Worker do initial work
+    // Don't prompt on the very first iteration — let Worker do initial work first.
     if (currentIteration === 0) {
       return false;
     }
 
-    // Immediate prompt after browser navigation - that's usually the end of the task
-    const hasBrowserNavigation = toolsUsed.some(tool => tool.includes('browser_navigate'));
-    if (hasBrowserNavigation) {
+    // Approaching the iteration limit — give the model one last chance to wrap up.
+    const nearIterationLimit =
+      this.maxIterations > 0 &&
+      currentIteration >= Math.floor(this.maxIterations * 0.7);
+    if (nearIterationLimit) {
       return true;
     }
 
-    // Detect repetitive tool usage - sign of stuck loop
-    const lastThreeTools = toolsUsed.slice(-3);
-    if (lastThreeTools.length === 3 && 
-        lastThreeTools[0] === lastThreeTools[1] && 
-        lastThreeTools[1] === lastThreeTools[2]) {
-      return true; // Same tool called 3 times in a row - prompt for completion
-    }
-
-    // Don't prompt too frequently - only every 2 iterations after first
-    if (currentIteration % 2 !== 0) {
-      return false;
-    }
-
-    // Prompt only when genuinely substantive operations have completed.
-    // 'create_directory' is intentionally excluded — it is a setup step, not
-    // evidence that the main deliverable (e.g. file content) has been written.
-    // Pure tool-free responses (e.g. "explain X") never reach this point because
-    // no tools means hasSignificantOperations is false.
-    const hasSignificantOperations = toolsUsed.some(tool =>
-      tool.includes('write') ||
-      tool.includes('edit') ||
-      tool.includes('read') ||
-      tool.includes('browser') ||
-      tool.includes('navigate') ||
-      (tool.includes('create') && !tool.includes('directory') && !tool.includes('dir'))
-    );
-
-    return hasSignificantOperations && toolsUsed.length >= 2;
+    // Fire every 3 successful tool calls for any tool type
+    // (at 3, 6, 9, 12 … tools accumulated).
+    return toolsUsed.length >= 3 && toolsUsed.length % 3 === 0;
   }
 }

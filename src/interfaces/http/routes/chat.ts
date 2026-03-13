@@ -35,7 +35,7 @@ export function setupChatRoutes(app: Express, sessionManager: SessionManager): v
         response: response.content,
         iterations: response.iterations,
         toolsUsed: response.toolsUsed,
-        plan: response.plan,
+        ...(response.plan !== undefined && { plan: response.plan }),
       });
     } catch (error) {
       logger.error('[API] Chat error:', error);
@@ -87,7 +87,7 @@ export function setupChatRoutes(app: Express, sessionManager: SessionManager): v
           content: response.content,
           iterations: response.iterations,
           toolsUsed: response.toolsUsed,
-          plan: response.plan,
+          ...(response.plan !== undefined && { plan: response.plan }),
         });
 
         // Update activity
