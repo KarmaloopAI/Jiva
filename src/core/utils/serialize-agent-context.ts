@@ -40,7 +40,9 @@ function serializeMessage(msg: Message): string {
   const role = msg.role.toUpperCase();
   const content = typeof msg.content === 'string'
     ? msg.content
-    : msg.content.map(c => c.text || '[image]').join(' ');
+    : msg.content
+      ? msg.content.map(c => c.text || '[image]').join(' ')
+      : '[tool call]';
   return `[${role}]: ${content}`;
 }
 

@@ -4,9 +4,16 @@
 
 export interface Message {
   role: 'system' | 'developer' | 'user' | 'assistant' | 'tool';
-  content: string | MessageContent[];
+  /** Text content. May be null/empty when the message contains only tool_calls. */
+  content: string | MessageContent[] | null;
   name?: string;
   tool_call_id?: string;
+  /**
+   * Standard OpenAI tool call array. Present on assistant messages in standard
+   * (non-Harmony) tool-calling mode. Must be preserved in the message history so
+   * subsequent role:'tool' results can be matched by tool_call_id.
+   */
+  tool_calls?: ToolCall[];
 }
 
 export interface MessageContent {

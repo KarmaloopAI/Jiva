@@ -100,6 +100,8 @@ export interface CodeAgentConfig {
 
 const DEFAULT_MAX_ITERATIONS = 50;
 const DOOM_LOOP_THRESHOLD = 3;
+/** Max consecutive read_file calls before injecting an "act, don't just read" nudge. */
+const MAX_CONSECUTIVE_READS = 5;
 const CODE_MODE_INDICATOR = '[CODE MODE]';
 // Default token threshold for in-loop compaction (90K leaves ~38K headroom in a 128K model)
 const DEFAULT_COMPACTION_THRESHOLD = 90_000;
@@ -123,35 +125,41 @@ PERSISTENCE AND COMPLETION:
 - Verify your changes are correct — run tests or the build after making changes when appropriate.
 
 TOOLS AVAILABLE:
-- read_file: Read files or list directories. Always read before editing.
-- edit_file: Replace a specific string in a file (use old_string/new_string). Preferred for partial changes.
-- write_file: Create new files or completely rewrite existing ones.
-- glob: Find files matching a pattern (e.g. "**/*.ts").
-- grep: Search file contents with regex.
+- read_file: Read an existing file or list a directory. Only needed before editing an existing file.
+- edit_file: Replace a specific string in an existing file (old_string → new_string). For partial changes.
+- write_file: Create a new file or fully overwrite an existing one. Use this to create files from scratch.
+- glob: Find files matching a pattern (e.g. "**/*.ts"). Only when you need to locate existing files.
+- grep: Search existing file contents with regex. Only when you need to find something in existing code.
 - bash: Run shell commands (build, test, lint, git operations).
 - spawn_code_agent: Delegate a focused sub-task to a child agent.
 
-CODING PRINCIPLES:
-1. ALWAYS read a file before editing it — never edit blindly.
-2. Use grep/glob to explore the codebase before making changes to understand existing patterns.
-3. Make minimal, targeted changes — edit the exact lines that need changing.
-4. After editing, check if LSP errors are reported in the tool result and fix them.
-5. Verify your changes work by running tests or the build when appropriate.
-6. Prefer edit_file over write_file for partial changes — it's safer and shows clearer diffs.
-7. Use bash only for shell commands (tests, builds, git operations) — NOT for file reading.
+CODING PRINCIPLES — READ CAREFULLY:
+1. CREATING A NEW FILE → use write_file immediately. Do NOT read or explore first.
+2. EDITING AN EXISTING FILE → read it first with read_file, then edit_file for targeted changes.
+3. Only use glob/grep when you genuinely need to locate or understand existing code.
+4. Make minimal, targeted changes — edit the exact lines that need changing.
+5. After editing, check LSP errors in the tool result and fix them.
+6. Verify your changes work by running tests or the build when appropriate.
+7. Use bash only for shell commands (tests, builds, git) — NOT for reading files.
+8. LARGE FILES (100+ lines): write in stages — never try to generate a complete large file in one call.
+   - Stage 1: write_file with the skeleton/structure only (HTML tags, empty <style>, empty <script>)
+   - Stage 2: edit_file to add CSS content into the <style> block
+   - Stage 3: edit_file to add JS content into the <script> block
+   - Each individual call must be short enough to fit in one model response.
 
-TOOL SELECTION RULES (follow these exactly):
-- To READ a file → use read_file, NOT bash
-- To LIST directory contents → use read_file on the directory path, NOT bash ls
-- To FIND files by name/pattern → use glob, NOT bash find
-- To SEARCH file contents → use grep, NOT bash grep/rg
-- To RUN a command (build/test/git) → use bash
+TOOL SELECTION RULES (follow exactly):
+- To CREATE a new file → write_file immediately (no reads needed first)
+- To READ an existing file → read_file (not bash)
+- To LIST directory contents → read_file on the directory path (not bash ls)
+- To FIND files by pattern → glob (not bash find)
+- To SEARCH file contents → grep (not bash grep/rg)
+- To RUN commands (build/test/git) → bash
 
-WHEN EXPLORING:
-- Use glob to find files by pattern before assuming file paths.
-- Use grep to find where functions/classes/variables are defined or used.
-- Read the relevant files to understand context before changing anything.
-- Do NOT use bash for exploration tasks that glob/grep/read_file can handle.`;
+WHEN TO EXPLORE (only when actually needed):
+- You are modifying existing code and need to understand its structure first.
+- You need to find where a function, class, or variable is defined.
+- You are debugging or tracing code through multiple files.
+- Do NOT explore before creating brand-new files — just write them directly.`;
 
   if (directive) {
     return `${base}\n\n${directive}`;
@@ -346,6 +354,13 @@ ${directive ? `\n${directive}` : ''}`;
     // Track consecutive API errors to avoid infinite error loops
     let consecutiveApiErrors = 0;
     const MAX_CONSECUTIVE_API_ERRORS = 3;
+    // Track empty responses (no tool calls, no content) so we can inject a recovery nudge.
+    // Allow up to 4 retries — Krutrim/Groq can return blank responses transiently and the
+    // model usually recovers within 2-3 nudges.
+    let emptyResponseCount = 0;
+    const MAX_EMPTY_RESPONSES = 4;
+    // Track consecutive read_file calls — model can get stuck re-reading without making changes
+    let consecutiveReadCount = 0;
 
     let iterations = 0;
     let finalContent = '';
@@ -425,6 +440,15 @@ ${directive ? `\n${directive}` : ''}`;
         const isValidationFailed = msg.includes('Tool call validation failed') || msg.includes('did not match schema');
 
         if (isToolUseFailed || isValidationFailed) {
+          // Conversation turn guard: for API-rejected calls (e.g. 400 tool_use_failed), the
+          // model's assistant turn was never recorded. Injecting a user correction directly
+          // would create an invalid user→user sequence. Add an empty assistant placeholder
+          // so the structure is user→assistant→user before the correction lands.
+          const lastMsg = messages[messages.length - 1];
+          if (lastMsg && lastMsg.role !== 'assistant') {
+            messages.push({ role: 'assistant', content: '' });
+          }
+
           // --- Specific correction: edit_file missing new_string ---
           // gpt-oss-120b sometimes generates edit_file with old_string but forgets new_string.
           // The generic message doesn't help — we need to name the missing field explicitly.
@@ -448,6 +472,55 @@ ${directive ? `\n${directive}` : ''}`;
                 'new_string must contain the complete replacement for old_string.',
             });
             consecutiveApiErrors = 0;
+            emptyResponseCount = 0; // fresh recovery budget after targeted guidance
+            continue;
+          }
+
+          // --- Specific correction: tool content too large (output token limit hit) ---
+          // When the model generates a very large write_file or edit_file call, the API cuts off
+          // the JSON mid-content because the response exceeds the output token limit. The resulting
+          // JSON is unparseable. Detect by tool name appearing in the failed_generation field.
+          // Note: failed_generation is a JSON-encoded string so quotes are escaped (\"tool_name\").
+          const isContentTooLarge =
+            (msg.includes('write_file') || msg.includes('edit_file')) &&
+            (msg.includes('Failed to parse tool call') || msg.includes('tool_use_failed'));
+
+          if (isContentTooLarge) {
+            // Parse the actual tool name from failed_generation to distinguish write_file vs edit_file
+            let failedToolName = msg.includes('edit_file') && !msg.includes('write_file') ? 'edit_file' : 'write_file';
+            let targetFile = '';
+            try {
+              const jsonMatch = msg.match(/API error \(\d+\): (.+)/s);
+              if (jsonMatch) {
+                const errorBody = JSON.parse(jsonMatch[1]);
+                const failedGen: string | undefined = errorBody?.error?.failed_generation;
+                if (failedGen) {
+                  const parsed = JSON.parse(failedGen);
+                  if (parsed?.name) failedToolName = parsed.name; // authoritative source
+                  const fp = parsed?.arguments?.file_path;
+                  if (fp) targetFile = ` for \`${fp}\``;
+                }
+              }
+            } catch { /* ignore extraction errors */ }
+            const isEditFile = failedToolName === 'edit_file';
+
+            logger.warn(`[CodeAgent] ${isEditFile ? 'edit_file' : 'write_file'}${targetFile} content truncated (exceeded output token limit) — asking model to write in stages`);
+            const correctionContent = isEditFile
+              ? `Your edit_file call${targetFile} failed: new_string was too large and the response was cut off mid-JSON.\n\n` +
+                `MAXIMUM 20 LINES per edit_file call. Write one tiny chunk at a time:\n` +
+                `  - For JavaScript: add just ONE or TWO functions per call\n` +
+                `  - For HTML: add just one row of buttons per call\n\n` +
+                `Call edit_file now with a new_string of at most 20 lines.`
+              : `Your write_file call${targetFile} failed: the file content was too large and was cut off mid-JSON.\n\n` +
+                `Write the file in stages — NEVER put CSS or JavaScript in the initial write_file:\n` +
+                `  Stage 1: write_file — HTML skeleton ONLY (empty <style></style> and empty <script></script>) — MAX 20 lines\n` +
+                `  Stage 2: edit_file — add CSS (max 20 lines at a time)\n` +
+                `  Stage 3: edit_file — add JavaScript ONE function at a time\n\n` +
+                `Start with Stage 1 NOW: write_file with just the bare HTML skeleton (20 lines max).`;
+
+            messages.push({ role: 'user', content: correctionContent });
+            consecutiveApiErrors = 0;
+            emptyResponseCount = 0; // reset so model has fresh recovery budget for staged CSS/JS edits
             continue;
           }
 
@@ -507,14 +580,26 @@ ${directive ? `\n${directive}` : ''}`;
         break;
       }
 
-      // Add assistant response to messages.
-      // In Harmony mode the raw response (with <|call|> tokens) is stored so the model sees its
-      // prior tool calls in the next turn. In standard mode, just the content is stored.
+      // Add assistant response to messages, preserving the full structure needed for the next turn.
+      //
+      // Three cases:
+      //   1. Harmony mode: store rawHarmony string (contains <|call|> tokens the model needs).
+      //   2. Standard tool-calling with tool calls: store content + tool_calls so subsequent
+      //      role:'tool' results can be matched by tool_call_id (required by OpenAI-compatible APIs).
+      //   3. Text-only response: store content as-is.
       const rawHarmony: string | undefined = (response as any).raw?.parsedHarmony?.rawResponse;
-      messages.push({
-        role: 'assistant',
-        content: rawHarmony ?? response.content,
-      });
+      if (rawHarmony) {
+        messages.push({ role: 'assistant', content: rawHarmony });
+      } else if (response.toolCalls && response.toolCalls.length > 0) {
+        // Preserve tool_calls so tool results are properly matched in the next turn
+        messages.push({
+          role: 'assistant',
+          content: response.content || null,
+          tool_calls: response.toolCalls,
+        });
+      } else {
+        messages.push({ role: 'assistant', content: response.content });
+      }
 
       // Stream the visible (final-channel) text output if callback provided
       if (response.content && onChunk) {
@@ -550,8 +635,36 @@ ${directive ? `\n${directive}` : ''}`;
       }
       // ────────────────────────────────────────────────────────────────────────
 
-      // No tool calls → final response
+      // No tool calls → model is done (or gave up)
       if (!response.toolCalls || response.toolCalls.length === 0) {
+        if (!response.content && emptyResponseCount < MAX_EMPTY_RESPONSES) {
+          // Model returned empty content with no tool calls — it got stuck or confused.
+          // Inject an escalating recovery nudge and let it try again.
+          emptyResponseCount++;
+          logger.warn(
+            `[CodeAgent] Empty response with no tool calls (${emptyResponseCount}/${MAX_EMPTY_RESPONSES}) — injecting recovery nudge`,
+          );
+
+          // Escalate urgency with each retry so the model doesn't keep ignoring it
+          let nudgeContent: string;
+          if (emptyResponseCount <= 2) {
+            nudgeContent =
+              'Your last response was empty. Please continue working on the task.\n\n' +
+              '- If you need to CREATE a file → call write_file now.\n' +
+              '- If you need to EDIT a file → call read_file then edit_file.\n' +
+              '- If the task is already complete → provide a brief summary of what was done.';
+          } else {
+            nudgeContent =
+              `IMPORTANT (attempt ${emptyResponseCount}/${MAX_EMPTY_RESPONSES}): Your response is empty again — you have not called any tools.\n\n` +
+              `You MUST call a tool NOW. Do not output plain text without a tool call.\n` +
+              `  • To CREATE a new file → call write_file immediately with the file content.\n` +
+              `  • To EDIT an existing file → call edit_file with old_string and new_string.\n` +
+              `  • To LIST files → call read_file on the directory.\n\n` +
+              `Make a tool call in your very next response. Do not explain — just call the tool.`;
+          }
+          messages.push({ role: 'user', content: nudgeContent });
+          continue;
+        }
         finalContent = response.content || '[No response content]';
         break;
       }
@@ -564,6 +677,13 @@ ${directive ? `\n${directive}` : ''}`;
           toolArgs = JSON.parse(toolCall.function.arguments);
         } catch {
           // malformed args
+        }
+
+        // Consecutive reads tracker — any non-read tool resets the streak
+        if (toolName === 'read_file') {
+          consecutiveReadCount++;
+        } else {
+          consecutiveReadCount = 0;
         }
 
         // Doom loop check
@@ -625,6 +745,32 @@ ${directive ? `\n${directive}` : ''}`;
         // Add tool result to messages (using Harmony format helper)
         const toolMessage = formatToolResult(toolCall.id, toolName, toolResult);
         messages.push(toolMessage);
+
+        // Reset empty response budget after any productive (mutating) tool call.
+        // This gives the model a fresh set of recovery nudges for each new work phase
+        // (e.g., after writing the skeleton, it gets 4 more chances to add CSS/JS).
+        if (toolName === 'write_file' || toolName === 'edit_file' || toolName === 'bash') {
+          emptyResponseCount = 0;
+        }
+
+        // Excessive reads nudge — model is re-reading without making any changes.
+        // Fires after MAX_CONSECUTIVE_READS consecutive read_file calls; resets the count
+        // so the model gets a fresh budget after each nudge (prevents spamming).
+        if (consecutiveReadCount >= MAX_CONSECUTIVE_READS) {
+          logger.warn(`[CodeAgent] ${consecutiveReadCount} consecutive read_file calls without edits — nudging model to act`);
+          consecutiveReadCount = 0;
+          messages.push({
+            role: 'user',
+            content:
+              `You have called read_file ${MAX_CONSECUTIVE_READS}+ times in a row without making any changes.\n\n` +
+              `STOP READING — you have enough context. Make a concrete change NOW:\n` +
+              `  • To ADD or CHANGE content in an existing file → call edit_file with old_string and new_string\n` +
+              `  • To CREATE a new file → call write_file\n` +
+              `  • If the task is fully complete → provide a final summary (no more tool calls needed)\n\n` +
+              `Do NOT call read_file again until you have made at least one edit_file or write_file call.`,
+          });
+          break; // exit inner tool loop — model sees the nudge on the next outer iteration
+        }
       }
     }
 
