@@ -62,8 +62,9 @@ function readRecentConversations(limit = 5): ConversationMeta[] {
 
 /**
  * Build the content of the date-aware jiva-directive.md.
+ * @param userDirective Optional user-authored instructions prepended before the dynamic context block.
  */
-export function buildDirectiveContent(): string {
+export function buildDirectiveContent(userDirective?: string): string {
   const now = new Date()
 
   const weekdays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
@@ -109,7 +110,7 @@ export function buildDirectiveContent(): string {
     recentActivity = `| Date | Title | Messages |\n|------|-------|----------|\n${rows}`
   }
 
-  return `# Jiva Operating Context
+  const dynamicContext = `# Jiva Operating Context
 
 ## Current Date & Time
 - Date: ${weekday}, ${month} ${day}, ${year}
@@ -124,6 +125,11 @@ export function buildDirectiveContent(): string {
 ## Recent Session Activity
 ${recentActivity}
 `
+
+  if (userDirective?.trim()) {
+    return userDirective.trim() + '\n\n---\n\n' + dynamicContext
+  }
+  return dynamicContext
 }
 
 /**
@@ -131,8 +137,8 @@ ${recentActivity}
  * This is called before WorkspaceManager.initialize() so the directive is picked up
  * as a system-level instruction for the agent.
  */
-export function writeDirective(): { path: string; content: string } {
-  const content = buildDirectiveContent()
+export function writeDirective(userDirective?: string): { path: string; content: string } {
+  const content = buildDirectiveContent(userDirective)
   try {
     if (!fs.existsSync(JIVA_DIR)) {
       fs.mkdirSync(JIVA_DIR, { recursive: true })

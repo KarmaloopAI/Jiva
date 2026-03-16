@@ -1,7 +1,9 @@
 import { ipcMain, BrowserWindow, dialog, shell } from 'electron'
 import { execSync } from 'child_process'
 import { JivaRunner } from './jiva-runner'
+import type { CodeRunner } from './code-runner'
 import { readConfig, writeConfig, getJivaConfigPath } from './config-manager'
+import { writeDirective } from './directive-manager'
 import { listPersonas, activatePersona, getActivePersona } from './persona-manager'
 import fs from 'fs'
 import path from 'path'
@@ -9,6 +11,7 @@ import os from 'os'
 
 export function setupIpcHandlers(
   jivaRunner: JivaRunner,
+  codeRunner: CodeRunner,
   getWindow: () => BrowserWindow | null
 ) {
   // --- Pre-flight setup check (fast, no agent needed) ---
@@ -498,5 +501,104 @@ export function setupIpcHandlers(
 
   ipcMain.handle('window:isMaximized', () => {
     return getWindow()?.isMaximized() ?? false
+  })
+
+  // --- Code Mode: send message via CodeAgent ---
+  ipcMain.handle('code:send-message', async (_event, prompt: string) => {
+    const win = getWindow()
+    try {
+      if (!codeRunner.isReady()) {
+        const config = readConfig()
+        const workspaceDir = (config as Record<string, unknown>)?.workspaceDir as string | undefined
+          ?? os.homedir()
+        await codeRunner.initialize(workspaceDir)
+      }
+
+      const result = await codeRunner.chat(prompt, (event) => {
+        win?.webContents.send('jiva:code-log', event)
+      })
+
+      return { success: true, ...result }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // --- Git: check if directory is a git repo ---
+  ipcMain.handle('git:is-repo', (_event, dir: string) => {
+    try {
+      execSync('git rev-parse --is-inside-work-tree', { cwd: dir, timeout: 3000 })
+      return true
+    } catch {
+      return false
+    }
+  })
+
+  // --- Git: get changed files (git status --porcelain) ---
+  ipcMain.handle('git:status', (_event, dir: string) => {
+    try {
+      const output = execSync('git status --porcelain', { cwd: dir, timeout: 5000 }).toString()
+      return output
+        .split('\n')
+        .filter(Boolean)
+        .map(line => ({
+          status: line.slice(0, 2).trim(),
+          file: line.slice(3).trim(),
+        }))
+    } catch {
+      return []
+    }
+  })
+
+  // --- Git: get unified diff for a specific file ---
+  ipcMain.handle('git:diff-file', (_event, dir: string, file: string) => {
+    try {
+      // Try HEAD diff first (committed vs working tree)
+      try {
+        const diff = execSync(`git diff HEAD -- "${file}"`, { cwd: dir, timeout: 5000 }).toString()
+        if (diff.trim()) return diff
+      } catch {}
+      // Fall back to plain diff (staged only / untracked)
+      const fallback = execSync(`git diff -- "${file}"`, { cwd: dir, timeout: 5000 }).toString()
+      return fallback || null
+    } catch {
+      return null
+    }
+  })
+
+  // --- Git: initialise a new repository in a directory ---
+  ipcMain.handle('git:init-repo', (_event, dir: string) => {
+    try {
+      execSync('git init', { cwd: dir, timeout: 10000 })
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // --- Code Mode: explicitly initialise CodeRunner with a chosen directory ---
+  ipcMain.handle('code:init', async (_event, dir: string) => {
+    try {
+      await codeRunner.initialize(dir)
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // --- Directive: read user-editable directive prefix from config ---
+  ipcMain.handle('directive:get', () => {
+    const config = readConfig()
+    return (config as Record<string, unknown>)?.userDirective as string ?? ''
+  })
+
+  // --- Directive: save user-editable directive prefix to config and immediately
+  //     rewrite ~/.jiva/jiva-directive.md so the change is visible right away ---
+  ipcMain.handle('directive:set', (_event, content: string) => {
+    const config = readConfig() ?? { models: { reasoning: null } }
+    writeConfig({ ...config, userDirective: content } as Parameters<typeof writeConfig>[0])
+    // Rewrite the directive file immediately so it is up-to-date for the next agent session
+    writeDirective(content || undefined)
+    return { success: true }
   })
 }

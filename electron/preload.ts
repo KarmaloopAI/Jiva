@@ -53,6 +53,23 @@ contextBridge.exposeInMainWorld('electron', {
     close: () => ipcRenderer.invoke('window:close'),
     isMaximized: () => ipcRenderer.invoke('window:isMaximized'),
   },
+  code: {
+    sendMessage: (prompt: string) => ipcRenderer.invoke('code:send-message', prompt),
+    init: (dir: string) => ipcRenderer.invoke('code:init', dir),
+    onCodeLog: (cb: (event: unknown) => void) => {
+      ipcRenderer.on('jiva:code-log', (_event, e) => cb(e))
+    },
+  },
+  git: {
+    isRepo: (dir: string) => ipcRenderer.invoke('git:is-repo', dir),
+    status: (dir: string) => ipcRenderer.invoke('git:status', dir),
+    diffFile: (dir: string, file: string) => ipcRenderer.invoke('git:diff-file', dir, file),
+    initRepo: (dir: string) => ipcRenderer.invoke('git:init-repo', dir),
+  },
+  directive: {
+    get: () => ipcRenderer.invoke('directive:get'),
+    set: (content: string) => ipcRenderer.invoke('directive:set', content),
+  },
   onNativeThemeChanged: (callback: (isDark: boolean) => void) => {
     ipcRenderer.on('native-theme-changed', (_event, isDark) => callback(isDark))
   },

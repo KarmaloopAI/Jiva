@@ -1,13 +1,14 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
-import { ArrowLeft, Cpu, Server, Users, Sun, Moon, FolderOpen, HardDrive } from 'lucide-react'
+import { ArrowLeft, Cpu, Server, Users, Sun, Moon, FolderOpen, HardDrive, FileText } from 'lucide-react'
 import { ModelsTab } from './tabs/ModelsTab'
 import { MCPTab } from './tabs/MCPTab'
 import { PersonasTab } from './tabs/PersonasTab'
 import { WorkspaceTab } from './tabs/WorkspaceTab'
+import { DirectiveTab } from './tabs/DirectiveTab'
 import { useSettingsStore } from '../../store/settings.store'
 
-type SettingsTab = 'models' | 'mcp' | 'personas' | 'workspace'
+type SettingsTab = 'models' | 'mcp' | 'personas' | 'workspace' | 'directive'
 
 interface SettingsPageProps {
   onClose: () => void
@@ -22,6 +23,7 @@ const TABS: Array<{
   { id: 'models', label: 'Models', icon: <Cpu size={14} /> },
   { id: 'mcp', label: 'MCPs', icon: <Server size={14} /> },
   { id: 'workspace', label: 'Workspace', icon: <HardDrive size={14} /> },
+  { id: 'directive', label: 'Directive', icon: <FileText size={14} /> },
   { id: 'personas', label: 'Personas / Plugins', icon: <Users size={14} />, comingSoon: true },
 ]
 
@@ -114,6 +116,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         {activeTab === 'models' && <ModelsTab />}
         {activeTab === 'mcp' && <MCPTab />}
         {activeTab === 'workspace' && <WorkspaceTab />}
+        {activeTab === 'directive' && <DirectiveTab />}
         {activeTab === 'personas' && <PersonasTab />}
       </div>
 

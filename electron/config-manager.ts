@@ -40,6 +40,7 @@ export interface JivaConfig {
     enabled: boolean
   }>
   workspaceDir?: string  // configurable workspace directory for the Files browser
+  userDirective?: string // user-authored directive prefix, prepended before dynamic context
   debug?: boolean
   autoSave?: boolean
 }

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, nativeTheme, Menu } from 'electron'
+import { app, BrowserWindow, nativeTheme, Menu } from 'electron'
 import { execSync } from 'child_process'
 import fs from 'fs'
 import os from 'os'
@@ -6,6 +6,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { setupIpcHandlers } from './ipc-handlers'
 import { JivaRunner } from './jiva-runner'
+import { CodeRunner } from './code-runner'
 
 /**
  * Augment process.env.PATH so that npm/npx/node are findable in packaged apps.
@@ -48,13 +49,6 @@ augmentPath()
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
-// The built directory structure
-// ├─┬─┬ dist-electron
-// │ │ └── main.js
-// │ │── preload.js
-// │ └── dist
-// │     └── index.html
-
 process.env.DIST = path.join(__dirname, '../dist')
 process.env.VITE_PUBLIC = app.isPackaged
   ? process.env.DIST
@@ -62,6 +56,7 @@ process.env.VITE_PUBLIC = app.isPackaged
 
 let win: BrowserWindow | null
 let jivaRunner: JivaRunner | null = null
+let codeRunner: CodeRunner | null = null
 
 const VITE_DEV_SERVER_URL = process.env['VITE_DEV_SERVER_URL']
 
@@ -158,12 +153,10 @@ function createWindow() {
     },
   })
 
-  // Show window when ready
   win.once('ready-to-show', () => {
     win?.show()
   })
 
-  // Send native theme changes to renderer
   nativeTheme.on('updated', () => {
     win?.webContents.send('native-theme-changed', nativeTheme.shouldUseDarkColors)
   })
@@ -182,10 +175,14 @@ function createWindow() {
   return win
 }
 
-// Initialize Jiva runner singleton
 function initJivaRunner() {
   jivaRunner = new JivaRunner()
   return jivaRunner
+}
+
+function initCodeRunner() {
+  codeRunner = new CodeRunner()
+  return codeRunner
 }
 
 app.on('window-all-closed', () => {
@@ -196,9 +193,8 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', async () => {
-  if (jivaRunner) {
-    await jivaRunner.cleanup()
-  }
+  if (jivaRunner) await jivaRunner.cleanup()
+  if (codeRunner) await codeRunner.cleanup()
 })
 
 app.on('activate', () => {
@@ -210,7 +206,8 @@ app.on('activate', () => {
 app.whenReady().then(() => {
   app.name = 'Jivam'
   const runner = initJivaRunner()
-  setupIpcHandlers(runner, () => win)
+  const cRunner = initCodeRunner()
+  setupIpcHandlers(runner, cRunner, () => win)
   createAppMenu()
   createWindow()
 })

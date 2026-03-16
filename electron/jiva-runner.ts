@@ -4,6 +4,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { writeDirective } from './directive-manager'
+import { readConfig } from './config-manager'
 
 /**
  * Resolve the absolute path to jiva-core's main entry point.
@@ -188,7 +189,9 @@ export class JivaRunner extends EventEmitter {
       // --- 5. Write date-aware directive + Initialize workspace ---
       // The directive injects current date/time + recent activity so the LLM always
       // knows the correct date without relying on its training data.
-      const { path: directivePath } = writeDirective()
+      const { path: directivePath } = writeDirective(
+        (readConfig() as Record<string, unknown>)?.userDirective as string | undefined
+      )
 
       const workspaceDir = process.cwd()
       const WsClass = WorkspaceManager as new (config: unknown) => { initialize(): Promise<void> }

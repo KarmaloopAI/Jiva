@@ -1,3 +1,15 @@
+export interface CodeLogEvent {
+  timestamp: string
+  level: 'info' | 'warn' | 'error'
+  tag: string
+  message: string
+}
+
+export interface GitFile {
+  status: string
+  file: string
+}
+
 import type { PersonaInfo } from './persona'
 import type { JivaRunResult } from './jiva'
 
@@ -82,6 +94,21 @@ interface ElectronAPI {
     maximize: () => Promise<void>
     close: () => Promise<void>
     isMaximized: () => Promise<boolean>
+  }
+  code: {
+    sendMessage: (prompt: string) => Promise<{ success: boolean; content?: string; toolsUsed?: string[]; iterations?: number; error?: string }>
+    init: (dir: string) => Promise<{ success: boolean; error?: string }>
+    onCodeLog: (cb: (event: CodeLogEvent) => void) => void
+  }
+  git: {
+    isRepo: (dir: string) => Promise<boolean>
+    status: (dir: string) => Promise<GitFile[]>
+    diffFile: (dir: string, file: string) => Promise<string | null>
+    initRepo: (dir: string) => Promise<{ success: boolean; error?: string }>
+  }
+  directive: {
+    get: () => Promise<string>
+    set: (content: string) => Promise<{ success: boolean }>
   }
   onNativeThemeChanged: (callback: (isDark: boolean) => void) => void
   setup: {

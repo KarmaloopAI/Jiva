@@ -91,7 +91,7 @@ export function TopBar({
         <NavTab id="chat" label="Chat" isActive={activeTab === 'chat'} onClick={onTabChange} />
         <NavTab id="files" label="Files" isActive={activeTab === 'files'} onClick={onTabChange} />
         <NavTab id="cowork" label="Cowork" isActive={activeTab === 'cowork'} comingSoon onClick={onTabChange} />
-        <NavTab id="code" label="Code" isActive={activeTab === 'code'} comingSoon onClick={onTabChange} />
+        <NavTab id="code" label="Code" isActive={activeTab === 'code'} onClick={onTabChange} />
       </nav>
 
       {/* Spacer */}
