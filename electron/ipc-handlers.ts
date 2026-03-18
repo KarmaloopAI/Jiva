@@ -52,6 +52,23 @@ export function setupIpcHandlers(
           } catch {}
         }
       }
+      // Windows fallback paths
+      if (!jivaCoreOk && process.platform === 'win32') {
+        const windowsPaths = [
+          path.join(process.env.APPDATA ?? '', 'npm', 'node_modules', 'jiva-core', 'package.json'),
+          path.join(process.env.LOCALAPPDATA ?? '', 'npm', 'node_modules', 'jiva-core', 'package.json'),
+        ]
+        for (const wp of windowsPaths) {
+          if (fs.existsSync(wp)) {
+            try {
+              const pkg = JSON.parse(fs.readFileSync(wp, 'utf-8')) as { version?: string }
+              jivaCoreVersion = pkg.version
+              jivaCoreOk = true
+              break
+            } catch {}
+          }
+        }
+      }
     }
 
     // 3. Configuration — check correct platform path first, fall back to legacy ~/.jiva
@@ -100,7 +117,9 @@ export function setupIpcHandlers(
       }
       return { success: true, status: jivaRunner.getStatus() }
     } catch (err) {
-      return { success: false, error: err instanceof Error ? err.message : String(err) }
+      const errorMsg = err instanceof Error ? err.message : String(err)
+      console.error('[IPC] jiva:server:start failed:', errorMsg)
+      return { success: false, error: errorMsg }
     }
   })
 

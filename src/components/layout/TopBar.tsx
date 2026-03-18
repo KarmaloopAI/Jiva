@@ -16,7 +16,7 @@ interface TopBarProps {
 }
 
 function StatusDot() {
-  const { connectionStatus, serverStatus } = useJivaStore()
+  const { connectionStatus, serverStatus, lastError } = useJivaStore()
 
   const isConnected = connectionStatus === 'connected'
   const isStarting = serverStatus === 'starting' || connectionStatus === 'connecting'
@@ -34,9 +34,10 @@ function StatusDot() {
             ? 'bg-red-500'
             : 'bg-gray-400'
         }`}
+        title={lastError ?? undefined}
       />
       <span className="hidden sm:inline">
-        {isConnected ? 'Connected' : isStarting ? 'Starting...' : isError ? 'Error' : 'Offline'}
+        {isConnected ? 'Connected' : isStarting ? 'Starting...' : isError ? (lastError ?? 'Error') : 'Offline'}
       </span>
     </div>
   )
