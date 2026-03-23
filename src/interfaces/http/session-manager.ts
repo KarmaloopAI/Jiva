@@ -159,9 +159,9 @@ export class SessionManager extends EventEmitter {
       const reasoningModel = createKrutrimModel({
         endpoint: modelConfig.reasoning.endpoint,
         apiKey: modelConfig.reasoning.apiKey,
-        model: modelConfig.reasoning.model,
+        model: modelConfig.reasoning.model || (modelConfig.reasoning as any).defaultModel,
         type: 'reasoning',
-        useHarmonyFormat: true, // gpt-oss-120b requires Harmony format
+        useHarmonyFormat: (modelConfig.reasoning as any).useHarmonyFormat ?? false,
         defaultReasoningEffort: 'high',
       });
 
