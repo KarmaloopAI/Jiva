@@ -2,7 +2,7 @@
 
 ## Overview
 
-Jiva supports multiple OpenAI-compatible API providers including Krutrim, Groq, OpenAI, Ollama, and others. The configuration system is designed to be provider-agnostic with smart defaults.
+Jiva supports any OpenAI-compatible API provider including Krutrim, Groq, Sarvam, OpenAI, Ollama, and others. The configuration system is fully provider-agnostic — all provider-specific behaviour (tool format, reasoning effort strategy, token budgets) is driven by configuration flags, not hardcoded logic.
 
 ## Configuration Location
 
@@ -39,13 +39,23 @@ MCP Servers:
 jiva setup
 ```
 
-This runs the interactive setup wizard that prompts for:
+This runs the interactive setup wizard. It starts by asking you to choose a provider:
 
-1. **API Endpoint** - The base URL for your LLM provider
-2. **API Key** - Your authentication token
-3. **Model Name** - The specific model to use
-4. **Tool Format** - How tool calls are formatted (Harmony vs Standard)
-5. **Multimodal Model** (optional) - For image understanding
+```
+? Select your LLM provider:
+  ❯ Krutrim
+    Groq
+    Sarvam
+    OpenAI-Compatible (custom endpoint)
+```
+
+Selecting a named provider automatically fills in the API endpoint, default model name, tool format, and reasoning effort strategy. You only need to supply your API key (and optionally override the model name).
+
+For **OpenAI-Compatible**, you are prompted to enter the endpoint and model name manually.
+
+The wizard then (optionally) configures a **multimodal model** for image understanding. Note: Sarvam does not currently offer a multimodal model — this step is skipped automatically when Sarvam is selected for reasoning.
+
+**API key deduplication:** If you select the same provider for both the reasoning and multimodal models, the wizard asks for the key only once.
 
 ### Updating Configuration
 
@@ -65,26 +75,50 @@ Choose what to update:
 
 Different providers use different formats for tool calling:
 
-### Harmony Format (Krutrim)
+### Harmony Format (Krutrim only)
 - Used by: Krutrim Cloud with `gpt-oss-120b`
-- Tools embedded in developer message
+- Tools embedded in developer message as TypeScript-like signatures
 - Response format: `<|call|>tool_name(args)<|return|>`
 - **Set**: `useHarmonyFormat: true`
 
-### Standard OpenAI Format (Most Providers)
-- Used by: Groq, OpenAI, Ollama, and most other providers
-- Tools sent as separate `tools` array
+### Standard OpenAI Format (all other providers)
+- Used by: Groq, Sarvam, OpenAI, Ollama, and most other providers
+- Tools sent as separate `tools` array in the request body
 - Response format: Standard `tool_calls` structure
-- **Set**: `useHarmonyFormat: false` (or omit - this is the default)
+- **Set**: `useHarmonyFormat: false` (or omit — this is the default)
 
-### Smart Detection
+### Provider Presets
 
-The setup wizard automatically detects the recommended format based on your model name:
+The setup wizard automatically sets the correct format based on provider selection — no manual configuration needed:
 
-- **`gpt-oss-120b`** → Recommends `useHarmonyFormat: true`
-- **All other models** → Recommends `useHarmonyFormat: false`
+| Provider | `useHarmonyFormat` |
+|----------|--------------------|
+| Krutrim | `true` |
+| Groq | `false` |
+| Sarvam | `false` |
+| OpenAI-Compatible | `false` |
 
-You can override this recommendation if needed.
+## Reasoning Effort Strategy
+
+Controls how reasoning effort (`low` / `medium` / `high`) is communicated to the model:
+
+| Strategy | Behaviour | Recommended for |
+|----------|-----------|-----------------|
+| `api_param` | Sent as `reasoning_effort` request field | Groq, Sarvam |
+| `system_prompt` | Injected as leading system message: `"Reasoning: <level>"` | Krutrim gpt-oss-120b |
+| `both` | Both of the above | Unknown / custom providers |
+
+The setup wizard sets this automatically. You can override it in the config file:
+
+```json
+{
+  "models": {
+    "reasoning": {
+      "reasoningEffortStrategy": "api_param"
+    }
+  }
+}
+```
 
 ## Provider Examples
 
@@ -98,7 +132,8 @@ You can override this recommendation if needed.
       "apiKey": "your-krutrim-api-key",
       "model": "gpt-oss-120b",
       "type": "reasoning",
-      "useHarmonyFormat": true
+      "useHarmonyFormat": true,
+      "reasoningEffortStrategy": "system_prompt"
     }
   }
 }
@@ -112,27 +147,35 @@ You can override this recommendation if needed.
     "reasoning": {
       "endpoint": "https://api.groq.com/openai/v1/chat/completions",
       "apiKey": "your-groq-api-key",
-      "model": "openai/gpt-oss-20b",
+      "model": "openai/gpt-oss-120b",
       "type": "reasoning",
-      "useHarmonyFormat": false
+      "reasoningEffortStrategy": "api_param"
     }
   }
 }
 ```
 
-Or omit `useHarmonyFormat` entirely (defaults to false):
+### Sarvam
+
+Sarvam-105B is a reasoning model that internally performs a chain-of-thought pass before producing output. Set `defaultMaxTokens` to at least `8192` to give the model sufficient token budget for both reasoning and output.
+
 ```json
 {
   "models": {
     "reasoning": {
-      "endpoint": "https://api.groq.com/openai/v1/chat/completions",
-      "apiKey": "your-groq-api-key",
-      "model": "openai/gpt-oss-20b",
-      "type": "reasoning"
+      "endpoint": "https://api.sarvam.ai/v1/chat/completions",
+      "apiKey": "your-sarvam-api-key",
+      "model": "sarvam-105b",
+      "type": "reasoning",
+      "useHarmonyFormat": false,
+      "reasoningEffortStrategy": "api_param",
+      "defaultMaxTokens": 8192
     }
   }
 }
 ```
+
+Sarvam does not offer a multimodal model. Do not configure a `multimodal` block when using Sarvam as your sole provider.
 
 ### OpenAI
 
@@ -142,7 +185,7 @@ Or omit `useHarmonyFormat` entirely (defaults to false):
     "reasoning": {
       "endpoint": "https://api.openai.com/v1/chat/completions",
       "apiKey": "sk-...",
-      "model": "gpt-4",
+      "model": "gpt-4o",
       "type": "reasoning"
     }
   }
@@ -176,15 +219,21 @@ Or omit `useHarmonyFormat` entirely (defaults to false):
       endpoint: string;          // API endpoint URL
       apiKey: string;            // API key
       type: "reasoning";         // Fixed type
-      defaultModel: string;      // Model name/ID
-      useHarmonyFormat?: boolean; // Optional, defaults to false
+      model?: string;            // Model name/ID (preferred)
+      defaultModel?: string;     // Alias for model (legacy)
+      useHarmonyFormat?: boolean; // Krutrim gpt-oss-120b only; defaults to false
+      reasoningEffortStrategy?: "api_param" | "system_prompt" | "both"; // defaults to "both"
+      defaultReasoningEffort?: "low" | "medium" | "high";
+      defaultMaxTokens?: number; // Required for Sarvam-105B (8192 recommended)
+      includeReasoning?: boolean; // Request thinking tokens in response (Groq)
     };
     multimodal?: {
       name: string;              // "multimodal"
       endpoint: string;          // API endpoint URL
       apiKey: string;            // API key
       type: "multimodal";        // Fixed type
-      defaultModel: string;      // Model name/ID
+      model?: string;            // Model name/ID
+      defaultModel?: string;     // Alias for model (legacy)
     };
   };
   mcpServers: {
@@ -374,13 +423,33 @@ jiva config → Reasoning Model
 
 ## Migration Guide
 
-### From Krutrim to Groq
+### Switching Providers
+
+The easiest way to switch providers is to re-run the setup wizard:
+
+```bash
+jiva setup
+```
+
+Select your new provider and the wizard fills in endpoint, model, and format settings automatically.
+
+### From Krutrim to Groq (manual)
 
 1. Run `jiva config → Reasoning Model`
 2. Update endpoint: `https://api.groq.com/openai/v1/chat/completions`
 3. Update API key: Your Groq API key
-4. Update model: `openai/gpt-oss-20b` (or another Groq model)
+4. Update model: `openai/gpt-oss-120b` (or another Groq model)
 5. Set tool format: **No** (Standard OpenAI format)
+6. Set `reasoningEffortStrategy: "api_param"` in config file
+
+### From Krutrim to Sarvam (manual)
+
+1. Run `jiva config → Reasoning Model`
+2. Update endpoint: `https://api.sarvam.ai/v1/chat/completions`
+3. Update API key: Your Sarvam API key
+4. Update model: `sarvam-105b`
+5. Set tool format: **No** (Standard)
+6. Add `"reasoningEffortStrategy": "api_param"` and `"defaultMaxTokens": 8192` to the reasoning config in `config.json`
 
 ### From OpenAI to Local Ollama
 
@@ -501,7 +570,7 @@ jiva chat --config ./team-jiva-config.json
 ```bash
 # Compare different model providers
 jiva run "test query" --config ./config/groq.json
-jiva run "test query" --config ./config/openai.json
+jiva run "test query" --config ./config/sarvam.json
 jiva run "test query" --config ./config/krutrim.json
 ```
 

@@ -2,7 +2,7 @@
 
 ## Overview
 
-Jiva is a production-ready autonomous AI agent built with TypeScript, powered by gpt-oss-120b with full support for MCP (Model Context Protocol) servers. **Version 0.2.1** introduces a complete architectural redesign with a dual-agent pattern (Manager + Worker) for improved reliability, transparency, and task completion.
+Jiva is a production-ready autonomous AI agent built with TypeScript. It works with any OpenAI-compatible LLM provider (Krutrim, Groq, Sarvam, OpenAI, Ollama, and others) and supports MCP (Model Context Protocol) servers for extensible tool integration. The architecture centres on a dual-agent pattern (Manager + Worker) for improved reliability, transparency, and task completion, with an optional single-loop Code mode for software engineering tasks.
 
 ## Key Achievements
 
@@ -23,20 +23,17 @@ Jiva is a production-ready autonomous AI agent built with TypeScript, powered by
 - Clear visibility into what each agent is thinking and doing
 - Better task completion rates through structured planning
 
-### 2. **Robust gpt-oss-120b Integration**
+### 2. **Provider-Agnostic Model Client**
 
-After extensive research, we discovered that gpt-oss-120b has **documented reliability issues** with tool calling:
-- Tools are sometimes ignored
-- Tool calls can be malformed
-- Function names may appear as `assistant<|channel|>analysis` instead of proper names
+The model layer (`src/models/model-client.ts`) is a generic OpenAI-compatible HTTP client that adapts to any provider through configuration flags rather than hardcoded logic:
 
-**Our Solution:**
-- Implemented full **Harmony Response Format** handling (required by gpt-oss-120b)
-- Built robust tool call parser with JSON auto-fixing
-- Multi-channel output support (analysis, commentary, final)
-- Comprehensive error handling and retry logic (now at Worker level)
-- Detailed logging for debugging tool call issues
-- API-level error catching prevents system crashes
+- **`useHarmonyFormat`** — enables Krutrim's Harmony tool-calling format (only for `gpt-oss-120b`)
+- **`reasoningEffortStrategy`** — controls how reasoning effort is communicated (`api_param` for Groq/Sarvam, `system_prompt` for Krutrim)
+- **`defaultMaxTokens`** — ensures reasoning models (e.g. Sarvam-105B) have sufficient token budget
+- **Retry logic** — handles 403/429/5xx transient errors with exponential backoff and Groq retry-after parsing
+- **Reasoning token logging** — reads `reasoning_content` (Sarvam) and `reasoning` (Groq) at debug level
+
+Supported out of the box: **Krutrim**, **Groq**, **Sarvam**, **OpenAI**, **Ollama**, and any OpenAI-compatible endpoint.
 
 ### 2. **Complete MCP Integration**
 
@@ -48,9 +45,10 @@ After extensive research, we discovered that gpt-oss-120b has **documented relia
 
 ### 3. **Multi-Model Orchestration**
 
-- Automatic routing between reasoning (gpt-oss-120b) and multimodal (Llama-4-Maverick) models
+- Automatic routing between reasoning and multimodal model instances
 - Image content detection and preprocessing
-- Seamless integration - images are described by multimodal model, then forwarded to reasoning model
+- Images are described by the multimodal model, then forwarded to the reasoning model as text descriptions
+- Optional dedicated tool-calling model for improved tool serialisation reliability
 - Fallback handling when multimodal model is not configured
 
 ### 4. **Directive-Based Operation**
@@ -149,35 +147,16 @@ src/
 - **Single-shot Mode**: Execute one prompt and exit
 - **Configuration Management**: Update settings anytime
 
-## Handling gpt-oss-120b Challenges
+## Harmony Format (Krutrim gpt-oss-120b)
 
-### Research Summary
+The Harmony format is a Krutrim-specific tool-calling protocol used exclusively by `gpt-oss-120b`. All other providers use standard OpenAI tool calling.
 
-From extensive web research, we found:
-
-1. **Harmony Format is Mandatory**
-   - gpt-oss models ONLY work with Harmony format
-   - Tools must be defined in TypeScript-like syntax within a `<namespace>` block
-   - Responses use special tokens: `<|call|>`, `<|return|>`, `<|channel|>`
-
-2. **Tool Calling Reliability Issues**
-   - Multiple GitHub issues report tool calling failures
-   - Model may answer "I'm not able to pull real-time data" instead of using tools
-   - Tool call format can be malformed
-
-3. **Recommended Approach**
-   - Use `--tool-call-parser openai --enable-auto-tool-choice` for vLLM
-   - Implement robust parsing with error recovery
-   - Validate tool calls before execution
-
-### Our Implementation
+When `useHarmonyFormat: true` is set:
 
 ```typescript
 // Harmony tool formatting (src/models/harmony.ts)
-function formatToolsForHarmony(tools: HarmonyToolDefinition[]): string {
-  return `# Tools
-
-<namespace name="functions">
+// Tools are embedded in the developer message as TypeScript-like signatures:
+`<namespace name="functions">
 /**
  * ${tool.description}
  */
@@ -185,20 +164,20 @@ function ${tool.name}(params: {
   param1: type1;
   param2?: type2;
 }): void;
-</namespace>
+</namespace>`
 
-You MUST use the exact function names and parameter formats defined above.
-Always output valid JSON for parameters.`;
-}
-
-// Robust parsing with auto-fix
-function parseHarmonyResponse(response: string): ParsedHarmonyResponse {
-  // 1. Parse channels (analysis, final, commentary)
-  // 2. Extract tool calls with regex
-  // 3. Auto-fix common JSON issues (single quotes, unquoted keys)
-  // 4. Validate and return
-}
+// Responses use special tokens parsed by parseHarmonyResponse():
+// <|call|>tool_name({"param": "value"})<|return|>
+// <|channel|>analysis<|end|>
+// <|channel|>final<|end|>
 ```
+
+The parser handles:
+- Multi-channel responses (analysis, final, commentary channels)
+- Malformed JSON auto-fix (single quotes, unquoted keys)
+- Graceful fallback when tool calls are absent
+
+For all other providers, tools are sent as a standard OpenAI `tools` array and responses contain a standard `tool_calls` structure.
 
 ## Configuration
 
@@ -208,11 +187,15 @@ function parseHarmonyResponse(response: string): ParsedHarmonyResponse {
 jiva setup
 ```
 
-Prompts for:
-- API endpoint (default: Krutrim Cloud)
-- API key
-- Model names
-- Multimodal model (optional)
+The setup wizard presents a provider selection menu:
+- **Krutrim** — auto-fills Krutrim endpoint, `gpt-oss-120b`, Harmony format
+- **Groq** — auto-fills Groq endpoint, `openai/gpt-oss-120b`, standard format
+- **Sarvam** — auto-fills Sarvam endpoint, `sarvam-105b`, `defaultMaxTokens: 8192`
+- **OpenAI-Compatible** — prompts for custom endpoint and model name
+
+Then prompts for:
+- API key (asked once per provider even if used for both models)
+- Multimodal model (optional; not shown when Sarvam is selected for reasoning)
 - MCP servers (auto-configured)
 - Debug mode
 
@@ -223,24 +206,25 @@ Uses the `conf` package for persistent storage:
 - Linux: `~/.config/jiva-nodejs/config.json`
 - Windows: `%APPDATA%\jiva-nodejs\config.json`
 
-### Example Config
+### Example Config (Groq)
 
 ```json
 {
   "models": {
     "reasoning": {
       "name": "reasoning",
-      "endpoint": "https://cloud.olakrutrim.com/v1/chat/completions",
-      "apiKey": "kr-...",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions",
+      "apiKey": "gsk_...",
       "type": "reasoning",
-      "defaultModel": "gpt-oss-120b"
+      "model": "openai/gpt-oss-120b",
+      "reasoningEffortStrategy": "api_param"
     },
     "multimodal": {
       "name": "multimodal",
-      "endpoint": "https://cloud.olakrutrim.com/v1/chat/completions",
-      "apiKey": "kr-...",
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions",
+      "apiKey": "gsk_...",
       "type": "multimodal",
-      "defaultModel": "Llama-4-Maverick-17B-128E-Instruct"
+      "model": "meta-llama/llama-4-maverick-17b-128e-instruct"
     }
   },
   "mcpServers": {
@@ -280,24 +264,25 @@ jiva chat --debug
 jiva config
 ```
 
-### Programmatic Usage (v0.2.1)
+### Programmatic Usage
 
 ```typescript
 import {
   DualAgent,
-  createKrutrimModel,
+  createModelClient,
   ModelOrchestrator,
   MCPServerManager,
   WorkspaceManager,
   ConversationManager,
-} from 'jiva';
+} from 'jiva-core';
 
-// Setup
-const reasoningModel = createKrutrimModel({
-  endpoint: 'https://cloud.olakrutrim.com/v1/chat/completions',
-  apiKey: process.env.KRUTRIM_API_KEY!,
-  model: 'gpt-oss-120b',
+// Setup — works with any OpenAI-compatible provider
+const reasoningModel = createModelClient({
+  endpoint: 'https://api.groq.com/openai/v1/chat/completions',
+  apiKey: process.env.API_KEY!,
+  model: 'openai/gpt-oss-120b',
   type: 'reasoning',
+  reasoningEffortStrategy: 'api_param',
 });
 
 const orchestrator = new ModelOrchestrator({ reasoningModel });
@@ -489,23 +474,19 @@ ENTRYPOINT ["node", "dist/interfaces/cli/index.js"]
 
 Jiva is a **production-ready, extensible autonomous agent** that:
 
-✅ Fully implements Harmony format for gpt-oss-120b
-✅ Handles known tool calling issues with robust parsing
+✅ Works with any OpenAI-compatible provider (Krutrim, Groq, Sarvam, OpenAI, Ollama, and more)
+✅ Provider-aware setup wizard with per-provider presets and defaults
+✅ Harmony format support for gpt-oss-120b with robust parsing
 ✅ Integrates seamlessly with MCP servers
 ✅ Supports multi-modal workflows
 ✅ Provides both CLI and programmatic interfaces
-✅ Includes comprehensive error handling and logging
-✅ Has clear architecture for future expansion
+✅ Includes comprehensive error handling, retry logic, and context-overflow protection
+✅ Code mode with LSP integration for software engineering tasks
+✅ Cloud-native HTTP/WebSocket deployment on Google Cloud Run
 
 The agent is ready for:
-- Development workflows
-- Code review automation
-- Data analysis tasks
-- General-purpose assistance
-- Custom directive-based tasks
-
-Next steps:
-1. Test with real Krutrim API credentials
-2. Create additional directive templates
-3. Build Electron or web interface
-4. Publish as npm package
+- Development workflows and code review automation
+- Data analysis and research tasks
+- General-purpose multi-step task execution
+- Custom directive-based domain specialisation
+- Cloud-native multi-tenant deployments
