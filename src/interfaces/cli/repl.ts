@@ -172,6 +172,13 @@ export async function startREPL(options: REPLOptions): Promise<void> {
     // ── Execute ─────────────────────────────────────────────────────────────
     const spinner = ora('Thinking...').start();
 
+    // Ctrl+C while the agent is running → stop gracefully instead of killing
+    const sigintHandler = () => {
+      spinner.text = chalk.yellow('Stopping after current step…');
+      agent.stop();
+    };
+    process.once('SIGINT', sigintHandler);
+
     try {
       const response = await agent.chat(messageToSend);
 
@@ -192,6 +199,8 @@ export async function startREPL(options: REPLOptions): Promise<void> {
       spinner.stop();
       console.log(chalk.red('\n✗ Error:'), error instanceof Error ? error.message : String(error));
       console.log('');
+    } finally {
+      process.removeListener('SIGINT', sigintHandler);
     }
   }
 }
@@ -310,7 +319,8 @@ async function handleLoadConversation(agent: IAgent) {
       const date = new Date(conv.updated).toLocaleString();
       const title = conv.title || 'Untitled Conversation';
       console.log(`  ${index + 1}. ${chalk.cyan(title)}`);
-      console.log(`     ${chalk.gray(date)} • ${chalk.gray(`${conv.messageCount} messages`)}`);
+      const wsHint = conv.workspace ? ` • ${chalk.gray(conv.workspace)}` : '';
+      console.log(`     ${chalk.gray(date)} • ${chalk.gray(`${conv.messageCount} messages`)}${wsHint}`);
     });
     console.log('');
 
@@ -331,8 +341,15 @@ async function handleLoadConversation(agent: IAgent) {
     ]);
 
     if (selection) {
+      const selectedConv = conversations.find(c => c.id === selection);
       await agent.loadConversation(selection);
-      console.log(chalk.green(`\n✓ Conversation loaded: ${selection}`));
+      console.log(chalk.green(`\n✓ Conversation loaded`));
+      if (selectedConv?.workspace) {
+        const currentWorkspace = agent.getWorkspace().getWorkspaceDir();
+        if (selectedConv.workspace !== currentWorkspace) {
+          console.log(chalk.cyan(`  ↳ Workspace restored: ${selectedConv.workspace}`));
+        }
+      }
       console.log('');
     }
   } catch (error) {
@@ -364,7 +381,8 @@ async function handleListConversations(agent: IAgent) {
     conversations.forEach((conv, index) => {
       const date = new Date(conv.updated).toLocaleString();
       const title = conv.title || 'Untitled Conversation';
-      console.log(`\n${index + 1}. ${chalk.cyan.bold(title)}`);
+      const typeBadge = conv.type === 'code' ? chalk.magenta(' [code]') : chalk.gray(' [chat]');
+      console.log(`\n${index + 1}. ${chalk.cyan.bold(title)}${typeBadge}`);
       console.log(`   ${chalk.gray(conv.id)}`);
       console.log(`   Updated: ${chalk.gray(date)}`);
       console.log(`   Messages: ${chalk.gray(conv.messageCount.toString())}`);

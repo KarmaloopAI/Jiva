@@ -414,6 +414,43 @@ Please complete this subtask and report your findings.`,
           continue;
         }
 
+        // Context-overflow error — retrying with more feedback makes it worse
+        // (each appended message grows the context further). Hard-stop immediately.
+        const isContextOverflow =
+          errorMsg.includes('reduce the length') ||
+          errorMsg.includes('context_length_exceeded') ||
+          errorMsg.includes('maximum context length') ||
+          errorMsg.includes('token limit') ||
+          errorMsg.includes('too long');
+
+        if (isContextOverflow) {
+          logger.error(`  [Worker] Context overflow — stopping retry loop to avoid death spiral`);
+          const hasWork = toolsUsed.length > 0;
+          if (hasWork) {
+            // Attempt synthesis from what was gathered before overflow
+            try {
+              const synthHistory = conversationHistory.slice(0, 3); // system + user task only
+              synthHistory.push({
+                role: 'user',
+                content:
+                  `The conversation history grew too large for the model to continue. ` +
+                  `Tools used so far: ${toolsUsed.join(', ')}. ` +
+                  `Please write a concise summary of the work completed based on the subtask instruction.`,
+              });
+              const synthResponse = await this.orchestrator.chatWithFallback(
+                { messages: synthHistory },
+                useToolCallingFallback,
+              );
+              finalResult = synthResponse.content || `Partial completion: context overflow after ${toolsUsed.length} tool(s). Tools used: ${toolsUsed.join(', ')}.`;
+            } catch {
+              finalResult = `Partial completion: context overflow after ${toolsUsed.length} tool(s). Tools used: ${toolsUsed.join(', ')}.`;
+            }
+          } else {
+            finalResult = `Task could not be completed: context overflow on first API call. The system prompt or subtask context may be too large.`;
+          }
+          break;
+        }
+
         // Non-JSON-parse API error — regular retry with error feedback
         if (iteration >= this.maxIterations - 1) {
           logger.error(`  [Worker] Max retries reached after API errors`);

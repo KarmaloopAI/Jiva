@@ -1,17 +1,18 @@
 /**
  * Multi-Model Orchestrator
  *
- * Coordinates between reasoning model (gpt-oss-120b) and multimodal model (Llama-4-Maverick)
+ * Coordinates between reasoning, multimodal, and tool-calling model instances.
+ * Provider-agnostic: works with any ModelClient (Krutrim, Groq, Sarvam, OpenAI-compatible).
  */
 
-import { KrutrimModel } from './krutrim.js';
+import { ModelClient } from './model-client.js';
 import { Message, MessageContent, ChatCompletionOptions, ModelResponse, Tool } from './base.js';
 import { logger } from '../utils/logger.js';
 import { ModelError } from '../utils/errors.js';
 
 export interface OrchestratorConfig {
-  reasoningModel: KrutrimModel;
-  multimodalModel?: KrutrimModel;
+  reasoningModel: ModelClient;
+  multimodalModel?: ModelClient;
   /**
    * Optional dedicated tool-calling LLM.
    * When configured this model is used as the *primary* model for all tool
@@ -19,13 +20,13 @@ export interface OrchestratorConfig {
    * The reasoning model then serves as the secondary fallback.
    * If not configured the reasoning model is the only model used for tool calls.
    */
-  toolCallingModel?: KrutrimModel;
+  toolCallingModel?: ModelClient;
 }
 
 export class ModelOrchestrator {
-  private reasoningModel: KrutrimModel;
-  private multimodalModel?: KrutrimModel;
-  private toolCallingModel?: KrutrimModel;
+  private reasoningModel: ModelClient;
+  private multimodalModel?: ModelClient;
+  private toolCallingModel?: ModelClient;
 
   constructor(config: OrchestratorConfig) {
     this.reasoningModel = config.reasoningModel;
@@ -202,21 +203,21 @@ export class ModelOrchestrator {
   /**
    * Get reasoning model instance
    */
-  getReasoningModel(): KrutrimModel {
+  getReasoningModel(): ModelClient {
     return this.reasoningModel;
   }
 
   /**
    * Get multimodal model instance if configured
    */
-  getMultimodalModel(): KrutrimModel | undefined {
+  getMultimodalModel(): ModelClient | undefined {
     return this.multimodalModel;
   }
 
   /**
    * Get tool-calling model instance if configured
    */
-  getToolCallingModel(): KrutrimModel | undefined {
+  getToolCallingModel(): ModelClient | undefined {
     return this.toolCallingModel;
   }
 

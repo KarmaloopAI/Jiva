@@ -61,6 +61,7 @@ export class DualAgent {
   private condensingThreshold: number;
 
   private userConversationHistory: Message[] = [];
+  private _stopped = false;
 
   constructor(config: DualAgentConfig) {
     this.orchestrator = config.orchestrator;
@@ -207,7 +208,13 @@ VALIDATION GUIDANCE:
   /**
    * Process user message using dual-agent architecture
    */
+  /** Signal the agent to stop after the current subtask completes. */
+  stop(): void {
+    this._stopped = true;
+  }
+
   async chat(userMessage: string): Promise<DualAgentResponse> {
+    this._stopped = false; // reset for new turn
     logger.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     logger.info(`>> User: ${userMessage}`);
     logger.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
@@ -264,6 +271,7 @@ VALIDATION GUIDANCE:
           this.userConversationHistory,
           this.workspace.getWorkspaceDir(),
           this.orchestrator,
+          'chat',
         );
       }
 
@@ -293,6 +301,12 @@ VALIDATION GUIDANCE:
     const subtaskRetryCounts = new Map<string, number>();
 
     for (let i = 0; i < subtasksToExecute.length; i++) {
+      // Cooperative stop: set by stop() (Ctrl+C or HTTP stop endpoint)
+      if (this._stopped) {
+        logger.info('[DualAgent] Stop requested — halting subtask execution');
+        break;
+      }
+
       const subtask = subtasksToExecute[i];
 
       logger.info(`\n[Subtask ${i + 1}/${subtasksToExecute.length}] ${subtask}`);
@@ -359,7 +373,8 @@ VALIDATION GUIDANCE:
       await this.conversationManager.autoSave(
         this.userConversationHistory,
         this.workspace.getWorkspaceDir(),
-        this.orchestrator
+        this.orchestrator,
+        'chat'
       );
     }
 
@@ -478,7 +493,8 @@ VALIDATION GUIDANCE:
       this.userConversationHistory,
       this.workspace.getWorkspaceDir(),
       undefined,
-      this.orchestrator
+      this.orchestrator,
+      'chat'
     );
 
     logger.info(`[+] Conversation saved: ${id}`);
@@ -502,6 +518,6 @@ VALIDATION GUIDANCE:
       throw new Error('Conversation manager not initialized');
     }
 
-    return await this.conversationManager.listConversations();
+    return await this.conversationManager.listConversations('chat');
   }
 }

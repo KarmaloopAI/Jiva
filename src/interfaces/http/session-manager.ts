@@ -21,7 +21,7 @@ import { ConversationManager } from '../../core/conversation-manager.js';
 import { StorageProvider } from '../../storage/provider.js';
 import { logger } from '../../utils/logger.js';
 import { orchestrationLogger } from '../../utils/orchestration-logger.js';
-import { createKrutrimModel } from '../../models/krutrim.js';
+import { createModelClient } from '../../models/model-client.js';
 import { Message } from '../../models/base.js';
 import { PersonaManager } from '../../personas/persona-manager.js';
 import { getDefaultFilesystemAllowedPath } from '../../utils/platform.js';
@@ -156,12 +156,12 @@ export class SessionManager extends EventEmitter {
       }
 
       // Create model orchestrator
-      const reasoningModel = createKrutrimModel({
+      const reasoningModel = createModelClient({
         endpoint: modelConfig.reasoning.endpoint,
         apiKey: modelConfig.reasoning.apiKey,
-        model: modelConfig.reasoning.model,
+        model: modelConfig.reasoning.model || (modelConfig.reasoning as any).defaultModel,
         type: 'reasoning',
-        useHarmonyFormat: true, // gpt-oss-120b requires Harmony format
+        useHarmonyFormat: (modelConfig.reasoning as any).useHarmonyFormat ?? false,
         defaultReasoningEffort: 'high',
       });
 
@@ -174,7 +174,7 @@ export class SessionManager extends EventEmitter {
       const tcApiKey   = process.env.JIVA_TOOL_CALLING_MODEL_API_KEY;
       const tcModel    = process.env.JIVA_TOOL_CALLING_MODEL_NAME;
       const toolCallingModel = (tcEndpoint && tcApiKey && tcModel)
-        ? createKrutrimModel({
+        ? createModelClient({
             endpoint: tcEndpoint,
             apiKey: tcApiKey,
             model: tcModel,
@@ -490,6 +490,16 @@ export class SessionManager extends EventEmitter {
       total: this.sessions.size,
       byTenant,
     };
+  }
+
+  /**
+   * Return the agent for an existing session without creating one.
+   * Used by the stop endpoint to signal a running chat() call.
+   * Returns null if the session does not exist.
+   */
+  getActiveAgent(tenantId: string, sessionId: string): IAgent | null {
+    const key = this.getSessionKey(tenantId, sessionId);
+    return this.sessions.get(key)?.agent ?? null;
   }
 
   private getSessionKey(tenantId: string, sessionId: string): string {

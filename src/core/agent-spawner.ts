@@ -1,14 +1,16 @@
 /**
  * Agent Spawner - Manages hierarchical sub-agent spawning with personas
- * 
+ *
  * Enables a parent agent to spawn child agents with specific personas,
  * creating a multi-agent collaboration system for complex tasks.
- * 
+ *
  * Example: An "engineering-manager" persona can spawn:
  * - "code-reviewer" agent to review code
  * - "developer" agent to implement features
  * - "tester" agent to write tests
  */
+
+import { randomUUID } from 'node:crypto';
 
 import { DualAgent, DualAgentConfig } from './dual-agent.js';
 import { ModelOrchestrator } from '../models/orchestrator.js';
@@ -131,7 +133,7 @@ export class AgentSpawner {
       );
     }
 
-    const agentId = `agent-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const agentId = `agent-${randomUUID()}`;
 
     logger.info(`[AgentSpawner] Spawning sub-agent with persona: ${request.persona}`);
     logger.info(`[AgentSpawner] Task: ${request.task}`);

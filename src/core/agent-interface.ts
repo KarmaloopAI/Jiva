@@ -25,6 +25,13 @@ export interface AgentChatResponse {
 
 export interface IAgent {
   chat(message: string): Promise<AgentChatResponse>;
+  /**
+   * Cooperatively stop a running chat() call.
+   * The agent finishes its current model call / tool execution then exits the loop,
+   * returning a partial result with a "[Task stopped by user]" message.
+   * Safe to call from a SIGINT handler or an HTTP stop endpoint.
+   */
+  stop(): void;
   cleanup(): Promise<void>;
   getWorkspace(): WorkspaceManager;
   getMCPManager(): {
@@ -42,5 +49,6 @@ export interface IAgent {
     updated: string | number;
     messageCount: number;
     workspace?: string;
+    type?: string;
   }>>;
 }

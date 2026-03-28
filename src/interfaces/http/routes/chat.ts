@@ -114,6 +114,26 @@ export function setupChatRoutes(app: Express, sessionManager: SessionManager): v
   });
 
   /**
+   * Stop an ongoing agent turn (cooperative stop — finishes current step then exits)
+   * POST /api/chat/stop
+   */
+  app.post('/api/chat/stop', async (req: Request, res: Response) => {
+    try {
+      const { tenantId, sessionId } = req.auth!;
+      const agent = sessionManager.getActiveAgent(tenantId, sessionId);
+      if (!agent) {
+        res.status(404).json({ error: 'No active session found' });
+        return;
+      }
+      agent.stop();
+      res.status(200).json({ success: true, message: 'Stop signal sent — agent will halt after current step' });
+    } catch (error) {
+      logger.error('[API] Failed to stop agent:', error);
+      res.status(500).json({ error: 'Failed to send stop signal', message: error instanceof Error ? error.message : 'Unknown error' });
+    }
+  });
+
+  /**
    * Get conversation history
    * GET /api/chat/history
    */

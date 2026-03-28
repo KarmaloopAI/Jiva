@@ -218,4 +218,22 @@ ${this.directive.raw}`;
   hasDirective(): boolean {
     return !!this.directive;
   }
+
+  /**
+   * Switch the active workspace to a new directory.
+   * Re-loads the directive from the new location.
+   * Throws WorkspaceError if the directory does not exist.
+   */
+  async switchWorkspace(newDir: string): Promise<void> {
+    const resolvedDir = resolve(newDir);
+    try {
+      await access(resolvedDir);
+    } catch {
+      throw new WorkspaceError(`Workspace directory does not exist: ${resolvedDir}`);
+    }
+    this.workspaceDir = resolvedDir;
+    this.directive = undefined;
+    await this.loadDirective();
+    logger.info(`Workspace switched to: ${this.workspaceDir}`);
+  }
 }

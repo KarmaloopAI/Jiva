@@ -7,7 +7,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { configManager } from '../../core/config.js';
-import { createKrutrimModel } from '../../models/krutrim.js';
+import { createModelClient } from '../../models/model-client.js';
 import { ModelOrchestrator } from '../../models/orchestrator.js';
 import { MCPServerManager } from '../../mcp/server-manager.js';
 import { WorkspaceManager } from '../../core/workspace.js';
@@ -168,7 +168,7 @@ program
         throw new Error('Reasoning model configuration is required');
       }
       const reasoningModelConfig = modelConfig.reasoning;
-      const reasoningModel = createKrutrimModel({
+      const reasoningModel = createModelClient({
         endpoint: reasoningModelConfig.endpoint,
         apiKey: reasoningModelConfig.apiKey,
         model: reasoningModelConfig.defaultModel,
@@ -180,7 +180,7 @@ program
       let multimodalModel;
       const multimodalModelConfig = modelConfig.multimodal;
       if (multimodalModelConfig) {
-        multimodalModel = createKrutrimModel({
+        multimodalModel = createModelClient({
           endpoint: multimodalModelConfig.endpoint,
           apiKey: multimodalModelConfig.apiKey,
           model: multimodalModelConfig.defaultModel,
@@ -194,7 +194,7 @@ program
       let toolCallingModel;
       const toolCallingModelConfig = modelConfig.toolCalling;
       if (toolCallingModelConfig) {
-        toolCallingModel = createKrutrimModel({
+        toolCallingModel = createModelClient({
           endpoint: toolCallingModelConfig.endpoint,
           apiKey: toolCallingModelConfig.apiKey,
           model: toolCallingModelConfig.defaultModel,
@@ -638,7 +638,7 @@ program
         throw new Error('Reasoning model configuration is required');
       }
       const reasoningModelConfig = modelConfig.reasoning;
-      const reasoningModel = createKrutrimModel({
+      const reasoningModel = createModelClient({
         endpoint: reasoningModelConfig.endpoint,
         apiKey: reasoningModelConfig.apiKey,
         model: reasoningModelConfig.defaultModel,
@@ -650,7 +650,7 @@ program
       let multimodalModel;
       const multimodalModelConfig = configManager.getMultimodalModel();
       if (multimodalModelConfig) {
-        multimodalModel = createKrutrimModel({
+        multimodalModel = createModelClient({
           endpoint: multimodalModelConfig.endpoint,
           apiKey: multimodalModelConfig.apiKey,
           model: multimodalModelConfig.defaultModel,
@@ -663,7 +663,7 @@ program
       let toolCallingModel;
       const toolCallingModelCfg = configManager.getToolCallingModel();
       if (toolCallingModelCfg) {
-        toolCallingModel = createKrutrimModel({
+        toolCallingModel = createModelClient({
           endpoint: toolCallingModelCfg.endpoint,
           apiKey: toolCallingModelCfg.apiKey,
           model: toolCallingModelCfg.defaultModel,

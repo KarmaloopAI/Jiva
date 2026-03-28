@@ -8,6 +8,7 @@
  * - Development mode (no auth)
  */
 
+import { randomUUID } from 'node:crypto';
 import { Request, Response, NextFunction } from 'express';
 import { logger } from '../../../utils/logger.js';
 
@@ -180,7 +181,7 @@ function parseTokenBasic(token: string): AuthContext {
  * Generate a session ID
  */
 function generateSessionId(): string {
-  return `session-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+  return `session-${randomUUID()}`;
 }
 
 /**

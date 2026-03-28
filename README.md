@@ -19,7 +19,7 @@ npm install -g jiva-core
 jiva setup
 ```
 
-The setup wizard prompts for your API endpoint, key, and model name. Jiva works with Krutrim, Groq, OpenAI, Ollama, and any OpenAI-compatible provider.
+The setup wizard opens with a provider selection menu. Choose your provider and Jiva auto-fills the endpoint, model name, and tool format — you only supply your API key. Supported providers: **Krutrim**, **Groq**, **Sarvam**, **OpenAI**, and any **OpenAI-compatible** endpoint.
 
 ### Development install
 
@@ -156,7 +156,8 @@ Configuration is stored at `~/.config/jiva-nodejs/config.json` (Linux/macOS) or 
       "apiKey": "kr-...",
       "model": "gpt-oss-120b",
       "type": "reasoning",
-      "useHarmonyFormat": true
+      "useHarmonyFormat": true,
+      "reasoningEffortStrategy": "system_prompt"
     }
   }
 }
@@ -169,8 +170,25 @@ Configuration is stored at `~/.config/jiva-nodejs/config.json` (Linux/macOS) or 
     "reasoning": {
       "endpoint": "https://api.groq.com/openai/v1/chat/completions",
       "apiKey": "gsk_...",
-      "model": "openai/gpt-oss-20b",
-      "type": "reasoning"
+      "model": "openai/gpt-oss-120b",
+      "type": "reasoning",
+      "reasoningEffortStrategy": "api_param"
+    }
+  }
+}
+```
+
+**Sarvam** — reasoning model with internal chain-of-thought; requires a generous token budget
+```json
+{
+  "models": {
+    "reasoning": {
+      "endpoint": "https://api.sarvam.ai/v1/chat/completions",
+      "apiKey": "your-sarvam-key",
+      "model": "sarvam-105b",
+      "type": "reasoning",
+      "reasoningEffortStrategy": "api_param",
+      "defaultMaxTokens": 8192
     }
   }
 }
@@ -189,6 +207,8 @@ Configuration is stored at `~/.config/jiva-nodejs/config.json` (Linux/macOS) or 
   }
 }
 ```
+
+Any other OpenAI-compatible endpoint works the same way — set `endpoint`, `apiKey`, and `model`; Jiva handles the rest.
 
 ### Code mode configuration
 
@@ -312,15 +332,16 @@ Skills bundle MCP servers, directives, and model behavior overrides into portabl
 ## Programmatic Usage
 
 ```typescript
-import { DualAgent, CodeAgent, createKrutrimModel, ModelOrchestrator,
+import { DualAgent, CodeAgent, createModelClient, ModelOrchestrator,
          MCPServerManager, WorkspaceManager, ConversationManager,
          createStorageProvider } from 'jiva-core';
 
-const reasoningModel = createKrutrimModel({
+const reasoningModel = createModelClient({
   endpoint: 'https://api.groq.com/openai/v1/chat/completions',
   apiKey: process.env.API_KEY!,
-  model: 'openai/gpt-oss-20b',
+  model: 'openai/gpt-oss-120b',
   type: 'reasoning',
+  reasoningEffortStrategy: 'api_param',
 });
 const orchestrator = new ModelOrchestrator({ reasoningModel });
 const storageProvider = await createStorageProvider();

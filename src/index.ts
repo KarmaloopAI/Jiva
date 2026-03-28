@@ -16,6 +16,8 @@ export type { IAgent, AgentChatResponse } from './core/agent-interface.js';
 export { WorkspaceManager } from './core/workspace.js';
 export { ConversationManager } from './core/conversation-manager.js';
 
+export { ModelClient, createModelClient } from './models/model-client.js';
+// Backward-compat aliases (deprecated — use ModelClient / createModelClient)
 export { KrutrimModel, createKrutrimModel } from './models/krutrim.js';
 export { ModelOrchestrator } from './models/orchestrator.js';
 

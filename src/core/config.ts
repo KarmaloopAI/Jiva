@@ -28,6 +28,10 @@ const ModelConfigSchema = z.object({
   type: z.enum(['reasoning', 'multimodal', 'tool-calling']),
   defaultModel: z.string(),
   useHarmonyFormat: z.boolean().optional(),
+  /** How to send reasoning effort: 'api_param' | 'system_prompt' | 'both' */
+  reasoningEffortStrategy: z.enum(['api_param', 'system_prompt', 'both']).optional(),
+  /** Default max tokens — required for reasoning models like Sarvam-105B */
+  defaultMaxTokens: z.number().optional(),
 });
 
 const CodeModeConfigSchema = z.object({

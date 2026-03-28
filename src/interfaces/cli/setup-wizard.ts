@@ -1,33 +1,114 @@
 /**
  * Setup Wizard for first-time configuration
+ *
+ * Provider-aware: Krutrim, Groq, Sarvam, OpenAI-Compatible
+ * - Auto-fills endpoints and model defaults per provider
+ * - Asks API key only once per provider (reuses across model roles)
+ * - Sets useHarmonyFormat, reasoningEffortStrategy, defaultMaxTokens automatically
  */
 
 import inquirer from 'inquirer';
 import { configManager } from '../../core/config.js';
 import { logger } from '../../utils/logger.js';
 import chalk from 'chalk';
+import type { ModelConfig } from '../../core/config.js';
 
-export async function runSetupWizard(): Promise<void> {
-  console.log(chalk.bold.cyan('\n∞ Welcome to Jiva Setup Wizard\n'));
-  console.log('This wizard will help you configure Jiva for the first time.\n');
+// ── Provider registry ──────────────────────────────────────────────────────
 
-  // Reasoning Model Configuration
-  console.log(chalk.bold('Reasoning Model Configuration (gpt-oss-120b)'));
-  console.log(chalk.gray('This model will be used for reasoning and tool calling.\n'));
+type ProviderKey = 'krutrim' | 'groq' | 'sarvam' | 'openai-compatible';
 
-  const reasoningAnswers = await inquirer.prompt([
+interface ProviderPreset {
+  label: string;
+  endpoint: string;
+  reasoningModel: string;
+  multimodalModel: string | null; // null = not supported
+  toolCallingModel: string;
+  useHarmonyFormat: boolean;
+  reasoningEffortStrategy: 'api_param' | 'system_prompt' | 'both';
+  defaultMaxTokens?: number;
+  hasMultimodal: boolean;
+  note?: string; // shown during setup
+}
+
+const PROVIDERS: Record<ProviderKey, ProviderPreset> = {
+  krutrim: {
+    label: 'Krutrim',
+    endpoint: 'https://cloud.olakrutrim.com/v1/chat/completions',
+    reasoningModel: 'gpt-oss-120b',
+    multimodalModel: 'Llama-4-Maverick-17B-128E-Instruct',
+    toolCallingModel: 'gpt-oss-120b',
+    useHarmonyFormat: true,
+    reasoningEffortStrategy: 'system_prompt',
+    hasMultimodal: true,
+  },
+  groq: {
+    label: 'Groq',
+    endpoint: 'https://api.groq.com/openai/v1/chat/completions',
+    reasoningModel: 'openai/gpt-oss-120b',
+    multimodalModel: 'meta-llama/llama-4-maverick-17b-128e-instruct',
+    toolCallingModel: 'meta-llama/llama-4-maverick-17b-128e-instruct',
+    useHarmonyFormat: false,
+    reasoningEffortStrategy: 'api_param',
+    hasMultimodal: true,
+  },
+  sarvam: {
+    label: 'Sarvam',
+    endpoint: 'https://api.sarvam.ai/v1/chat/completions',
+    reasoningModel: 'sarvam-105b',
+    multimodalModel: null, // Sarvam has no multimodal model
+    toolCallingModel: 'sarvam-105b',
+    useHarmonyFormat: false,
+    reasoningEffortStrategy: 'api_param',
+    defaultMaxTokens: 8192,
+    hasMultimodal: false,
+    note: 'Sarvam does not offer a multimodal model. You will need to pick a separate provider for multimodal.',
+  },
+  'openai-compatible': {
+    label: 'OpenAI-Compatible',
+    endpoint: '',
+    reasoningModel: '',
+    multimodalModel: '',
+    toolCallingModel: '',
+    useHarmonyFormat: false,
+    reasoningEffortStrategy: 'both',
+    hasMultimodal: true,
+  },
+};
+
+const PROVIDER_CHOICES = Object.entries(PROVIDERS).map(([value, p]) => ({
+  name: p.label,
+  value: value as ProviderKey,
+}));
+
+const MULTIMODAL_PROVIDER_CHOICES = PROVIDER_CHOICES.filter(c => c.value !== 'sarvam');
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+async function askApiKey(provider: ProviderKey, collectedKeys: Map<ProviderKey, string>): Promise<string> {
+  if (collectedKeys.has(provider)) {
+    console.log(chalk.gray(`  Using ${PROVIDERS[provider].label} API key already entered.\n`));
+    return collectedKeys.get(provider)!;
+  }
+  const { apiKey } = await inquirer.prompt([
+    {
+      type: 'password',
+      name: 'apiKey',
+      message: `${PROVIDERS[provider].label} API Key:`,
+      validate: (input: string) => input.length > 0 || 'API key is required',
+    },
+  ]);
+  collectedKeys.set(provider, apiKey);
+  return apiKey;
+}
+
+async function askEndpointAndKey(collectedKeys: Map<ProviderKey, string>): Promise<{ endpoint: string; apiKey: string }> {
+  const answers = await inquirer.prompt([
     {
       type: 'input',
       name: 'endpoint',
       message: 'API Endpoint URL:',
-      default: 'https://cloud.olakrutrim.com/v1/chat/completions',
       validate: (input: string) => {
-        try {
-          new URL(input);
-          return true;
-        } catch {
-          return 'Please enter a valid URL';
-        }
+        try { new URL(input); return true; } catch { return 'Please enter a valid URL'; }
       },
     },
     {
@@ -36,167 +117,232 @@ export async function runSetupWizard(): Promise<void> {
       message: 'API Key:',
       validate: (input: string) => input.length > 0 || 'API key is required',
     },
+  ]);
+  collectedKeys.set('openai-compatible', answers.apiKey);
+  return answers;
+}
+
+// ── Reasoning model setup ──────────────────────────────────────────────────
+
+async function setupReasoningModel(collectedKeys: Map<ProviderKey, string>): Promise<{ config: ModelConfig; provider: ProviderKey }> {
+  console.log(chalk.bold('\n● Reasoning Model'));
+  console.log(chalk.gray('Used for planning and tool calling.\n'));
+
+  const { provider } = await inquirer.prompt([
+    {
+      type: 'list',
+      name: 'provider',
+      message: 'Select provider:',
+      choices: PROVIDER_CHOICES,
+    },
+  ]);
+
+  const preset = PROVIDERS[provider as ProviderKey];
+
+  if (preset.note) {
+    console.log(chalk.yellow(`\n  ⚠  ${preset.note}\n`));
+  }
+
+  let endpoint = preset.endpoint;
+  let apiKey: string;
+
+  if (provider === 'openai-compatible') {
+    const custom = await askEndpointAndKey(collectedKeys);
+    endpoint = custom.endpoint;
+    apiKey = custom.apiKey;
+  } else {
+    console.log(chalk.gray(`  Endpoint: ${endpoint}\n`));
+    apiKey = await askApiKey(provider as ProviderKey, collectedKeys);
+  }
+
+  const { model } = await inquirer.prompt([
     {
       type: 'input',
       name: 'model',
       message: 'Model name:',
-      default: 'gpt-oss-120b',
+      default: preset.reasoningModel || undefined,
     },
   ]);
 
-  // Detect if Harmony format should be used based on model name
-  const isKrutrimModel = reasoningAnswers.model.includes('gpt-oss-120b');
-  const defaultUseHarmony = isKrutrimModel;
-
-  console.log(chalk.gray('\nTool Format Configuration'));
-  console.log(chalk.gray('Different providers use different formats for tool calling.\n'));
-
-  const { useHarmonyFormat } = await inquirer.prompt([
-    {
-      type: 'confirm',
-      name: 'useHarmonyFormat',
-      message: 'Use Harmony format for tool calling?',
-      default: defaultUseHarmony,
-      when: () => {
-        // Show this prompt for all models, but provide smart default
-        console.log(chalk.gray(`  Recommended: ${defaultUseHarmony ? 'Yes' : 'No'} (${isKrutrimModel ? 'Krutrim uses Harmony format' : 'Standard OpenAI format'})`));
-        return true;
-      },
-    },
-  ]);
-
-  configManager.setReasoningModel({
+  const config: ModelConfig = {
     name: 'reasoning',
-    endpoint: reasoningAnswers.endpoint,
-    apiKey: reasoningAnswers.apiKey,
+    endpoint,
+    apiKey,
     type: 'reasoning',
-    defaultModel: reasoningAnswers.model,
-    useHarmonyFormat,
-  });
+    defaultModel: model,
+    useHarmonyFormat: preset.useHarmonyFormat,
+    reasoningEffortStrategy: preset.reasoningEffortStrategy,
+    ...(preset.defaultMaxTokens ? { defaultMaxTokens: preset.defaultMaxTokens } : {}),
+  };
 
-  logger.success('Reasoning model configured');
+  return { config, provider: provider as ProviderKey };
+}
 
-  // Multimodal Model Configuration (Optional)
-  console.log(chalk.bold('\nMultimodal Model Configuration (Optional)'));
-  console.log(chalk.gray('This model will be used for understanding images.\n'));
+// ── Multimodal model setup ─────────────────────────────────────────────────
 
-  const { configureMultimodal } = await inquirer.prompt([
+async function setupMultimodalModel(
+  reasoningProvider: ProviderKey,
+  collectedKeys: Map<ProviderKey, string>
+): Promise<ModelConfig | null> {
+  console.log(chalk.bold('\n● Multimodal Model') + chalk.gray(' (optional)'));
+  console.log(chalk.gray('Used for understanding images.\n'));
+
+  if (reasoningProvider === 'sarvam') {
+    console.log(chalk.yellow('  ⚠  Sarvam does not have a multimodal model.'));
+    console.log(chalk.gray('     Please select a different provider below.\n'));
+  }
+
+  const { configure } = await inquirer.prompt([
     {
       type: 'confirm',
-      name: 'configureMultimodal',
-      message: 'Would you like to configure a multimodal model?',
+      name: 'configure',
+      message: 'Configure a multimodal model?',
       default: true,
     },
   ]);
 
-  if (configureMultimodal) {
-    const multimodalAnswers = await inquirer.prompt([
-      {
-        type: 'input',
-        name: 'endpoint',
-        message: 'Multimodal API Endpoint URL:',
-        default: 'https://cloud.olakrutrim.com/v1/chat/completions',
-        validate: (input: string) => {
-          try {
-            new URL(input);
-            return true;
-          } catch {
-            return 'Please enter a valid URL';
-          }
-        },
-      },
-      {
-        type: 'password',
-        name: 'apiKey',
-        message: 'Multimodal API Key:',
-        default: reasoningAnswers.apiKey,
-        validate: (input: string) => input.length > 0 || 'API key is required',
-      },
-      {
-        type: 'input',
-        name: 'model',
-        message: 'Multimodal model name:',
-        default: 'Llama-4-Maverick-17B-128E-Instruct',
-      },
-    ]);
+  if (!configure) return null;
 
-    configManager.setMultimodalModel({
-      name: 'multimodal',
-      endpoint: multimodalAnswers.endpoint,
-      apiKey: multimodalAnswers.apiKey,
-      type: 'multimodal',
-      defaultModel: multimodalAnswers.model,
-    });
+  const { provider } = await inquirer.prompt([
+    {
+      type: 'list',
+      name: 'provider',
+      message: 'Select provider:',
+      choices: MULTIMODAL_PROVIDER_CHOICES,
+      default: reasoningProvider !== 'sarvam' ? reasoningProvider : 'groq',
+    },
+  ]);
 
-    logger.success('Multimodal model configured');
+  const preset = PROVIDERS[provider as ProviderKey];
+  let endpoint = preset.endpoint;
+  let apiKey: string;
+
+  if (provider === 'openai-compatible') {
+    const custom = await askEndpointAndKey(collectedKeys);
+    endpoint = custom.endpoint;
+    apiKey = custom.apiKey;
+  } else {
+    console.log(chalk.gray(`  Endpoint: ${endpoint}\n`));
+    apiKey = await askApiKey(provider as ProviderKey, collectedKeys);
   }
 
-  // ── Tool-Calling Model ────────────────────────────────────────────────────
-  console.log(chalk.bold('\nTool-Calling Model Configuration (Optional)'));
-  console.log(chalk.gray('A dedicated model that reliably formats tool calls as standard JSON.'));
-  console.log(chalk.gray('When configured it is used as the PRIMARY model for tool execution,'));
-  console.log(chalk.gray('with the reasoning model acting as a secondary fallback.\n'));
+  const { model } = await inquirer.prompt([
+    {
+      type: 'input',
+      name: 'model',
+      message: 'Multimodal model name:',
+      default: preset.multimodalModel || undefined,
+    },
+  ]);
 
-  const { configureToolCalling } = await inquirer.prompt([
+  return {
+    name: 'multimodal',
+    endpoint,
+    apiKey,
+    type: 'multimodal',
+    defaultModel: model,
+  };
+}
+
+// ── Tool-calling model setup ───────────────────────────────────────────────
+
+async function setupToolCallingModel(
+  reasoningProvider: ProviderKey,
+  collectedKeys: Map<ProviderKey, string>
+): Promise<ModelConfig | null> {
+  console.log(chalk.bold('\n● Tool-Calling Model') + chalk.gray(' (optional)'));
+  console.log(chalk.gray('A dedicated model that reliably formats tool calls as standard JSON.'));
+  console.log(chalk.gray('When configured it is the PRIMARY model for tool execution;\nthe reasoning model is the fallback.\n'));
+
+  const { configure } = await inquirer.prompt([
     {
       type: 'confirm',
-      name: 'configureToolCalling',
-      message: 'Would you like to configure a tool-calling model?',
+      name: 'configure',
+      message: 'Configure a dedicated tool-calling model?',
       default: false,
     },
   ]);
 
-  if (configureToolCalling) {
-    const toolCallingAnswers = await inquirer.prompt([
-      {
-        type: 'input',
-        name: 'endpoint',
-        message: 'Tool-Calling API Endpoint URL:',
-        default: 'https://cloud.olakrutrim.com/v1/chat/completions',
-        validate: (input: string) => {
-          try {
-            new URL(input);
-            return true;
-          } catch {
-            return 'Please enter a valid URL';
-          }
-        },
-      },
-      {
-        type: 'password',
-        name: 'apiKey',
-        message: 'Tool-Calling API Key:',
-        default: reasoningAnswers.apiKey,
-        validate: (input: string) => input.length > 0 || 'API key is required',
-      },
-      {
-        type: 'input',
-        name: 'model',
-        message: 'Tool-Calling model name:',
-        default: 'gpt-4o-mini',
-      },
-    ]);
+  if (!configure) return null;
 
-    configManager.setToolCallingModel({
-      name: 'tool-calling',
-      endpoint: toolCallingAnswers.endpoint,
-      apiKey: toolCallingAnswers.apiKey,
-      type: 'tool-calling',
-      defaultModel: toolCallingAnswers.model,
-      useHarmonyFormat: false,
-    });
+  const { provider } = await inquirer.prompt([
+    {
+      type: 'list',
+      name: 'provider',
+      message: 'Select provider:',
+      choices: PROVIDER_CHOICES,
+      default: reasoningProvider,
+    },
+  ]);
 
+  const preset = PROVIDERS[provider as ProviderKey];
+  let endpoint = preset.endpoint;
+  let apiKey: string;
+
+  if (provider === 'openai-compatible') {
+    const custom = await askEndpointAndKey(collectedKeys);
+    endpoint = custom.endpoint;
+    apiKey = custom.apiKey;
+  } else {
+    console.log(chalk.gray(`  Endpoint: ${endpoint}\n`));
+    apiKey = await askApiKey(provider as ProviderKey, collectedKeys);
+  }
+
+  const { model } = await inquirer.prompt([
+    {
+      type: 'input',
+      name: 'model',
+      message: 'Tool-calling model name:',
+      default: preset.toolCallingModel || undefined,
+    },
+  ]);
+
+  return {
+    name: 'tool-calling',
+    endpoint,
+    apiKey,
+    type: 'tool-calling',
+    defaultModel: model,
+    useHarmonyFormat: false, // always standard format for tool-calling models
+  };
+}
+
+// ── Main wizard ────────────────────────────────────────────────────────────
+
+export async function runSetupWizard(): Promise<void> {
+  console.log(chalk.bold.cyan('\n∞ Welcome to Jiva Setup Wizard\n'));
+  console.log('This wizard will configure your AI providers.\n');
+  console.log(chalk.gray('API keys for the same provider are only asked once.\n'));
+
+  // Track API keys keyed by provider so we never ask twice
+  const collectedKeys = new Map<ProviderKey, string>();
+
+  // 1. Reasoning model
+  const { config: reasoningConfig, provider: reasoningProvider } = await setupReasoningModel(collectedKeys);
+  configManager.setReasoningModel(reasoningConfig);
+  logger.success('Reasoning model configured');
+
+  // 2. Multimodal model (optional)
+  const multimodalConfig = await setupMultimodalModel(reasoningProvider, collectedKeys);
+  if (multimodalConfig) {
+    configManager.setMultimodalModel(multimodalConfig);
+    logger.success('Multimodal model configured');
+  }
+
+  // 3. Tool-calling model (optional)
+  const toolCallingConfig = await setupToolCallingModel(reasoningProvider, collectedKeys);
+  if (toolCallingConfig) {
+    configManager.setToolCallingModel(toolCallingConfig);
     logger.success('Tool-calling model configured');
   }
 
-  // MCP Servers Configuration
-  console.log(chalk.bold('\nMCP Servers Configuration'));
+  // 4. MCP Servers
+  console.log(chalk.bold('\n● MCP Servers'));
   console.log(chalk.gray('Setting up default MCP servers (filesystem, mcp-shell-server)...\n'));
-
   configManager.initializeDefaultServers();
   logger.success('Default MCP servers configured');
 
-  // Debug Mode
+  // 5. Debug mode
   const { enableDebug } = await inquirer.prompt([
     {
       type: 'confirm',
@@ -205,7 +351,6 @@ export async function runSetupWizard(): Promise<void> {
       default: false,
     },
   ]);
-
   configManager.setDebug(enableDebug);
 
   console.log(chalk.bold.green('\n✓ Setup complete!\n'));
@@ -214,9 +359,8 @@ export async function runSetupWizard(): Promise<void> {
   console.log('');
 }
 
-/**
- * Update existing configuration interactively
- */
+// ── Update existing configuration ─────────────────────────────────────────
+
 export async function updateConfiguration(): Promise<void> {
   console.log(chalk.bold.cyan('\n🔧 Update Jiva Configuration\n'));
 
@@ -238,16 +382,25 @@ export async function updateConfiguration(): Promise<void> {
     },
   ]);
 
+  const collectedKeys = new Map<ProviderKey, string>();
+
   switch (choice) {
-    case 'reasoning':
-      await updateReasoningModel();
+    case 'reasoning': {
+      const { config } = await setupReasoningModel(collectedKeys);
+      configManager.setReasoningModel(config);
+      logger.success('Reasoning model updated');
       break;
-    case 'multimodal':
-      await updateMultimodalModel();
+    }
+    case 'multimodal': {
+      const config = await setupMultimodalModel('groq', collectedKeys);
+      if (config) { configManager.setMultimodalModel(config); logger.success('Multimodal model updated'); }
       break;
-    case 'tool-calling':
-      await updateToolCallingModel();
+    }
+    case 'tool-calling': {
+      const config = await setupToolCallingModel('groq', collectedKeys);
+      if (config) { configManager.setToolCallingModel(config); logger.success('Tool-calling model updated'); }
       break;
+    }
     case 'mcp':
       await manageMCPServers();
       break;
@@ -266,136 +419,7 @@ export async function updateConfiguration(): Promise<void> {
   }
 }
 
-async function updateReasoningModel() {
-  const current = configManager.getReasoningModel();
-
-  const answers = await inquirer.prompt([
-    {
-      type: 'input',
-      name: 'endpoint',
-      message: 'API Endpoint URL:',
-      default: current?.endpoint,
-    },
-    {
-      type: 'password',
-      name: 'apiKey',
-      message: 'API Key:',
-      default: current?.apiKey,
-    },
-    {
-      type: 'input',
-      name: 'model',
-      message: 'Model name:',
-      default: current?.defaultModel,
-    },
-  ]);
-
-  // Detect if Harmony format should be used based on model name
-  const isKrutrimModel = answers.model.includes('gpt-oss-120b');
-  const defaultUseHarmony = isKrutrimModel;
-
-  console.log(chalk.gray('\nTool Format Configuration'));
-  console.log(chalk.gray('Different providers use different formats for tool calling.\n'));
-
-  const { useHarmonyFormat } = await inquirer.prompt([
-    {
-      type: 'confirm',
-      name: 'useHarmonyFormat',
-      message: 'Use Harmony format for tool calling?',
-      default: current?.useHarmonyFormat ?? defaultUseHarmony,
-      when: () => {
-        // Show this prompt for all models, but provide smart default
-        console.log(chalk.gray(`  Recommended: ${defaultUseHarmony ? 'Yes' : 'No'} (${isKrutrimModel ? 'Krutrim uses Harmony format' : 'Standard OpenAI format'})`));
-        return true;
-      },
-    },
-  ]);
-
-  configManager.setReasoningModel({
-    name: 'reasoning',
-    endpoint: answers.endpoint,
-    apiKey: answers.apiKey,
-    type: 'reasoning',
-    defaultModel: answers.model,
-    useHarmonyFormat,
-  });
-
-  logger.success('Reasoning model updated');
-}
-
-async function updateMultimodalModel() {
-  const current = configManager.getMultimodalModel();
-
-  const answers = await inquirer.prompt([
-    {
-      type: 'input',
-      name: 'endpoint',
-      message: 'Multimodal API Endpoint URL:',
-      default: current?.endpoint || 'https://cloud.olakrutrim.com/v1/chat/completions',
-    },
-    {
-      type: 'password',
-      name: 'apiKey',
-      message: 'Multimodal API Key:',
-      default: current?.apiKey,
-    },
-    {
-      type: 'input',
-      name: 'model',
-      message: 'Multimodal model name:',
-      default: current?.defaultModel || 'Llama-4-Maverick-17B-128E-Instruct',
-    },
-  ]);
-
-  configManager.setMultimodalModel({
-    name: 'multimodal',
-    endpoint: answers.endpoint,
-    apiKey: answers.apiKey,
-    type: 'multimodal',
-    defaultModel: answers.model,
-  });
-
-  logger.success('Multimodal model updated');
-}
-
-async function updateToolCallingModel() {
-  const current = configManager.getToolCallingModel();
-
-  console.log(chalk.gray('\nA dedicated tool-calling model is used as the PRIMARY model for tool'));
-  console.log(chalk.gray('execution. The reasoning model acts as the secondary fallback.\n'));
-
-  const answers = await inquirer.prompt([
-    {
-      type: 'input',
-      name: 'endpoint',
-      message: 'Tool-Calling API Endpoint URL:',
-      default: current?.endpoint || 'https://cloud.olakrutrim.com/v1/chat/completions',
-    },
-    {
-      type: 'password',
-      name: 'apiKey',
-      message: 'Tool-Calling API Key:',
-      default: current?.apiKey,
-    },
-    {
-      type: 'input',
-      name: 'model',
-      message: 'Tool-Calling model name:',
-      default: current?.defaultModel || 'gpt-4o-mini',
-    },
-  ]);
-
-  configManager.setToolCallingModel({
-    name: 'tool-calling',
-    endpoint: answers.endpoint,
-    apiKey: answers.apiKey,
-    type: 'tool-calling',
-    defaultModel: answers.model,
-    useHarmonyFormat: false,
-  });
-
-  logger.success('Tool-calling model updated');
-}
+// ── Sub-functions (MCP, debug, view, reset) ────────────────────────────────
 
 async function manageMCPServers() {
   const servers = configManager.getMCPServers();
@@ -422,77 +446,42 @@ async function manageMCPServers() {
     });
   } else if (action === 'add') {
     const answers = await inquirer.prompt([
-      {
-        type: 'input',
-        name: 'name',
-        message: 'Server name:',
-      },
-      {
-        type: 'input',
-        name: 'command',
-        message: 'Command:',
-      },
-      {
-        type: 'input',
-        name: 'args',
-        message: 'Arguments (space-separated):',
-      },
+      { type: 'input', name: 'name', message: 'Server name:' },
+      { type: 'input', name: 'command', message: 'Command:' },
+      { type: 'input', name: 'args', message: 'Arguments (space-separated):' },
     ]);
-
     configManager.addMCPServer(answers.name, {
       command: answers.command,
       args: answers.args ? answers.args.split(' ') : [],
       enabled: true,
     });
-
     logger.success(`MCP server '${answers.name}' added`);
   } else if (action === 'remove' && serverNames.length > 0) {
     const { serverName } = await inquirer.prompt([
-      {
-        type: 'list',
-        name: 'serverName',
-        message: 'Select server to remove:',
-        choices: serverNames,
-      },
+      { type: 'list', name: 'serverName', message: 'Select server to remove:', choices: serverNames },
     ]);
-
     configManager.removeMCPServer(serverName);
     logger.success(`MCP server '${serverName}' removed`);
   }
 }
 
 async function toggleDebugMode() {
-  const current = configManager.isDebug();
-
   const { enabled } = await inquirer.prompt([
-    {
-      type: 'confirm',
-      name: 'enabled',
-      message: 'Enable debug mode?',
-      default: current,
-    },
+    { type: 'confirm', name: 'enabled', message: 'Enable debug mode?', default: configManager.isDebug() },
   ]);
-
   configManager.setDebug(enabled);
   logger.success(`Debug mode ${enabled ? 'enabled' : 'disabled'}`);
 }
 
 function viewConfiguration() {
-  const config = configManager.getConfig();
   console.log('\nCurrent Configuration:');
-  console.log(JSON.stringify(config, null, 2));
+  console.log(JSON.stringify(configManager.getConfig(), null, 2));
 }
 
 async function resetConfiguration() {
   const { confirm } = await inquirer.prompt([
-    {
-      type: 'confirm',
-      name: 'confirm',
-      message: chalk.red('Are you sure you want to reset all configuration?'),
-      default: false,
-    },
+    { type: 'confirm', name: 'confirm', message: chalk.red('Are you sure you want to reset all configuration?'), default: false },
   ]);
-
   if (confirm) {
     configManager.reset();
     logger.success('Configuration reset');
