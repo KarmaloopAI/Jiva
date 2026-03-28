@@ -5,6 +5,7 @@
  * Now uses StorageProvider abstraction for cloud-native support.
  */
 
+import { randomUUID } from 'node:crypto';
 import { Message } from '../models/base.js';
 import { logger } from '../utils/logger.js';
 import { ModelOrchestrator } from '../models/orchestrator.js';
@@ -37,9 +38,7 @@ export class ConversationManager {
    * Generate a unique conversation ID
    */
   private generateConversationId(): string {
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const random = Math.random().toString(36).substring(2, 8);
-    return `conv-${timestamp}-${random}`;
+    return `conv-${randomUUID()}`;
   }
 
   /**
