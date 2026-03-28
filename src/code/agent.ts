@@ -178,6 +178,7 @@ export class CodeAgent {
   private maxDepth: number;
   private history: Message[] = [];
   private tools: ICodeTool[];
+  private _stopped = false;
 
   constructor(config: CodeAgentConfig) {
     this.orchestrator = config.orchestrator;
@@ -354,6 +355,8 @@ ${directive ? `\n${directive}` : ''}`;
     // Track consecutive API errors to avoid infinite error loops
     let consecutiveApiErrors = 0;
     const MAX_CONSECUTIVE_API_ERRORS = 3;
+    let consecutiveToolCallErrors = 0;
+    const MAX_CONSECUTIVE_TOOL_CALL_ERRORS = 6;
     // Track empty responses (no tool calls, no content) so we can inject a recovery nudge.
     // Allow up to 4 retries — Krutrim/Groq can return blank responses transiently and the
     // model usually recovers within 2-3 nudges.
@@ -376,7 +379,16 @@ ${directive ? `\n${directive}` : ''}`;
     // In-loop compaction flag — only compact once per chat() turn to avoid thrashing
     let compactedThisTurn = false;
 
+    // Reset stop flag at the start of each chat() so the agent is immediately reusable
+    this._stopped = false;
+
     for (let i = 0; i < this.maxIterations; i++) {
+      // Cooperative stop: set by stop() (Ctrl+C or HTTP stop endpoint)
+      if (this._stopped) {
+        logger.info('[CodeAgent] Stop requested — exiting after current step');
+        finalContent = '[Task stopped by user]';
+        break;
+      }
       iterations = i + 1;
       logger.debug(`[CodeAgent] Iteration ${iterations}/${this.maxIterations}`);
 
@@ -424,22 +436,37 @@ ${directive ? `\n${directive}` : ''}`;
           temperature: 0.2,
         }, false);
         consecutiveApiErrors = 0; // reset on success
+        consecutiveToolCallErrors = 0; // reset on success
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
         logger.error(`[CodeAgent] Model error: ${msg}`);
 
-        consecutiveApiErrors++;
-        if (consecutiveApiErrors >= MAX_CONSECUTIVE_API_ERRORS) {
-          finalContent = `Error: ${msg}`;
-          break;
-        }
-
-        // For tool_use_failed (400) errors: first try to repair and execute the intended call,
-        // then fall back to injecting a correction message.
         const isToolUseFailed = msg.includes('tool_use_failed') || msg.includes('Failed to parse tool call');
         const isValidationFailed = msg.includes('Tool call validation failed') || msg.includes('did not match schema');
 
         if (isToolUseFailed || isValidationFailed) {
+          // Tool-call errors are handled separately from generic API errors.
+          // Reset the generic error counter — the tool correction loop has its own guard.
+          consecutiveApiErrors = 0;
+          consecutiveToolCallErrors++;
+
+          if (consecutiveToolCallErrors >= MAX_CONSECUTIVE_TOOL_CALL_ERRORS) {
+            logger.warn(`[CodeAgent] ${consecutiveToolCallErrors} consecutive tool-call failures — injecting strategy reset`);
+            consecutiveToolCallErrors = 0;
+            const lastMsg = messages[messages.length - 1];
+            if (lastMsg && lastMsg.role !== 'assistant') {
+              messages.push({ role: 'assistant', content: '' });
+            }
+            messages.push({
+              role: 'user',
+              content:
+                'You have had repeated tool call failures. Stop and think about a different approach.\n\n' +
+                `Valid tools: ${this.tools.map((t) => t.name).join(', ')}\n\n` +
+                'Use simpler arguments. Avoid heredocs or complex shell constructs in bash — write to a temp file first if needed.',
+            });
+            continue;
+          }
+
           // Conversation turn guard: for API-rejected calls (e.g. 400 tool_use_failed), the
           // model's assistant turn was never recorded. Injecting a user correction directly
           // would create an invalid user→user sequence. Add an empty assistant placeholder
@@ -471,7 +498,7 @@ ${directive ? `\n${directive}` : ''}`;
                 'Call edit_file again with all three parameters. ' +
                 'new_string must contain the complete replacement for old_string.',
             });
-            consecutiveApiErrors = 0;
+            consecutiveToolCallErrors = 0;
             emptyResponseCount = 0; // fresh recovery budget after targeted guidance
             continue;
           }
@@ -519,7 +546,7 @@ ${directive ? `\n${directive}` : ''}`;
                 `Start with Stage 1 NOW: write_file with just the bare HTML skeleton (20 lines max).`;
 
             messages.push({ role: 'user', content: correctionContent });
-            consecutiveApiErrors = 0;
+            consecutiveToolCallErrors = 0;
             emptyResponseCount = 0; // reset so model has fresh recovery budget for staged CSS/JS edits
             continue;
           }
@@ -557,27 +584,34 @@ ${directive ? `\n${directive}` : ''}`;
                 `[The model's previous tool call was automatically repaired from an invalid name to \`${repairedName}\`]\n` +
                 `<tool_result name="${repairedName}">\n${toolResult}\n</tool_result>`,
             });
-            consecutiveApiErrors = 0; // repaired successfully — reset error counter
+            consecutiveToolCallErrors = 0; // repaired successfully — reset tool call error counter
             continue;
           }
 
           // --- Fallback: inject correction message so the model can self-correct ---
           const nameMatch = msg.match(/"name":\s*"([^"]+)"/);
           const toolName = nameMatch ? nameMatch[1] : 'unknown';
-          logger.warn(`[CodeAgent] Tool call error (${toolName}), injecting correction — ${consecutiveApiErrors}/${MAX_CONSECUTIVE_API_ERRORS}`);
+          logger.warn(`[CodeAgent] Tool call error (${toolName}), injecting correction — ${consecutiveToolCallErrors}/${MAX_CONSECUTIVE_TOOL_CALL_ERRORS}`);
           messages.push({
             role: 'user',
             content:
               `Your last tool call was rejected. Error: "${msg.substring(0, 300)}"\n\n` +
               `Valid tools: ${this.tools.map((t) => t.name).join(', ')}\n` +
-              `Each tool requires specific parameters — call the tool again with the correct name and JSON arguments.`,
+              `Each tool requires specific parameters — call the tool again with the correct name and JSON arguments.\n\n` +
+              `For bash commands with complex content (heredocs, multi-line scripts): write the script to a temp file first using write_file, then execute it with bash.`,
           });
           continue;
         }
 
-        // For other non-transient errors, bail out
-        finalContent = `Error: ${msg}`;
-        break;
+        // For all other (non-tool-call) errors — genuine API/network failures
+        consecutiveApiErrors++;
+        if (consecutiveApiErrors >= MAX_CONSECUTIVE_API_ERRORS) {
+          finalContent = `Error: ${msg}`;
+          break;
+        }
+        // Non-fatal: log and let the next iteration try again
+        logger.warn(`[CodeAgent] API error ${consecutiveApiErrors}/${MAX_CONSECUTIVE_API_ERRORS}: ${msg}`);
+        continue;
       }
 
       // Add assistant response to messages, preserving the full structure needed for the next turn.
@@ -789,6 +823,7 @@ ${directive ? `\n${directive}` : ''}`;
         this.history,
         this.workspace.getWorkspaceDir(),
         this.orchestrator,
+        'code',
       );
     }
 
@@ -934,6 +969,11 @@ Keep the summary concise but complete. Focus on what would help continue the wor
     };
   }
 
+  /** Signal the agent to stop after the current iteration. */
+  stop(): void {
+    this._stopped = true;
+  }
+
   resetConversation(): void {
     this.history = [];
   }
@@ -953,6 +993,7 @@ Keep the summary concise but complete. Focus on what would help continue the wor
       this.workspace.getWorkspaceDir(),
       undefined,
       this.orchestrator,
+      'code',
     );
   }
 
@@ -961,12 +1002,28 @@ Keep the summary concise but complete. Focus on what would help continue the wor
     const conversation = await this.conversationManager.loadConversation(id);
     if (conversation) {
       this.history = conversation.messages;
+      // Restore the workspace this conversation was created in
+      const savedWorkspace = conversation.metadata?.workspace;
+      if (savedWorkspace && savedWorkspace !== this.workspace.getWorkspaceDir()) {
+        try {
+          await this.workspace.switchWorkspace(savedWorkspace);
+          // Restart LSP for the new workspace root
+          await this.lsp.shutdown().catch(() => {});
+          this.lsp = new LspManager({
+            root: savedWorkspace,
+            enabled: true,
+          });
+          logger.info(`[CodeAgent] Workspace restored to: ${savedWorkspace}`);
+        } catch (err) {
+          logger.warn(`[CodeAgent] Could not restore workspace '${savedWorkspace}': ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
     }
   }
 
-  async listConversations(): Promise<Array<{ id: string; title?: string; updated: string | number; messageCount: number; workspace?: string }>> {
+  async listConversations(): Promise<Array<{ id: string; title?: string; updated: string | number; messageCount: number; workspace?: string; type?: string }>> {
     if (!this.conversationManager) return [];
-    return this.conversationManager.listConversations();
+    return this.conversationManager.listConversations('code');
   }
 
   /** Get the code mode indicator for UI display. */

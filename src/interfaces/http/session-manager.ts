@@ -492,6 +492,16 @@ export class SessionManager extends EventEmitter {
     };
   }
 
+  /**
+   * Return the agent for an existing session without creating one.
+   * Used by the stop endpoint to signal a running chat() call.
+   * Returns null if the session does not exist.
+   */
+  getActiveAgent(tenantId: string, sessionId: string): IAgent | null {
+    const key = this.getSessionKey(tenantId, sessionId);
+    return this.sessions.get(key)?.agent ?? null;
+  }
+
   private getSessionKey(tenantId: string, sessionId: string): string {
     return `${tenantId}:${sessionId}`;
   }

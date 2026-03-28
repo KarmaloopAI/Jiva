@@ -20,7 +20,7 @@ import { extractAuthFromWebSocket, AuthContext } from './middleware/auth.js';
 import { logger } from '../../utils/logger.js';
 
 interface WebSocketMessage {
-  type: 'message' | 'ping';
+  type: 'message' | 'ping' | 'stop';
   content?: string;
 }
 
@@ -95,6 +95,18 @@ export function setupWebSocketHandler(wss: WebSocketServer, sessionManager: Sess
           // Handle ping
           if (message.type === 'ping') {
             ws.send(JSON.stringify({ type: 'pong' }));
+            return;
+          }
+
+          // Handle stop — cooperative: agent finishes current step then exits
+          if (message.type === 'stop') {
+            const agent = sessionManager.getActiveAgent(ws.auth!.tenantId, ws.auth!.sessionId);
+            if (agent) {
+              agent.stop();
+              ws.send(JSON.stringify({ type: 'status', message: 'Stop signal sent — agent will halt after current step' }));
+            } else {
+              ws.send(JSON.stringify({ type: 'status', message: 'No active agent to stop' }));
+            }
             return;
           }
 

@@ -19,6 +19,7 @@ export interface ConversationMetadata {
   messageCount: number;
   workspace?: string;
   summary?: string;
+  type?: 'chat' | 'code';
 }
 
 export class ConversationManager {
@@ -48,7 +49,8 @@ export class ConversationManager {
     messages: Message[],
     workspace?: string,
     conversationId?: string,
-    orchestrator?: ModelOrchestrator
+    orchestrator?: ModelOrchestrator,
+    type?: 'chat' | 'code'
   ): Promise<string> {
     const finalId = conversationId || this.currentConversationId || this.generateConversationId();
 
@@ -91,6 +93,7 @@ export class ConversationManager {
       messageCount: messages.length,
       workspace,
       summary: existingData?.metadata?.summary,
+      type: type ?? existingData?.metadata?.type,
     };
 
     const conversation: SavedConversation = {
@@ -130,9 +133,18 @@ export class ConversationManager {
   /**
    * List all saved conversations using StorageProvider
    */
-  async listConversations(): Promise<ConversationMetadata[]> {
+  async listConversations(type?: 'chat' | 'code'): Promise<ConversationMetadata[]> {
     try {
-      const conversations = await this.storageProvider.listConversations();
+      let conversations = await this.storageProvider.listConversations();
+
+      // Filter by type if specified
+      if (type) {
+        conversations = conversations.filter(c => {
+          // If no type stored, treat as 'chat' for backward compatibility
+          const convType = c.type ?? 'chat';
+          return convType === type;
+        });
+      }
 
       // Sort by updated date (most recent first)
       conversations.sort((a, b) =>
@@ -396,10 +408,11 @@ Summary:`;
   async autoSave(
     messages: Message[],
     workspace?: string,
-    orchestrator?: ModelOrchestrator
+    orchestrator?: ModelOrchestrator,
+    type?: 'chat' | 'code'
   ): Promise<void> {
     try {
-      await this.saveConversation(messages, workspace, this.currentConversationId || undefined, orchestrator);
+      await this.saveConversation(messages, workspace, this.currentConversationId || undefined, orchestrator, type);
     } catch (error) {
       logger.error('Auto-save failed', error);
     }

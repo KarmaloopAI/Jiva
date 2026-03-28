@@ -25,6 +25,7 @@ export interface ConversationMetadata {
   messageCount: number;
   workspace?: string;
   summary?: string;
+  type?: 'chat' | 'code';
 }
 
 /**
