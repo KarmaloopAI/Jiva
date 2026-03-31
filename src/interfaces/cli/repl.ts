@@ -10,6 +10,7 @@ import { logger } from '../../utils/logger.js';
 import { orchestrationLogger } from '../../utils/orchestration-logger.js';
 import { formatForCLI } from '../../utils/markdown.js';
 import type { IAgent } from '../../core/agent-interface.js';
+import type { EvaluatorHarness } from '../../evaluator/harness.js';
 
 export type { IAgent };
 
@@ -20,10 +21,15 @@ export interface REPLOptions {
    * flow before the agent executes. Only effective when the agent implements `plan()`.
    */
   planMode?: boolean;
+  /**
+   * When provided, each user message is processed through the harness instead of
+   * calling agent.chat() directly. The harness runs the main agent then the evaluator.
+   */
+  harness?: EvaluatorHarness;
 }
 
 export async function startREPL(options: REPLOptions): Promise<void> {
-  const { agent, planMode = false } = options;
+  const { agent, planMode = false, harness } = options;
 
   console.log(chalk.bold.cyan('\n∞ Jiva Agent - Interactive Mode\n'));
   console.log(chalk.gray('Type your message and press Enter. Type /help for commands or /exit to quit.\n'));
@@ -175,26 +181,68 @@ export async function startREPL(options: REPLOptions): Promise<void> {
     // Ctrl+C while the agent is running → stop gracefully instead of killing
     const sigintHandler = () => {
       spinner.text = chalk.yellow('Stopping after current step…');
-      agent.stop();
+      if (harness) {
+        harness.stop();
+      } else {
+        agent.stop();
+      }
     };
     process.once('SIGINT', sigintHandler);
 
     try {
-      const response = await agent.chat(messageToSend);
+      if (harness) {
+        // ── Harness mode: main agent + evaluator ─────────────────────────
+        spinner.text = 'Main agent processing…';
+        const harnessResult = await harness.run(messageToSend);
 
-      spinner.stop();
+        spinner.stop();
 
-      console.log(chalk.bold.green('\nJiva:'));
+        // Main agent response
+        console.log(chalk.bold.green('\nJiva:'));
+        console.log(formatForCLI(harnessResult.mainAgentResponse));
+        console.log(chalk.gray(`[Iterations: ${harnessResult.mainAgentIterations}]`));
 
-      // Render markdown for prettier output
-      const formattedContent = formatForCLI(response.content);
-      console.log(formattedContent);
+        // Evaluation result
+        const ev = harnessResult.evaluation;
+        console.log('');
+        if (ev.passed) {
+          console.log(
+            chalk.bold.green('⚡ Evaluation: ') +
+            chalk.green(`✓ Passed`) +
+            chalk.gray(` — ${ev.nudgesSent} nudge(s), ${ev.cyclesRan} cycle(s)`),
+          );
+        } else {
+          console.log(
+            chalk.bold.magenta('⚡ Evaluation: ') +
+            chalk.red(`✗ ${ev.gaps.length} gap(s) remain`) +
+            chalk.gray(` after ${ev.cyclesRan} cycle(s), ${ev.nudgesSent} nudge(s)`),
+          );
+          for (const gap of ev.gaps) {
+            console.log(chalk.red(`  • ${gap}`));
+          }
+        }
+        if (ev.summary) {
+          console.log(chalk.gray(`  ${ev.summary}`));
+        }
+        console.log('');
+      } else {
+        // ── Standard mode ────────────────────────────────────────────────
+        const response = await agent.chat(messageToSend);
 
-      if (response.toolsUsed.length > 0) {
-        console.log(chalk.gray(`\n[Used tools: ${response.toolsUsed.join(', ')}]`));
+        spinner.stop();
+
+        console.log(chalk.bold.green('\nJiva:'));
+
+        // Render markdown for prettier output
+        const formattedContent = formatForCLI(response.content);
+        console.log(formattedContent);
+
+        if (response.toolsUsed.length > 0) {
+          console.log(chalk.gray(`\n[Used tools: ${response.toolsUsed.join(', ')}]`));
+        }
+
+        console.log(chalk.gray(`[Iterations: ${response.iterations}]\n`));
       }
-
-      console.log(chalk.gray(`[Iterations: ${response.iterations}]\n`));
     } catch (error) {
       spinner.stop();
       console.log(chalk.red('\n✗ Error:'), error instanceof Error ? error.message : String(error));
@@ -216,6 +264,9 @@ function showHelp() {
   console.log('  /save          - Save current conversation');
   console.log('  /load          - Load a saved conversation');
   console.log('  /list          - List all saved conversations');
+  console.log('');
+  console.log(chalk.bold('Harness Modes (CLI flag):'));
+  console.log('  --harness evaluator  Pair a supervisor agent that validates completion');
   console.log('');
 }
 

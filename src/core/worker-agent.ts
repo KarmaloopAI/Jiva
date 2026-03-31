@@ -549,6 +549,17 @@ Tools used: ${spawnResult.toolsUsed.join(', ')}`;
               continue;
             }
 
+            // Catch dry-run file edits before they execute.
+            // Some MCP filesystem tools (e.g. filesystem__edit_file) accept a
+            // `dryRun: true` flag that previews the edit without writing it.
+            // Models occasionally use this as a "safety check" and then forget
+            // to make the real call, leaving files unchanged.
+            // We let the dry-run through so the model sees the preview, then
+            // immediately remind it that the file was NOT actually modified.
+            const isDryRun =
+              args.dryRun === true &&
+              (toolName.includes('edit_file') || toolName.includes('write_file') || toolName.includes('create_file'));
+
             // Regular MCP tool execution
             const result = await this.mcpManager.getClient().executeTool(toolName, args);
 
@@ -575,6 +586,16 @@ Tools used: ${spawnResult.toolsUsed.join(', ')}`;
 
             const toolMessage = formatToolResult(toolCall.id, toolName, toolResultText);
             conversationHistory.push(toolMessage);
+
+            // If the model used dryRun=true the file was NOT modified.
+            // Inject a reminder so the model makes the real call next.
+            if (isDryRun) {
+              logger.warn(`  [Worker] ${toolName} executed with dryRun=true — file NOT modified; injecting reminder`);
+              conversationHistory.push({
+                role: 'user',
+                content: `Note: You called \`${toolName}\` with \`dryRun: true\`. This was a preview only — the file was NOT actually modified. You MUST call \`${toolName}\` again WITHOUT \`dryRun: true\` to actually apply the change.`,
+              });
+            }
 
             logger.debug(`  ✓ [Worker] Tool ${toolName} completed`);
           } catch (error) {

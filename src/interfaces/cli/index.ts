@@ -127,6 +127,10 @@ program
   .option('--code', 'Enable code mode (single-loop agent + LSP integration)')
   .option('--no-lsp', 'Disable LSP in code mode')
   .option('--plan', 'Generate an implementation plan for approval before executing (code mode only)')
+  .option(
+    '--harness <type>',
+    'Run in harness mode. "evaluator" pairs a supervisor agent that validates task completion and nudges the main agent when gaps are found.',
+  )
   .action(async (options) => {
     try {
       // Load configuration from file if provided
@@ -358,15 +362,38 @@ program
         });
       }
 
-      // Start REPL
+      // Start REPL (optionally wrapped in evaluator harness)
       const planMode = useCodeMode && !!options.plan;
       if (planMode) {
         console.log(chalk.cyan('Plan mode active: implementation plans will be shown for approval before execution.\n'));
       }
-      await startREPL({ agent, planMode });
+
+      let harness: import('../../evaluator/index.js').EvaluatorHarness | undefined;
+      if (options.harness === 'evaluator') {
+        const { createEvaluatorHarness } = await import('../../evaluator/index.js');
+        const evalOrchestratorCfg = {
+          endpoint: modelConfig.reasoning.endpoint,
+          apiKey: modelConfig.reasoning.apiKey,
+          model: modelConfig.reasoning.defaultModel,
+          useHarmonyFormat: modelConfig.reasoning.useHarmonyFormat,
+          ...(modelConfig.toolCalling && {
+            toolCallingEndpoint: modelConfig.toolCalling.endpoint,
+            toolCallingApiKey: modelConfig.toolCalling.apiKey,
+            toolCallingModel: modelConfig.toolCalling.defaultModel,
+          }),
+        };
+        harness = await createEvaluatorHarness(agent, mcpServers, evalOrchestratorCfg);
+        console.log(chalk.magenta('⚡ Evaluator harness active — a supervisor agent will validate task completion after each response.\n'));
+      }
+
+      await startREPL({ agent, planMode, harness });
 
       // Cleanup
-      await agent.cleanup();
+      if (harness) {
+        await harness.cleanup();
+      } else {
+        await agent.cleanup();
+      }
       orchestrationLogger.close();
 
       // Show log location
