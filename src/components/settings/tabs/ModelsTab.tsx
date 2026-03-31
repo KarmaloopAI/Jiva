@@ -57,13 +57,13 @@ export function ModelsTab() {
   }, [])
 
   const handleSave = async () => {
-    if (!config) return
+    const base = config ?? { models: { reasoning: null } }
     setSaving(true)
     const updated: JivaConfig = {
-      ...config,
+      ...base,
       models: {
         reasoning: {
-          ...config.models?.reasoning,
+          ...base.models?.reasoning,
           provider: rProvider,
           endpoint: rEndpoint,
           apiKey: rApiKey,
@@ -76,6 +76,7 @@ export function ModelsTab() {
       },
     }
     await window.electron.config.write(updated)
+    setConfig(updated)
     setSaving(false)
     setSaved(true)
     setTimeout(() => setSaved(false), 2500)

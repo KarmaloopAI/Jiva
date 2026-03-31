@@ -63,7 +63,7 @@ contextBridge.exposeInMainWorld('electron', {
   git: {
     isRepo: (dir: string) => ipcRenderer.invoke('git:is-repo', dir),
     status: (dir: string) => ipcRenderer.invoke('git:status', dir),
-    diffFile: (dir: string, file: string) => ipcRenderer.invoke('git:diff-file', dir, file),
+    diffFile: (dir: string, file: string, status?: string) => ipcRenderer.invoke('git:diff-file', dir, file, status),
     initRepo: (dir: string) => ipcRenderer.invoke('git:init-repo', dir),
   },
   directive: {

@@ -1,13 +1,15 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useCodeStore } from '../store/code.store'
 import { useGitStore } from '../store/git.store'
 import { CodeChatView } from '../components/code/CodeChatView'
 import { GitPanel } from '../components/code/GitPanel'
 import { WorkspacePickerView } from '../components/code/WorkspacePickerView'
+import { ResizeHandle } from '../components/ui/ResizeHandle'
 
 export function CodePage() {
   const { isSessionStarted } = useCodeStore()
   const { isRepo } = useGitStore()
+  const [gitPanelWidth, setGitPanelWidth] = useState(320)
 
   // Keep git panel in sync after session starts
   useEffect(() => {
@@ -28,14 +30,21 @@ export function CodePage() {
         <CodeChatView />
       </div>
 
-      {/* Right: git panel (only when workspace is a git repo) */}
+      {/* Resize handle + git panel (only when workspace is a git repo) */}
       {isRepo && (
-        <div
-          className="w-80 flex-shrink-0 border-l flex flex-col"
-          style={{ borderColor: 'var(--card-border)' }}
-        >
-          <GitPanel />
-        </div>
+        <>
+          <ResizeHandle
+            onResize={(delta) =>
+              setGitPanelWidth((w) => Math.min(600, Math.max(240, w - delta)))
+            }
+          />
+          <div
+            className="flex-shrink-0 flex flex-col"
+            style={{ width: `${gitPanelWidth}px`, borderLeft: '1px solid var(--card-border)' }}
+          >
+            <GitPanel />
+          </div>
+        </>
       )}
     </div>
   )

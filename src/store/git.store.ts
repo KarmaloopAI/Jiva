@@ -72,8 +72,9 @@ export const useGitStore = create<GitStore>((set, get) => ({
     }
     set({ selectedFile: file, isLoadingDiff: true, diffContent: null })
     try {
-      const { workspaceDir } = get()
-      const diff = await window.electron.git.diffFile(workspaceDir, file)
+      const { workspaceDir, changedFiles } = get()
+      const status = changedFiles.find(f => f.file === file)?.status
+      const diff = await window.electron.git.diffFile(workspaceDir, file, status)
       set({ diffContent: diff, isLoadingDiff: false })
     } catch {
       set({ isLoadingDiff: false })

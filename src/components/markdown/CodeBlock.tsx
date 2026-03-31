@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import hljs from 'highlight.js'
+import 'highlight.js/styles/github.css'
 import { Check, Copy, ChevronDown, ChevronUp } from 'lucide-react'
 
 interface CodeBlockProps {
@@ -70,7 +72,20 @@ export function CodeBlock({ children, language, collapsible }: CodeBlockProps) {
       {!collapsed && (
         <div className={isLong ? 'max-h-96 overflow-y-auto' : ''}>
           <pre className="p-4 text-sm leading-relaxed overflow-x-auto">
-            <code className={language ? `language-${language}` : ''}>{code}</code>
+            <code
+              className={language ? `language-${language} hljs` : 'hljs'}
+              dangerouslySetInnerHTML={{
+                __html: (() => {
+                  try {
+                    return language
+                      ? hljs.highlight(code, { language, ignoreIllegals: true }).value
+                      : hljs.highlightAuto(code).value
+                  } catch {
+                    return hljs.highlightAuto(code).value
+                  }
+                })()
+              }}
+            />
           </pre>
         </div>
       )}

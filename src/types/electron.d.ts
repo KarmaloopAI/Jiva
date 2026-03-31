@@ -103,7 +103,7 @@ interface ElectronAPI {
   git: {
     isRepo: (dir: string) => Promise<boolean>
     status: (dir: string) => Promise<GitFile[]>
-    diffFile: (dir: string, file: string) => Promise<string | null>
+    diffFile: (dir: string, file: string, status?: string) => Promise<string | null>
     initRepo: (dir: string) => Promise<{ success: boolean; error?: string }>
   }
   directive: {

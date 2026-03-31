@@ -1,9 +1,27 @@
 import { useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { RefreshCw, GitBranch, ChevronLeft, FileCode } from 'lucide-react'
+import hljs from 'highlight.js'
 import { useGitStore } from '../../store/git.store'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
+
+const EXT_TO_LANG: Record<string, string> = {
+  ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
+  mjs: 'javascript', cjs: 'javascript', mts: 'typescript', cts: 'typescript',
+  py: 'python', go: 'go', rs: 'rust', java: 'java', kt: 'kotlin',
+  c: 'c', cpp: 'cpp', cc: 'cpp', h: 'cpp', hh: 'cpp', cs: 'csharp',
+  rb: 'ruby', php: 'php', swift: 'swift', scala: 'scala', lua: 'lua',
+  sh: 'bash', bash: 'bash', zsh: 'bash', fish: 'bash',
+  json: 'json', yaml: 'yaml', yml: 'yaml', toml: 'ini', env: 'bash',
+  md: 'markdown', css: 'css', scss: 'scss', html: 'xml', xml: 'xml',
+  sql: 'sql', graphql: 'graphql', r: 'r', vim: 'vim',
+}
+
+function getLang(filename: string): string | null {
+  const ext = filename.split('.').pop()?.toLowerCase() ?? ''
+  return EXT_TO_LANG[ext] ?? null
+}
 
 function StatusBadge({ status }: { status: string }) {
   const s = status.replace(' ', '')
@@ -17,6 +35,16 @@ function StatusBadge({ status }: { status: string }) {
 
 function DiffView({ content, file, onBack }: { content: string; file: string; onBack: () => void }) {
   const lines = content.split('\n')
+  const language = getLang(file)
+
+  const highlight = (code: string) => {
+    if (!language || !code) return code
+    try {
+      return hljs.highlight(code, { language, ignoreIllegals: true }).value
+    } catch {
+      return code
+    }
+  }
 
   return (
     <div className="flex flex-col h-full">
@@ -36,25 +64,40 @@ function DiffView({ content, file, onBack }: { content: string; file: string; on
           style={{ fontFamily: "'JetBrains Mono', 'Fira Code', monospace" }}
         >
           {lines.map((line, i) => {
-            let bg = 'transparent'
-            let color = 'var(--text-muted)'
+            const isFileHeader = line.startsWith('+++') || line.startsWith('---')
+            const isHunk = line.startsWith('@@')
+            const isAdd = !isFileHeader && line.startsWith('+')
+            const isRem = !isFileHeader && line.startsWith('-')
 
-            if (line.startsWith('+++') || line.startsWith('---')) {
-              color = 'var(--text-subtle)'
-            } else if (line.startsWith('+')) {
-              bg = 'rgba(34,197,94,0.1)'
-              color = '#22c55e'
-            } else if (line.startsWith('-')) {
-              bg = 'rgba(239,68,68,0.1)'
-              color = '#ef4444'
-            } else if (line.startsWith('@@')) {
-              color = 'var(--accent-blue)'
-              bg = 'rgba(59,130,246,0.06)'
+            // File header and hunk lines — no syntax highlighting
+            if (isFileHeader) {
+              return (
+                <div key={i} style={{ color: 'var(--text-subtle)', whiteSpace: 'pre' }}>
+                  {line || ' '}
+                </div>
+              )
+            }
+            if (isHunk) {
+              return (
+                <div key={i} style={{ color: 'var(--accent-blue)', background: 'rgba(59,130,246,0.06)', whiteSpace: 'pre' }}>
+                  {line || ' '}
+                </div>
+              )
             }
 
+            // Code lines — prefix colored, content syntax-highlighted
+            const prefix = line[0] ?? ' '
+            const code = line.length > 0 ? line.slice(1) : ' '
+            const prefixColor = isAdd ? '#22c55e' : isRem ? '#ef4444' : 'var(--text-subtle)'
+            const bg = isAdd ? 'rgba(34,197,94,0.1)' : isRem ? 'rgba(239,68,68,0.1)' : 'transparent'
+
             return (
-              <div key={i} style={{ background: bg, color, whiteSpace: 'pre' }}>
-                {line || ' '}
+              <div key={i} style={{ background: bg, whiteSpace: 'pre', display: 'flex' }}>
+                <span style={{ color: prefixColor, userSelect: 'none', flexShrink: 0 }}>{prefix}</span>
+                <span
+                  style={{ color: 'var(--text)' }}
+                  dangerouslySetInnerHTML={{ __html: highlight(code) }}
+                />
               </div>
             )
           })}

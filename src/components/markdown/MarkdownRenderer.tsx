@@ -1,8 +1,6 @@
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import rehypeHighlight from 'rehype-highlight'
 import { CodeBlock } from './CodeBlock'
-import 'highlight.js/styles/github.css'
 
 interface MarkdownRendererProps {
   content: string
@@ -14,7 +12,6 @@ export function MarkdownRenderer({ content, className }: MarkdownRendererProps) 
     <div className={`markdown-body ${className ?? ''}`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeHighlight]}
         components={{
           code({ className, children }) {
             const match = /language-(\w+)/.exec(className || '')

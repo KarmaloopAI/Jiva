@@ -47,9 +47,10 @@ function groupByDate(
 
 interface ConversationSidebarProps {
   isCollapsed: boolean
+  width: number
 }
 
-export function ConversationSidebar({ isCollapsed }: ConversationSidebarProps) {
+export function ConversationSidebar({ isCollapsed, width }: ConversationSidebarProps) {
   const { conversations, activeConversationId, isLoading, loadConversationList, startNewConversation, switchToConversation } =
     useConversationStore()
   const { conversationId } = useChatStore()
@@ -75,7 +76,7 @@ export function ConversationSidebar({ isCollapsed }: ConversationSidebarProps) {
         <motion.aside
           key="sidebar"
           initial={{ width: 0, opacity: 0 }}
-          animate={{ width: 240, opacity: 1 }}
+          animate={{ width, opacity: 1 }}
           exit={{ width: 0, opacity: 0 }}
           transition={{ type: 'spring', damping: 28, stiffness: 300 }}
           className="flex-shrink-0 h-full flex flex-col overflow-hidden"

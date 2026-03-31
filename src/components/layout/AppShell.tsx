@@ -7,6 +7,7 @@ import { ChatPage } from '../../pages/ChatPage'
 import { CoworkPage } from '../../pages/CoworkPage'
 import { CodePage } from '../../pages/CodePage'
 import { FilesPage } from '../../pages/FilesPage'
+import { ResizeHandle } from '../ui/ResizeHandle'
 import type { ActiveTab } from '../../App'
 
 interface AppShellProps {
@@ -18,6 +19,7 @@ export function AppShell({ activeTab, onTabChange }: AppShellProps) {
   const [personaOpen, setPersonaOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [sidebarWidth, setSidebarWidth] = useState(240)
 
   return (
     <div className="flex flex-col h-full relative z-10">
@@ -32,7 +34,14 @@ export function AppShell({ activeTab, onTabChange }: AppShellProps) {
 
       <div className="flex flex-1 overflow-hidden relative">
         {/* Persistent Conversation Sidebar */}
-        <ConversationSidebar isCollapsed={sidebarCollapsed} />
+        <ConversationSidebar isCollapsed={sidebarCollapsed} width={sidebarWidth} />
+        {!sidebarCollapsed && (
+          <ResizeHandle
+            onResize={(delta) =>
+              setSidebarWidth((w) => Math.min(400, Math.max(160, w + delta)))
+            }
+          />
+        )}
 
         {/* Main Content */}
         <main className="flex-1 overflow-hidden relative">

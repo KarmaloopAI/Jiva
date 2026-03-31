@@ -1,5 +1,5 @@
 import { ipcMain, BrowserWindow, dialog, shell } from 'electron'
-import { execSync } from 'child_process'
+import { execSync, execFileSync } from 'child_process'
 import { JivaRunner } from './jiva-runner'
 import type { CodeRunner } from './code-runner'
 import { readConfig, writeConfig, getJivaConfigPath } from './config-manager'
@@ -546,7 +546,7 @@ export function setupIpcHandlers(
   // --- Git: check if directory is a git repo ---
   ipcMain.handle('git:is-repo', (_event, dir: string) => {
     try {
-      execSync('git rev-parse --is-inside-work-tree', { cwd: dir, timeout: 3000 })
+      execFileSync('git', ['rev-parse', '--is-inside-work-tree'], { cwd: dir, timeout: 3000 })
       return true
     } catch {
       return false
@@ -556,7 +556,7 @@ export function setupIpcHandlers(
   // --- Git: get changed files (git status --porcelain) ---
   ipcMain.handle('git:status', (_event, dir: string) => {
     try {
-      const output = execSync('git status --porcelain', { cwd: dir, timeout: 5000 }).toString()
+      const output = execFileSync('git', ['status', '--porcelain'], { cwd: dir, timeout: 5000 }).toString()
       return output
         .split('\n')
         .filter(Boolean)
@@ -570,16 +570,50 @@ export function setupIpcHandlers(
   })
 
   // --- Git: get unified diff for a specific file ---
-  ipcMain.handle('git:diff-file', (_event, dir: string, file: string) => {
+  // status param: '??' = untracked, 'A' = staged new, others = modified/deleted/renamed
+  ipcMain.handle('git:diff-file', (_event, dir: string, file: string, status?: string) => {
     try {
-      // Try HEAD diff first (committed vs working tree)
+      // Untracked file — synthesise a diff showing all lines as additions
+      if (status === '??') {
+        const fullPath = path.join(dir, file)
+        try {
+          const content = fs.readFileSync(fullPath, 'utf-8')
+          const lines = content.split('\n')
+          if (lines[lines.length - 1] === '') lines.pop()
+          const body = lines.map(l => `+${l}`).join('\n')
+          return `--- /dev/null\n+++ b/${file}\n@@ -0,0 +1,${lines.length} @@\n${body}`
+        } catch {
+          return null
+        }
+      }
+
+      // Staged new file — show what was added to the index
+      if (status === 'A') {
+        try {
+          const diff = execFileSync('git', ['diff', '--cached', '--', file], { cwd: dir, timeout: 5000 }).toString()
+          if (diff.trim()) return diff
+        } catch {}
+      }
+
+      // Modified / deleted / renamed — diff HEAD covers staged + unstaged vs last commit
       try {
-        const diff = execSync(`git diff HEAD -- "${file}"`, { cwd: dir, timeout: 5000 }).toString()
+        const diff = execFileSync('git', ['diff', 'HEAD', '--', file], { cwd: dir, timeout: 5000 }).toString()
         if (diff.trim()) return diff
       } catch {}
-      // Fall back to plain diff (staged only / untracked)
-      const fallback = execSync(`git diff -- "${file}"`, { cwd: dir, timeout: 5000 }).toString()
-      return fallback || null
+
+      // Fallback: staged-only diff (e.g. AM — added to index, modified in worktree)
+      try {
+        const diff = execFileSync('git', ['diff', '--cached', '--', file], { cwd: dir, timeout: 5000 }).toString()
+        if (diff.trim()) return diff
+      } catch {}
+
+      // Last resort: plain unstaged diff
+      try {
+        const diff = execFileSync('git', ['diff', '--', file], { cwd: dir, timeout: 5000 }).toString()
+        if (diff.trim()) return diff
+      } catch {}
+
+      return null
     } catch {
       return null
     }
@@ -588,7 +622,7 @@ export function setupIpcHandlers(
   // --- Git: initialise a new repository in a directory ---
   ipcMain.handle('git:init-repo', (_event, dir: string) => {
     try {
-      execSync('git init', { cwd: dir, timeout: 10000 })
+      execFileSync('git', ['init'], { cwd: dir, timeout: 10000 })
       return { success: true }
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) }
