@@ -30,6 +30,7 @@ export interface AgentResponse {
   content: string;
   toolsUsed: string[];
   iterations: number;
+  tokenUsage?: import('../models/token-tracker.js').TokenUsageSnapshot;
 }
 
 /**
@@ -101,7 +102,7 @@ export interface CodeAgentConfig {
 const DEFAULT_MAX_ITERATIONS = 50;
 const DOOM_LOOP_THRESHOLD = 3;
 /** Max consecutive read_file calls before injecting an "act, don't just read" nudge. */
-const MAX_CONSECUTIVE_READS = 5;
+const MAX_CONSECUTIVE_READS = 15;
 const CODE_MODE_INDICATOR = '[CODE MODE]';
 // Default token threshold for in-loop compaction (90K leaves ~38K headroom in a 128K model)
 const DEFAULT_COMPACTION_THRESHOLD = 90_000;
@@ -824,10 +825,11 @@ ${directive ? `\n${directive}` : ''}`;
         this.workspace.getWorkspaceDir(),
         this.orchestrator,
         'code',
+        this.orchestrator.getTokenUsage(),
       );
     }
 
-    return { content: finalContent, toolsUsed, iterations };
+    return { content: finalContent, toolsUsed, iterations, tokenUsage: this.orchestrator.getTokenUsage() };
   }
 
   /**
@@ -872,7 +874,12 @@ ${directive ? `\n${directive}` : ''}`;
       })
       .join('\n\n');
 
-    const compactionPrompt = `You are summarising a coding session to preserve context for the next agent turn.
+    const directiveText = this.workspace.getDirectivePrompt();
+    const directiveBlock = directiveText
+      ? `WORKSPACE DIRECTIVE (prioritise retaining context aligned with this):\n${directiveText}\n\nWhen summarising, prioritise information that directly supports the directive above.\n\n---\n\n`
+      : '';
+
+    const compactionPrompt = `${directiveBlock}You are summarising a coding session to preserve context for the next agent turn.
 
 Provide a structured summary following this exact template:
 
@@ -1024,6 +1031,10 @@ Keep the summary concise but complete. Focus on what would help continue the wor
   async listConversations(): Promise<Array<{ id: string; title?: string; updated: string | number; messageCount: number; workspace?: string; type?: string }>> {
     if (!this.conversationManager) return [];
     return this.conversationManager.listConversations('code');
+  }
+
+  getTokenUsage() {
+    return this.orchestrator.getTokenUsage();
   }
 
   /** Get the code mode indicator for UI display. */

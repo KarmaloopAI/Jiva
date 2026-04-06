@@ -340,12 +340,16 @@ export class SessionManager extends EventEmitter {
       // Persist conversation state
       const conversationHistory = session.agent.getConversationHistory();
       if (conversationHistory.length > 0) {
+        const tokenUsage = session.agent.getTokenUsage();
         await this.config.storageProvider.saveConversation({
           metadata: {
             id: sessionId,
             created: session.info.createdAt.toISOString(),
             updated: new Date().toISOString(),
             messageCount: conversationHistory.length,
+            totalPromptTokens: tokenUsage.promptTokens,
+            totalCompletionTokens: tokenUsage.completionTokens,
+            totalTokens: tokenUsage.totalTokens,
           },
           messages: conversationHistory,
         });

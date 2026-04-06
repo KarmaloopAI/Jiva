@@ -73,6 +73,8 @@ export class EvaluatorHarness {
       mainAgentResponse: mainResponse.content,
       mainAgentIterations: mainResponse.iterations,
       evaluation,
+      mainAgentTokenUsage: this.mainAgent.getTokenUsage(),
+      evaluatorTokenUsage: this.evaluatorAgent.getOrchestratorTokenUsage(),
     };
   }
 

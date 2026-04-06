@@ -21,6 +21,9 @@ export interface ConversationMetadata {
   workspace?: string;
   summary?: string;
   type?: 'chat' | 'code';
+  totalPromptTokens?: number;
+  totalCompletionTokens?: number;
+  totalTokens?: number;
 }
 
 export class ConversationManager {
@@ -49,7 +52,8 @@ export class ConversationManager {
     workspace?: string,
     conversationId?: string,
     orchestrator?: ModelOrchestrator,
-    type?: 'chat' | 'code'
+    type?: 'chat' | 'code',
+    tokenUsage?: { promptTokens: number; completionTokens: number; totalTokens: number }
   ): Promise<string> {
     const finalId = conversationId || this.currentConversationId || this.generateConversationId();
 
@@ -93,6 +97,9 @@ export class ConversationManager {
       workspace,
       summary: existingData?.metadata?.summary,
       type: type ?? existingData?.metadata?.type,
+      totalPromptTokens: (existingData?.metadata?.totalPromptTokens ?? 0) + (tokenUsage?.promptTokens ?? 0),
+      totalCompletionTokens: (existingData?.metadata?.totalCompletionTokens ?? 0) + (tokenUsage?.completionTokens ?? 0),
+      totalTokens: (existingData?.metadata?.totalTokens ?? 0) + (tokenUsage?.totalTokens ?? 0),
     };
 
     const conversation: SavedConversation = {
@@ -190,7 +197,8 @@ export class ConversationManager {
   async condenseConversation(
     messages: Message[],
     orchestrator: ModelOrchestrator,
-    targetMessageCount: number = 20
+    targetMessageCount: number = 20,
+    compactionContext?: { directive?: string; currentGoal?: string }
   ): Promise<Message[]> {
     if (messages.length <= targetMessageCount) {
       return messages;
@@ -228,8 +236,20 @@ export class ConversationManager {
         })
         .join('\n\n');
 
+      // Build optional context block so the LLM can prioritise what to keep
+      const contextParts: string[] = [];
+      if (compactionContext?.directive) {
+        contextParts.push(`WORKSPACE DIRECTIVE (prioritise retaining context aligned with this):\n${compactionContext.directive}`);
+      }
+      if (compactionContext?.currentGoal) {
+        contextParts.push(`CURRENT GOAL:\n${compactionContext.currentGoal}`);
+      }
+      const contextBlock = contextParts.length > 0
+        ? contextParts.join('\n\n') + '\n\nWhen summarising, prioritise information that directly supports the directive and current goal above.\n\n---\n\n'
+        : '';
+
       // Structured compaction prompt (ported from opencode's compaction.ts)
-      const summaryPrompt = `Provide a detailed summary for continuing our conversation. The summary will be used so another agent can read it and continue the work.
+      const summaryPrompt = `${contextBlock}Provide a detailed summary for continuing our conversation. The summary will be used so another agent can read it and continue the work.
 
 When constructing the summary, follow this template:
 
@@ -408,10 +428,11 @@ Summary:`;
     messages: Message[],
     workspace?: string,
     orchestrator?: ModelOrchestrator,
-    type?: 'chat' | 'code'
+    type?: 'chat' | 'code',
+    tokenUsage?: { promptTokens: number; completionTokens: number; totalTokens: number }
   ): Promise<void> {
     try {
-      await this.saveConversation(messages, workspace, this.currentConversationId || undefined, orchestrator, type);
+      await this.saveConversation(messages, workspace, this.currentConversationId || undefined, orchestrator, type, tokenUsage);
     } catch (error) {
       logger.error('Auto-save failed', error);
     }

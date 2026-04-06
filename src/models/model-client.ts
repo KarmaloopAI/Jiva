@@ -314,8 +314,11 @@ export class ModelClient implements IModel {
         logger.debug(`[Model reasoning] ${reasoningTokens.substring(0, 2000)}${reasoningTokens.length > 2000 ? '…' : ''}`);
       }
 
-      // Parse response based on format used
-      if (useHarmony && isReasoningModel && options.tools && options.tools.length > 0) {
+      // Parse response based on format used.
+      // Always run Harmony parsing when the model is a Harmony-format model, even
+      // when no tools were requested — the model may still emit tool-call tokens
+      // (e.g. <|call|>…<|return|> or <tool_call>…</tool_call>) regardless.
+      if (useHarmony && isReasoningModel) {
         // Parse Harmony format response (Krutrim gpt-oss-120b only)
         const parsed = parseHarmonyResponse(messageContent);
 
@@ -407,7 +410,6 @@ export class ModelClient implements IModel {
         messages: [{ role: 'user', content: 'test' }],
         temperature: 0,
         maxTokens: 5,
-        reasoningEffort: 'low',
       });
 
       const latency = Date.now() - startTime;

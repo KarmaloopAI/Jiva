@@ -10,6 +10,7 @@ import type { ModelOrchestrator } from '../models/orchestrator.js';
 import type { MCPServerManager } from '../mcp/server-manager.js';
 import type { WorkspaceManager } from '../core/workspace.js';
 import type { IAgent } from '../core/agent-interface.js';
+import type { TokenUsageSnapshot } from '../models/token-tracker.js';
 
 // ─── Evaluator Agent ─────────────────────────────────────────────────────────
 
@@ -86,4 +87,8 @@ export interface HarnessResult {
   mainAgentIterations: number;
   /** Evaluation outcome after the evaluator ran. */
   evaluation: EvaluationResult;
+  /** Token usage accumulated by the main agent's orchestrator during this harness run. */
+  mainAgentTokenUsage?: TokenUsageSnapshot;
+  /** Token usage accumulated by the evaluator's isolated orchestrator. */
+  evaluatorTokenUsage?: TokenUsageSnapshot;
 }

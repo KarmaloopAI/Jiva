@@ -105,6 +105,28 @@ export function setupSessionRoutes(app: Express, sessionManager: SessionManager)
   });
 
   /**
+   * Get token usage for the active session
+   * GET /api/stats/tokens
+   */
+  app.get('/api/stats/tokens', async (req: Request, res: Response) => {
+    try {
+      const { tenantId, sessionId } = req.auth!;
+      const agent = sessionManager.getActiveAgent(tenantId, sessionId);
+      if (!agent) {
+        res.status(404).json({ error: 'No active session found' });
+        return;
+      }
+      res.status(200).json({ success: true, sessionId, tokenUsage: agent.getTokenUsage() });
+    } catch (error) {
+      logger.error('[API] Failed to get token usage:', error);
+      res.status(500).json({
+        error: 'Failed to get token usage',
+        message: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  });
+
+  /**
    * Get manager stats
    * GET /api/stats
    */

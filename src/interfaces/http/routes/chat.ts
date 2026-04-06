@@ -37,6 +37,7 @@ export function setupChatRoutes(app: Express, sessionManager: SessionManager): v
         iterations: response.iterations,
         toolsUsed: response.toolsUsed,
         ...(response.plan !== undefined && { plan: response.plan }),
+        ...(response.tokenUsage && { tokenUsage: response.tokenUsage }),
       });
     } catch (error) {
       logger.error('[API] Chat error:', error);
@@ -89,6 +90,7 @@ export function setupChatRoutes(app: Express, sessionManager: SessionManager): v
           iterations: response.iterations,
           toolsUsed: response.toolsUsed,
           ...(response.plan !== undefined && { plan: response.plan }),
+          ...(response.tokenUsage && { tokenUsage: response.tokenUsage }),
         });
 
         // Update activity
@@ -235,6 +237,8 @@ export function setupChatRoutes(app: Express, sessionManager: SessionManager): v
         mainAgentResponse: result.mainAgentResponse,
         mainAgentIterations: result.mainAgentIterations,
         evaluation: result.evaluation,
+        mainAgentTokenUsage: result.mainAgentTokenUsage,
+        evaluatorTokenUsage: result.evaluatorTokenUsage,
       });
     } catch (error) {
       logger.error('[API] Harness error:', error);

@@ -131,6 +131,7 @@ program
     '--harness <type>',
     'Run in harness mode. "evaluator" pairs a supervisor agent that validates task completion and nudges the main agent when gaps are found.',
   )
+  .option('--max-tool-calls <number>', 'Maximum tool calls per subtask', parseInt)
   .action(async (options) => {
     try {
       // Load configuration from file if provided
@@ -178,7 +179,7 @@ program
         model: reasoningModelConfig.defaultModel,
         type: 'reasoning',
         useHarmonyFormat: reasoningModelConfig.useHarmonyFormat,
-        defaultReasoningEffort: 'high',
+        defaultReasoningEffort: reasoningModelConfig.defaultReasoningEffort ?? undefined,
       });
 
       let multimodalModel;
@@ -402,14 +403,8 @@ program
         logger.info(`\nOrchestration log saved to: ${logPath}`);
       }
 
-      // Restore terminal state and exit. Two reasons:
-      // 1. LSP child-process streams keep the event loop alive after cleanup.
-      // 2. inquirer leaves stdin in raw mode; pausing it restores cooked mode
-      //    so no extra keypress is needed after /exit.
-      if (typeof (process.stdin as any).setRawMode === 'function') {
-        (process.stdin as any).setRawMode(false);
-      }
-      process.stdin.pause();
+      // LSP child-process streams keep the event loop alive after cleanup,
+      // so we must exit explicitly rather than letting it drain naturally.
       process.exit(0);
     } catch (error) {
       logger.error('Chat session failed', error);
@@ -626,6 +621,7 @@ program
   .option('--code', 'Enable code mode (single-loop agent + LSP integration)')
   .option('--no-lsp', 'Disable LSP in code mode')
   .option('--plan', 'Generate an implementation plan for approval before executing (code mode only)')
+  .option('--max-tool-calls <number>', 'Maximum tool calls per subtask', parseInt)
   .action(async (prompt, options) => {
     try {
       // Load configuration from file if provided
@@ -671,7 +667,7 @@ program
         model: reasoningModelConfig.defaultModel,
         type: 'reasoning',
         useHarmonyFormat: reasoningModelConfig.useHarmonyFormat,
-        defaultReasoningEffort: 'high',
+        defaultReasoningEffort: reasoningModelConfig.defaultReasoningEffort ?? undefined,
       });
 
       let multimodalModel;
@@ -848,6 +844,7 @@ program
           personaManager,
           maxSubtasks: 20, // Manager's subtask limit (separate from Worker iterations)
           maxIterations: options.maxIterations || 20, // Worker's iteration limit per subtask
+          maxToolCalls: options.maxToolCalls || 30, // Maximum tool calls per subtask
           autoSave: true,
           condensingThreshold: options.condensingThreshold ?? 30,
         });
@@ -878,6 +875,10 @@ program
       if (logPath) {
         logger.info(`\nOrchestration log saved to: ${logPath}`);
       }
+
+      // Explicit exit: CodeAgent keeps LSP child-process streams alive which
+      // prevent the event loop from draining naturally after cleanup.
+      process.exit(0);
     } catch (error) {
       logger.error('Execution failed', error);
       orchestrationLogger.close();

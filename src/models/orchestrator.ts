@@ -9,6 +9,7 @@ import { ModelClient } from './model-client.js';
 import { Message, MessageContent, ChatCompletionOptions, ModelResponse, Tool } from './base.js';
 import { logger } from '../utils/logger.js';
 import { ModelError } from '../utils/errors.js';
+import { TokenTracker, TokenUsageSnapshot } from './token-tracker.js';
 
 export interface OrchestratorConfig {
   reasoningModel: ModelClient;
@@ -27,6 +28,7 @@ export class ModelOrchestrator {
   private reasoningModel: ModelClient;
   private multimodalModel?: ModelClient;
   private toolCallingModel?: ModelClient;
+  private tokenTracker: TokenTracker = new TokenTracker();
 
   constructor(config: OrchestratorConfig) {
     this.reasoningModel = config.reasoningModel;
@@ -51,19 +53,31 @@ export class ModelOrchestrator {
     // Check if request contains images
     const hasImages = this.hasImageContent(options.messages);
 
+    let response: ModelResponse;
+
     if (hasImages && this.multimodalModel) {
       // Use multimodal model to process images first, then primary/fallback model
-      return await this.handleMultimodalRequest(options, useFallback);
-    }
-
-    // Use tool-calling model when requested and available
-    if (useFallback && this.toolCallingModel) {
+      response = await this.handleMultimodalRequest(options, useFallback);
+    } else if (useFallback && this.toolCallingModel) {
       logger.info('  [Orchestrator] Using tool-calling model');
-      return await this.toolCallingModel.chat(options);
+      response = await this.toolCallingModel.chat(options);
+    } else {
+      // Default: use reasoning model
+      response = await this.reasoningModel.chat(options);
     }
 
-    // Default: use reasoning model
-    return await this.reasoningModel.chat(options);
+    this.tokenTracker.record(response.usage, options.messages, response.content);
+    return response;
+  }
+
+  /** Return a snapshot of accumulated token usage for this orchestrator instance. */
+  getTokenUsage(): TokenUsageSnapshot {
+    return this.tokenTracker.getSnapshot();
+  }
+
+  /** Reset token counters (e.g. when starting a fresh conversation). */
+  resetTokenUsage(): void {
+    this.tokenTracker.reset();
   }
 
   /**

@@ -38,16 +38,30 @@ const DOOM_LOOP_THRESHOLD = 3;
  * Extract a structured EvaluationResult from the evaluator's final LLM response.
  * Looks for a JSON code block; falls back to a best-effort parse.
  */
+/** Strip Harmony/XML tool-call markup so it doesn't pollute the summary text. */
+function stripToolCallMarkup(text: string): string {
+  return text
+    .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '')
+    .replace(/<\|call\|>[\s\S]*?<\|return\|>/g, '')
+    .replace(/<\|channel\|>\w+/g, '')
+    .trim();
+}
+
 function parseEvaluationResult(
   text: string,
   nudgesSent: number,
   cyclesRan: number,
   evidence: string[],
 ): EvaluationResult {
+  // Strip any tool-call markup before attempting to parse
+  const stripped = stripToolCallMarkup(text);
+
   try {
-    // Look for ```json ... ``` block
-    const jsonMatch = text.match(/```json\s*([\s\S]+?)\s*```/i);
-    const raw = jsonMatch ? jsonMatch[1] : text;
+    // Look for ```json ... ``` block (prefer stripped, fall back to raw)
+    const jsonMatch =
+      stripped.match(/```json\s*([\s\S]+?)\s*```/i) ||
+      text.match(/```json\s*([\s\S]+?)\s*```/i);
+    const raw = jsonMatch ? jsonMatch[1] : stripped;
     const parsed = JSON.parse(raw.trim());
 
     return {
@@ -56,24 +70,32 @@ function parseEvaluationResult(
       nudgesSent,
       cyclesRan,
       evidence,
-      summary: typeof parsed.summary === 'string' ? parsed.summary : text.substring(0, 300),
+      summary: typeof parsed.summary === 'string' ? parsed.summary : stripped.substring(0, 300),
     };
   } catch {
-    // Free-form response — determine pass/fail from keywords
-    const lower = text.toLowerCase();
+    // Free-form response — determine pass/fail from keywords in the stripped text
+    const lower = stripped.toLowerCase();
     const passed =
       lower.includes('evaluation passed') ||
       lower.includes('all tasks complete') ||
       lower.includes('work is complete') ||
       lower.includes('"passed": true');
 
+    // If the stripped text is empty (was entirely tool calls) or too short to be
+    // a real verdict, treat this as inconclusive rather than a definitive failure.
+    const inconclusive = stripped.length < 20;
+
     return {
-      passed,
-      gaps: [],
+      passed: inconclusive ? false : passed,
+      gaps: inconclusive
+        ? ['Evaluation inconclusive — evaluator did not produce a final verdict']
+        : [],
       nudgesSent,
       cyclesRan,
       evidence,
-      summary: text.substring(0, 300),
+      summary: inconclusive
+        ? 'The evaluator did not produce a parseable verdict. Review the agent logs for details.'
+        : stripped.substring(0, 300),
     };
   }
 }
@@ -132,6 +154,11 @@ export class EvaluatorAgent {
     this.maxIterations = config.maxIterationsPerCycle ?? DEFAULT_MAX_ITERATIONS;
     this.maxCycles = config.maxEvaluationCycles ?? DEFAULT_MAX_CYCLES;
     this.virtualTools = EVALUATOR_VIRTUAL_TOOLS;
+  }
+
+  /** Return token usage accumulated by the evaluator's isolated orchestrator. */
+  getOrchestratorTokenUsage() {
+    return this.orchestrator.getTokenUsage();
   }
 
   /**

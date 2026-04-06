@@ -26,6 +26,12 @@ export interface ConversationMetadata {
   workspace?: string;
   summary?: string;
   type?: 'chat' | 'code';
+  /** Lifetime accumulated prompt tokens for this conversation (optional — absent in older JSON files). */
+  totalPromptTokens?: number;
+  /** Lifetime accumulated completion tokens for this conversation. */
+  totalCompletionTokens?: number;
+  /** totalPromptTokens + totalCompletionTokens */
+  totalTokens?: number;
 }
 
 /**
