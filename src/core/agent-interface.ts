@@ -8,6 +8,7 @@
 import type { WorkspaceManager } from './workspace.js';
 import type { ConversationManager } from './conversation-manager.js';
 import type { Message } from '../models/base.js';
+import type { TokenUsageSnapshot } from '../models/token-tracker.js';
 
 export interface AgentChatResponse {
   content: string;
@@ -21,6 +22,8 @@ export interface AgentChatResponse {
     subtasks: string[];
     reasoning: string;
   };
+  /** Token usage accumulated by the agent's orchestrator during this chat() call. */
+  tokenUsage?: TokenUsageSnapshot;
 }
 
 export interface IAgent {
@@ -51,4 +54,6 @@ export interface IAgent {
     workspace?: string;
     type?: string;
   }>>;
+  /** Return a snapshot of token usage accumulated by this agent's orchestrator. */
+  getTokenUsage(): TokenUsageSnapshot;
 }

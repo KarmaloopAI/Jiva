@@ -43,8 +43,16 @@ export class MCPClient {
       const transport = new StdioClientTransport({
         command,
         args,
-        env: env || {},
+        // Merge process.env so spawned MCP servers inherit PATH and system vars.
+        // Passing `env || {}` would strip PATH entirely, causing npx/uvx to fail.
+        env: { ...Object.fromEntries(Object.entries(process.env).filter(([, v]) => v !== undefined)) as Record<string, string>, ...(env || {}) },
+        // Pipe stderr so MCP server output (tracebacks, warnings) never reaches
+        // the user's terminal.  We drain the pipe immediately to prevent buildup.
+        stderr: 'pipe',
       });
+      // Drain the stderr pipe — data events are consumed and discarded so the
+      // stream never blocks and memory doesn't accumulate.
+      (transport.stderr as import('stream').Readable | null)?.resume();
 
       await this.connectWithTransport(name, transport);
     } catch (error) {

@@ -244,6 +244,13 @@ Please complete this subtask and report your findings.`,
     let finalResult = '';
     let reasoning = '';
     let pendingImages: Array<{ base64: string; mimeType: string }> = [];
+    // Tracks how many consecutive iterations have been short-circuited by the
+    // exact-duplicate dedup guard (same tool + args already executed).  If the
+    // model keeps proposing the same call despite repeated warnings we break out
+    // and fall through to the forced-synthesis path rather than burning the
+    // entire remaining iteration budget on no-op `continue` statements.
+    let consecutiveDedupCount = 0;
+    const MAX_CONSECUTIVE_DEDUP = 3;
 
     // Worker execution loop
     for (let iteration = 0; iteration < this.maxIterations; iteration++) {
@@ -490,7 +497,21 @@ Please complete this subtask and report your findings.`,
         if (exactDuplicate) {
           const dupSig = proposedTools.find(sig => executedToolSignatures.has(sig)) || '';
           const dupToolName = dupSig.split(':')[0];
-          logger.warn(`  [Worker] Detected repetitive tool usage - interrupting loop`);
+          consecutiveDedupCount++;
+          logger.warn(`  [Worker] Detected repetitive tool usage (${consecutiveDedupCount}/${MAX_CONSECUTIVE_DEDUP}) - interrupting loop`);
+
+          if (consecutiveDedupCount >= MAX_CONSECUTIVE_DEDUP) {
+            // Model is stuck in a dedup loop — it has ignored repeated warnings.
+            // Break out now so the post-loop forced-synthesis path can still
+            // produce a useful result from the tools that DID succeed.
+            logger.warn(`  [Worker] Dedup threshold reached (${MAX_CONSECUTIVE_DEDUP} consecutive) — breaking out to synthesis`);
+            conversationHistory.push({
+              role: 'user',
+              content: `FINAL STOP: You have attempted to call \`${dupToolName}\` with the same arguments ${consecutiveDedupCount} times in a row. This call is permanently blocked. You MUST now write your final summary using only the data already collected — do NOT call any more tools.`,
+            });
+            break; // Exit loop → falls through to forced-synthesis path
+          }
+
           conversationHistory.push({
             role: 'user',
             content: `STOP: You already called \`${dupToolName}\` with these exact arguments in a previous step. Do NOT repeat the same call.
@@ -501,6 +522,9 @@ You have two choices:
           });
           continue; // Skip executing the repetitive tools, let model reconsider
         }
+
+        // Successful tool path — reset consecutive dedup counter
+        consecutiveDedupCount = 0;
 
         for (const toolCall of response.toolCalls) {
           const toolName = toolCall.function.name;
@@ -549,6 +573,17 @@ Tools used: ${spawnResult.toolsUsed.join(', ')}`;
               continue;
             }
 
+            // Catch dry-run file edits before they execute.
+            // Some MCP filesystem tools (e.g. filesystem__edit_file) accept a
+            // `dryRun: true` flag that previews the edit without writing it.
+            // Models occasionally use this as a "safety check" and then forget
+            // to make the real call, leaving files unchanged.
+            // We let the dry-run through so the model sees the preview, then
+            // immediately remind it that the file was NOT actually modified.
+            const isDryRun =
+              args.dryRun === true &&
+              (toolName.includes('edit_file') || toolName.includes('write_file') || toolName.includes('create_file'));
+
             // Regular MCP tool execution
             const result = await this.mcpManager.getClient().executeTool(toolName, args);
 
@@ -575,6 +610,16 @@ Tools used: ${spawnResult.toolsUsed.join(', ')}`;
 
             const toolMessage = formatToolResult(toolCall.id, toolName, toolResultText);
             conversationHistory.push(toolMessage);
+
+            // If the model used dryRun=true the file was NOT modified.
+            // Inject a reminder so the model makes the real call next.
+            if (isDryRun) {
+              logger.warn(`  [Worker] ${toolName} executed with dryRun=true — file NOT modified; injecting reminder`);
+              conversationHistory.push({
+                role: 'user',
+                content: `Note: You called \`${toolName}\` with \`dryRun: true\`. This was a preview only — the file was NOT actually modified. You MUST call \`${toolName}\` again WITHOUT \`dryRun: true\` to actually apply the change.`,
+              });
+            }
 
             logger.debug(`  ✓ [Worker] Tool ${toolName} completed`);
           } catch (error) {
@@ -694,15 +739,24 @@ IMPORTANT: Do not claim completion unless the core deliverable (e.g. the file wr
         // text answer from what it already has rather than calling more tools.
         logger.warn(`[Worker] Max iterations reached after ${toolsUsed.length} tool(s) — forcing synthesis response`);
         try {
-          conversationHistory.push({
+          // Use a TRIMMED history (system prompt + original task only) so the
+          // model is not exposed to 100s of iterations of prior tool-call context.
+          // Sending the full conversationHistory risks the reasoning model
+          // "seeing" all the previous tool calls and attempting another one —
+          // which Groq rejects with HTTP 400 ("tool_choice is none but model
+          // called a tool") because we intentionally omit the `tools` array here.
+          // Mirrors the approach already used by the context-overflow recovery path.
+          const synthHistory = conversationHistory.slice(0, 3); // system prompt + initial user task
+          synthHistory.push({
             role: 'user',
             content:
-              'You have already gathered all the data above. ' +
-              'NOW write your final comprehensive response using ONLY what you have already collected — ' +
-              'do not call any more tools. Summarise all findings clearly and completely.',
+              `You have completed data gathering. ` +
+              `Tools used (${toolsUsed.length}): ${toolsUsed.join(', ')}. ` +
+              `Based on the original subtask, write a comprehensive final summary of everything ` +
+              `that was accomplished and discovered. Respond with text only — do NOT call any tools.`,
           });
           const synthResponse = await this.orchestrator.chatWithFallback(
-            { messages: conversationHistory }, // no `tools` field → forces text-only reply
+            { messages: synthHistory }, // trimmed history + no `tools` field → forces text-only reply
             useToolCallingFallback,
           );
           finalResult =
@@ -791,8 +845,10 @@ IMPORTANT: Do not claim completion unless the core deliverable (e.g. the file wr
       return true;
     }
 
-    // Fire every 3 successful tool calls for any tool type
-    // (at 3, 6, 9, 12 … tools accumulated).
-    return toolsUsed.length >= 3 && toolsUsed.length % 3 === 0;
+    // Fire every 8 successful tool calls for any tool type
+    // (at 8, 16, 24 … tools accumulated).
+    // Using 8 instead of 3 to give the Worker enough space to complete
+    // multi-step data-gathering workflows before being prompted to stop.
+    return toolsUsed.length >= 8 && toolsUsed.length % 8 === 0;
   }
 }

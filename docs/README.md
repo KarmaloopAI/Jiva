@@ -37,8 +37,20 @@ Deep dives into Jiva's design:
 - **[Filesystem Access](architecture/FILESYSTEM_ACCESS.md)** - MCP filesystem server details
 - **[Max Token Fix](architecture/MAXTOKEN_FIX.md)** - Token management and condensing strategies
 
+## Latest Features
+
+### Harness System (v0.3.43+)
+
+- **[Harness Feature Guide](guides/HARNESSES.md)** - Task validation with evaluator agent
+- **[Evaluator Harness](guides/HARNESSES.md)** - Autonomous evaluation and guidance
+- **[Token Tracking](guides/HARNESSES.md)** - Comprehensive usage monitoring
+- **[Workspace Directives](guides/HARNESSES.md)** - Enhanced conversation context
+
 ## Release Notes
 
+- **[v0.3.43](release_notes/v0.3.43.md)** - Token tracking & evaluator harness
+- **[v0.3.42](release_notes/v0.3.42.md)** - Token usage tracking infrastructure
+- **[v0.3.41](release_notes/v0.3.41.md)** - Workspace directive integration
 - **[v0.3.4](release_notes/v0.3.4.md)** - Code mode + two-agent system
 - **[v0.3.23](release_notes/v0.3.23.md)** - Linux support fix + dependency updates (legacy)
 - **[v0.3.22](release_notes/v0.3.22.md)** - Security updates & CI automation
@@ -52,8 +64,9 @@ Deep dives into Jiva's design:
 ### I want to...
 
 #### Use Jiva (Basic)
-→ [Quick Start Guide](guides/QUICKSTART.md)  
+→ [Quick Start Guide](guides/QUICKSTART.md)
 → [Configuration Guide](guides/CONFIGURATION.md)
+→ **[Try Harness System](guides/HARNESSES.md)** - Latest feature with task validation
 
 #### Deploy to Production
 → [Cloud Run Deployment](deployment/CLOUD_RUN_DEPLOYMENT.md)  
@@ -128,8 +141,8 @@ Legend: ✅ Supported | ⚠️ Partial | ➖ Not applicable | 🚧 In developmen
 
 ## Version Information
 
-**Current Version:** 0.3.4
-**Release Date:** March 2026
+**Current Version:** 0.3.43
+**Release Date:** April 2026
 **Node Version Required:** 20.0.0+
 
 ## Support

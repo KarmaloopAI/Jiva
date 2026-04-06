@@ -82,6 +82,7 @@ CRITICAL PRINCIPLES:
 - AVOID MICRO-MANAGEMENT: Don't break down tasks into tiny steps
 - CODE TASKS = 1-2 SUBTASKS: File creation, editing, generation should be single subtasks
 - INFO TASKS = 1-2 SUBTASKS: Reading, analyzing, listing should be single subtasks
+- DATA GATHER + FILE WRITE = 1 SUBTASK: If a task requires gathering/collecting data AND then writing that data to a file, create exactly ONE subtask that does both. The Worker does NOT share memory between subtasks — data collected in one subtask is gone when the next subtask starts.
 
 IMPORTANT:
 - Think strategically, not tactically
@@ -154,6 +155,9 @@ GOOD: 1 subtask: "Create the calculator application as calc.html"
 BAD: "List directory contents", "Read package.json", "Identify dependencies"
 GOOD: 1 subtask: "Analyze project dependencies and structure"
 
+BAD (DATA + WRITE SPLIT — WILL FAIL): Subtask 1 "Gather all data from APIs/databases", Subtask 2 "Compile and write results to output.json" — the second Worker will have NO data because Workers do not share memory between subtasks. The file will be empty.
+GOOD (DATA + WRITE TOGETHER): 1 subtask: "Gather all data from APIs/databases AND write the complete results to workspace/output.json before returning."
+
 Guidelines:
 - Don't create subtasks for clarifying requirements - Worker can ask if needed
 - Don't create subtasks for implementation details (styling, specific code structure)
@@ -192,7 +196,7 @@ Respond ONLY with valid JSON in this exact format (no other text before or after
     });
 
     // Parse JSON response with fallback
-    let plan: { reasoning: string; subtasks: string[] };
+    let plan: { reasoning: string; subtasks: string[]; conversational?: boolean };
 
     try {
       plan = this.parseJsonPlan(response.content);
@@ -415,7 +419,7 @@ Create a clear, honest response that accurately reflects what was accomplished. 
   /**
    * Parse a JSON plan from LLM output. Extracts the first JSON object found.
    */
-  private parseJsonPlan(content: string): { reasoning: string; subtasks: string[] } {
+  private parseJsonPlan(content: string): { reasoning: string; subtasks: string[]; conversational?: boolean } {
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
       throw new Error('No JSON object found in response');
@@ -423,33 +427,42 @@ Create a clear, honest response that accurately reflects what was accomplished. 
 
     const parsed = JSON.parse(jsonMatch[0]);
 
-    if (!parsed.subtasks || !Array.isArray(parsed.subtasks) || parsed.subtasks.length === 0) {
-      throw new Error('Invalid plan structure: missing or empty subtasks array');
+    // Conversational responses intentionally return subtasks: [] — that is valid.
+    const isConversational = !!parsed.conversational;
+
+    if (!parsed.subtasks || !Array.isArray(parsed.subtasks)) {
+      throw new Error('Invalid plan structure: missing subtasks array');
+    }
+
+    if (parsed.subtasks.length === 0 && !isConversational) {
+      throw new Error('Invalid plan structure: empty subtasks array for non-conversational message');
     }
 
     return {
       reasoning: parsed.reasoning || '',
       subtasks: parsed.subtasks.map((s: any) => String(s)),
+      conversational: isConversational || undefined,
     };
   }
 
   /**
    * Fallback: use LLM to clean a raw plan response into valid JSON
    */
-  private async cleanPlanWithLLM(rawContent: string): Promise<{ reasoning: string; subtasks: string[] }> {
+  private async cleanPlanWithLLM(rawContent: string): Promise<{ reasoning: string; subtasks: string[]; conversational?: boolean }> {
     const cleanupPrompt = `The following text is a plan that should have been JSON but was not properly formatted.
-Extract the reasoning and actionable subtasks from it and return valid JSON.
+Extract the reasoning and subtasks from it and return valid JSON.
 Ignore any prose, markdown separators, advice paragraphs, or non-actionable content.
 Only include entries that are clear, actionable task instructions.
+
+IMPORTANT: If the plan indicates a purely conversational message (greeting, small talk, etc.) with no
+actionable subtasks, preserve that by returning: {"conversational": true, "subtasks": [], "reasoning": "..."}
 
 Raw text:
 ${rawContent}
 
-Return ONLY valid JSON in this exact format (no other text):
-{
-  "reasoning": "<the reasoning extracted from the text>",
-  "subtasks": ["<subtask 1>", "<subtask 2>"]
-}`;
+Return ONLY valid JSON in one of these two formats (no other text):
+For actionable tasks: {"reasoning": "<reasoning>", "subtasks": ["<subtask 1>", "<subtask 2>"]}
+For conversational messages: {"conversational": true, "subtasks": [], "reasoning": "<reasoning>"}`;
 
     try {
       const cleanupResponse = await this.orchestrator.chat({
