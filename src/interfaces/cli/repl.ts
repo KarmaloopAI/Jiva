@@ -3,6 +3,7 @@
  */
 
 import inquirer from 'inquirer';
+import * as readline from 'readline';
 import chalk from 'chalk';
 import ora from 'ora';
 import { DualAgent } from '../../core/dual-agent.js';
@@ -10,6 +11,7 @@ import { logger } from '../../utils/logger.js';
 import { orchestrationLogger } from '../../utils/orchestration-logger.js';
 import { formatForCLI } from '../../utils/markdown.js';
 import type { IAgent } from '../../core/agent-interface.js';
+import type { EvaluatorHarness } from '../../evaluator/harness.js';
 
 export type { IAgent };
 
@@ -20,10 +22,27 @@ export interface REPLOptions {
    * flow before the agent executes. Only effective when the agent implements `plan()`.
    */
   planMode?: boolean;
+  /**
+   * When provided, each user message is processed through the harness instead of
+   * calling agent.chat() directly. The harness runs the main agent then the evaluator.
+   */
+  harness?: EvaluatorHarness;
+}
+
+function exitRepl(rl: readline.Interface): void {
+  process.stdout.write('\n');
+  console.log(chalk.gray('Goodbye!\n'));
+  // Close readline — fires 'close' → closeHandler → resolve(null) → loop breaks
+  // → startREPL returns → index.ts runs agent.cleanup() → process.exit(0).
+  rl.close();
+  // Safety net: if the graceful cleanup chain doesn't reach process.exit(0) within
+  // 500 ms (e.g. LSP shutdown stalls in code mode), force exit.
+  // .unref() means the timer won't keep the process alive on its own.
+  setTimeout(() => process.exit(0), 500).unref();
 }
 
 export async function startREPL(options: REPLOptions): Promise<void> {
-  const { agent, planMode = false } = options;
+  const { agent, planMode = false, harness } = options;
 
   console.log(chalk.bold.cyan('\n∞ Jiva Agent - Interactive Mode\n'));
   console.log(chalk.gray('Type your message and press Enter. Type /help for commands or /exit to quit.\n'));
@@ -50,16 +69,61 @@ export async function startREPL(options: REPLOptions): Promise<void> {
 
   console.log('');
 
+  // Use readline WITHOUT terminal mode so it never calls setRawMode.
+  // With terminal: false, Ctrl+C is delivered as a normal process SIGINT
+  // (the OS handles it in cooked mode) instead of being intercepted by
+  // readline's raw-mode key scanner.  This eliminates the "extra keypress
+  // after exit" caused by readline leaving the TTY in a dirty state.
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    terminal: false,
+  });
+
+  // Track whether the agent is currently running so the SIGINT handler
+  // knows whether to exit (idle) or stop the agent (busy).
+  let agentRunning = false;
+  // When an agent turn is in progress this is set to a function that gracefully
+  // stops the running agent.  Cleared to null in the finally block.
+  let stopCurrentAgent: (() => void) | null = null;
+
+  // With terminal: false, Ctrl+C sends process-level SIGINT (not rl 'SIGINT').
+  const sigintHandler = () => {
+    if (stopCurrentAgent) {
+      // Agent is mid-turn — ask it to stop gracefully.
+      stopCurrentAgent();
+    } else {
+      // Idle at the prompt — exit cleanly.
+      exitRepl(rl);
+    }
+  };
+  process.on('SIGINT', sigintHandler);
+
+  // Promisified readline input.
+  // Each listener removes the other when it fires to avoid stale registrations
+  // accumulating across iterations.
+  function askForInput(): Promise<string | null> {
+    return new Promise(resolve => {
+      process.stdout.write(chalk.bold.blue('You: '));
+      const lineHandler = (line: string) => {
+        rl.removeListener('close', closeHandler);
+        resolve(line);
+      };
+      const closeHandler = () => {
+        rl.removeListener('line', lineHandler);
+        resolve(null);
+      };
+      rl.once('line', lineHandler);
+      rl.once('close', closeHandler);
+    });
+  }
+
   // REPL loop
   while (true) {
-    const { message } = await inquirer.prompt([
-      {
-        type: 'input',
-        name: 'message',
-        message: chalk.bold.blue('You:'),
-        prefix: '',
-      },
-    ]);
+    const message = await askForInput();
+
+    // stdin closed (EOF / pipe ended) — exit cleanly
+    if (message === null) break;
 
     const trimmedMessage = message.trim();
 
@@ -109,7 +173,7 @@ export async function startREPL(options: REPLOptions): Promise<void> {
       }
 
       if (command === 'load') {
-        await handleLoadConversation(agent);
+        await handleLoadConversation(agent, rl);
         continue;
       }
 
@@ -132,7 +196,7 @@ export async function startREPL(options: REPLOptions): Promise<void> {
     let messageToSend = trimmedMessage;
 
     if (planMode && typeof (agent as any).plan === 'function') {
-      const planSpinner = ora('Exploring codebase and generating plan...').start();
+      const planSpinner = ora({ text: 'Exploring codebase and generating plan...', discardStdin: false }).start();
       let planText = '';
       try {
         planText = await (agent as any).plan(trimmedMessage);
@@ -148,6 +212,7 @@ export async function startREPL(options: REPLOptions): Promise<void> {
       console.log(formatForCLI(planText));
       console.log(chalk.bold.cyan('─────────────────────────────────────────────────────────────────\n'));
 
+      rl.pause();
       const { approved } = await inquirer.prompt([{
         type: 'confirm',
         name: 'approved',
@@ -155,6 +220,7 @@ export async function startREPL(options: REPLOptions): Promise<void> {
         default: true,
         prefix: '',
       }]);
+      rl.resume();
 
       if (!approved) {
         console.log(chalk.gray('\nCancelled. Refine your request and try again.\n'));
@@ -170,39 +236,112 @@ export async function startREPL(options: REPLOptions): Promise<void> {
     }
 
     // ── Execute ─────────────────────────────────────────────────────────────
-    const spinner = ora('Thinking...').start();
+    const spinner = ora({ text: 'Thinking...', discardStdin: false }).start();
 
-    // Ctrl+C while the agent is running → stop gracefully instead of killing
-    const sigintHandler = () => {
+    // readline intercepts Ctrl+C (raw mode), so process-level SIGINT won't
+    // fire — use stopCurrentAgent instead, dispatched from rl.on('SIGINT').
+    agentRunning = true;
+    stopCurrentAgent = () => {
       spinner.text = chalk.yellow('Stopping after current step…');
-      agent.stop();
+      if (harness) {
+        harness.stop();
+      } else {
+        agent.stop();
+      }
     };
-    process.once('SIGINT', sigintHandler);
 
     try {
-      const response = await agent.chat(messageToSend);
+      if (harness) {
+        // ── Harness mode: main agent + evaluator ─────────────────────────
+        spinner.text = 'Main agent processing…';
+        const harnessResult = await harness.run(messageToSend);
 
-      spinner.stop();
+        spinner.stop();
 
-      console.log(chalk.bold.green('\nJiva:'));
+        // Main agent response
+        console.log(chalk.bold.green('\nJiva:'));
+        console.log(formatForCLI(harnessResult.mainAgentResponse));
+        console.log(chalk.gray(`[Iterations: ${harnessResult.mainAgentIterations}]`));
 
-      // Render markdown for prettier output
-      const formattedContent = formatForCLI(response.content);
-      console.log(formattedContent);
+        // Evaluation result
+        const ev = harnessResult.evaluation;
+        console.log('');
+        const inconclusive = !ev.passed && ev.gaps.length === 0;
+        if (ev.passed) {
+          console.log(
+            chalk.bold.green('⚡ Evaluation: ') +
+            chalk.green(`✓ Passed`) +
+            chalk.gray(` — ${ev.nudgesSent} nudge(s), ${ev.cyclesRan} cycle(s)`),
+          );
+        } else if (inconclusive) {
+          console.log(
+            chalk.bold.yellow('⚡ Evaluation: ') +
+            chalk.yellow(`~ Inconclusive`) +
+            chalk.gray(` after ${ev.cyclesRan} cycle(s), ${ev.nudgesSent} nudge(s)`),
+          );
+        } else {
+          console.log(
+            chalk.bold.magenta('⚡ Evaluation: ') +
+            chalk.red(`✗ ${ev.gaps.length} gap(s) remain`) +
+            chalk.gray(` after ${ev.cyclesRan} cycle(s), ${ev.nudgesSent} nudge(s)`),
+          );
+          for (const gap of ev.gaps) {
+            console.log(chalk.red(`  • ${gap}`));
+          }
+        }
+        if (ev.summary) {
+          console.log(chalk.gray(`  ${ev.summary}`));
+        }
 
-      if (response.toolsUsed.length > 0) {
-        console.log(chalk.gray(`\n[Used tools: ${response.toolsUsed.join(', ')}]`));
+        const k = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+        if (harnessResult.mainAgentTokenUsage) {
+          const mtu = harnessResult.mainAgentTokenUsage;
+          console.log(chalk.gray(`  Main tokens: ${k(mtu.promptTokens)}p / ${k(mtu.completionTokens)}c = ${k(mtu.totalTokens)} total`));
+        }
+        if (harnessResult.evaluatorTokenUsage) {
+          const etu = harnessResult.evaluatorTokenUsage;
+          console.log(chalk.gray(`  Eval tokens: ${k(etu.promptTokens)}p / ${k(etu.completionTokens)}c = ${k(etu.totalTokens)} total`));
+        }
+        console.log('');
+      } else {
+        // ── Standard mode ────────────────────────────────────────────────
+        const response = await agent.chat(messageToSend);
+
+        spinner.stop();
+
+        console.log(chalk.bold.green('\nJiva:'));
+
+        // Render markdown for prettier output
+        const formattedContent = formatForCLI(response.content);
+        console.log(formattedContent);
+
+        if (response.toolsUsed.length > 0) {
+          console.log(chalk.gray(`\n[Used tools: ${response.toolsUsed.join(', ')}]`));
+        }
+
+        console.log(chalk.gray(`[Iterations: ${response.iterations}]`));
+
+        if (response.tokenUsage) {
+          const k = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+          const tu = response.tokenUsage;
+          console.log(chalk.gray(`[Tokens: ${k(tu.promptTokens)}p + ${k(tu.completionTokens)}c = ${k(tu.totalTokens)} total (this turn: ${k(tu.lastPromptTokens)}p prompt)]`));
+        }
+
+        console.log('');
       }
-
-      console.log(chalk.gray(`[Iterations: ${response.iterations}]\n`));
     } catch (error) {
       spinner.stop();
       console.log(chalk.red('\n✗ Error:'), error instanceof Error ? error.message : String(error));
       console.log('');
     } finally {
-      process.removeListener('SIGINT', sigintHandler);
+      agentRunning = false;
+      stopCurrentAgent = null;
     }
   }
+
+  // Remove the SIGINT handler so it doesn't leak into caller code.
+  process.removeListener('SIGINT', sigintHandler);
+  rl.close();
 }
 
 function showHelp() {
@@ -216,6 +355,9 @@ function showHelp() {
   console.log('  /save          - Save current conversation');
   console.log('  /load          - Load a saved conversation');
   console.log('  /list          - List all saved conversations');
+  console.log('');
+  console.log(chalk.bold('Harness Modes (CLI flag):'));
+  console.log('  --harness evaluator  Pair a supervisor agent that validates completion');
   console.log('');
 }
 
@@ -295,7 +437,7 @@ async function handleSaveConversation(agent: IAgent) {
   }
 }
 
-async function handleLoadConversation(agent: IAgent) {
+async function handleLoadConversation(agent: IAgent, rl: readline.Interface) {
   const conversationManager = agent.getConversationManager();
 
   if (!conversationManager) {
@@ -324,7 +466,8 @@ async function handleLoadConversation(agent: IAgent) {
     });
     console.log('');
 
-    // Ask which one to load
+    // Ask which one to load — pause the main readline so inquirer can take stdin
+    rl.pause();
     const { selection } = await inquirer.prompt([
       {
         type: 'list',
@@ -339,6 +482,7 @@ async function handleLoadConversation(agent: IAgent) {
         ],
       },
     ]);
+    rl.resume();
 
     if (selection) {
       const selectedConv = conversations.find(c => c.id === selection);

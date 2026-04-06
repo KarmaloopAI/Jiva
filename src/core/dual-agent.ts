@@ -30,7 +30,19 @@ export interface DualAgentConfig {
   maxIterations?: number;
   maxAgentDepth?: number; // Max depth for agent spawning (default: 1)
   autoSave?: boolean;
+  /** @deprecated Use compactionThreshold + maxMessagesBeforeCondense instead. */
   condensingThreshold?: number;
+  /**
+   * Prompt-token count above which conversation compaction is triggered.
+   * Defaults to 100_000 (≈80% of a typical 128K context window).
+   */
+  compactionThreshold?: number;
+  /**
+   * Message-count fallback: condense when this many messages accumulate even if
+   * the API omits token data. Defaults to 60.
+   */
+  maxMessagesBeforeCondense?: number;
+  maxToolCalls?: number; // Maximum tool calls per subtask
 }
 
 export interface DualAgentResponse {
@@ -41,6 +53,7 @@ export interface DualAgentResponse {
     subtasks: string[];
     reasoning: string;
   };
+  tokenUsage?: import('../models/token-tracker.js').TokenUsageSnapshot;
 }
 
 export class DualAgent {
@@ -59,6 +72,8 @@ export class DualAgent {
   private maxAgentDepth: number;
   private autoSave: boolean;
   private condensingThreshold: number;
+  private compactionThreshold: number;
+  private maxMessagesBeforeCondense: number;
 
   private userConversationHistory: Message[] = [];
   private _stopped = false;
@@ -74,7 +89,12 @@ export class DualAgent {
     this.maxIterations = config.maxIterations || 20;
     this.maxAgentDepth = config.maxAgentDepth ?? 1; // Default: only Manager can spawn
     this.autoSave = config.autoSave !== false;
-    this.condensingThreshold = config.condensingThreshold || 30;
+    this.condensingThreshold = config.condensingThreshold || 30; // kept for compat
+    this.compactionThreshold = config.compactionThreshold ?? 100_000;
+    this.maxMessagesBeforeCondense = config.maxMessagesBeforeCondense ?? 60;
+    if (config.condensingThreshold !== undefined) {
+      logger.warn('[DualAgent] condensingThreshold is deprecated — use compactionThreshold + maxMessagesBeforeCondense instead');
+    }
 
     // Initialize agents (Manager + Worker architecture)
     this.manager = new ManagerAgent(this.orchestrator, this.workspace, this.personaManager || undefined);
@@ -221,14 +241,30 @@ VALIDATION GUIDANCE:
 
     orchestrationLogger.logUserMessage(userMessage);
 
-    // Check if conversation needs condensing BEFORE adding new message
-    if (this.userConversationHistory.length > this.condensingThreshold && this.conversationManager) {
-      logger.info('[*] Condensing conversation history...');
-      this.userConversationHistory = await this.conversationManager.condenseConversation(
-        this.userConversationHistory,
-        this.orchestrator,
-        Math.floor(this.condensingThreshold * 0.7)
-      );
+    // Check if conversation needs condensing BEFORE adding new message.
+    // Token-based trigger: compacts when the last prompt was close to the context limit.
+    // Message-count fallback: triggers when API omits usage data.
+    if (this.conversationManager) {
+      const snapshot = this.orchestrator.getTokenUsage();
+      const byTokens = snapshot.lastPromptTokens > 0 &&
+                       snapshot.lastPromptTokens > this.compactionThreshold;
+      const byMessages = this.userConversationHistory.length > this.maxMessagesBeforeCondense;
+
+      if (byTokens || byMessages) {
+        const reason = byTokens
+          ? `${snapshot.lastPromptTokens.toLocaleString()} prompt tokens > ${this.compactionThreshold.toLocaleString()} threshold`
+          : `${this.userConversationHistory.length} messages > ${this.maxMessagesBeforeCondense} threshold`;
+        logger.info(`[DualAgent] Condensing — ${reason}`);
+        this.userConversationHistory = await this.conversationManager.condenseConversation(
+          this.userConversationHistory,
+          this.orchestrator,
+          Math.floor(this.maxMessagesBeforeCondense * 0.7),
+          {
+            directive: this.workspace.getDirectivePrompt() || undefined,
+            currentGoal: userMessage,
+          }
+        );
+      }
     }
 
     // Add user message to history
@@ -267,11 +303,13 @@ VALIDATION GUIDANCE:
       this.userConversationHistory.push({ role: 'assistant', content: directReply });
 
       if (this.autoSave && this.conversationManager) {
+        const tokenSnap = this.orchestrator.getTokenUsage();
         await this.conversationManager.autoSave(
           this.userConversationHistory,
           this.workspace.getWorkspaceDir(),
           this.orchestrator,
           'chat',
+          tokenSnap,
         );
       }
 
@@ -284,6 +322,7 @@ VALIDATION GUIDANCE:
         iterations: 1,
         toolsUsed: [],
         plan: { subtasks: [], reasoning: plan.reasoning },
+        tokenUsage: this.orchestrator.getTokenUsage(),
       };
     }
 
@@ -370,11 +409,13 @@ VALIDATION GUIDANCE:
 
     // Auto-save if enabled
     if (this.autoSave && this.conversationManager) {
+      const tokenSnap = this.orchestrator.getTokenUsage();
       await this.conversationManager.autoSave(
         this.userConversationHistory,
         this.workspace.getWorkspaceDir(),
         this.orchestrator,
-        'chat'
+        'chat',
+        tokenSnap,
       );
     }
 
@@ -392,6 +433,7 @@ VALIDATION GUIDANCE:
         subtasks: plan.subtasks,
         reasoning: plan.reasoning,
       },
+      tokenUsage: this.orchestrator.getTokenUsage(),
     };
   }
 
@@ -481,6 +523,10 @@ VALIDATION GUIDANCE:
    */
   getAgentSpawner(): AgentSpawner | null {
     return this.agentSpawner;
+  }
+
+  getTokenUsage() {
+    return this.orchestrator.getTokenUsage();
   }
 
   async saveConversation(): Promise<string | null> {

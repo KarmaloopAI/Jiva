@@ -186,7 +186,7 @@ export function parseHarmonyResponse(response: string): ParsedHarmonyResponse {
     }
   }
 
-  // Parse tool calls
+  // Parse tool calls — Harmony pipe format: <|call|>fn({"k":"v"})<|return|>
   const toolCallRegex = /<\|call\|>([\s\S]*?)<\|return\|>/g;
   let toolMatch;
   let callId = 0;
@@ -238,6 +238,39 @@ export function parseHarmonyResponse(response: string): ParsedHarmonyResponse {
       }
     } catch (error) {
       logger.error('Error parsing tool call', error);
+    }
+  }
+
+  // Parse tool calls — XML format: <tool_call>name<arg_key>k</arg_key><arg_value>v</arg_value></tool_call>
+  // Some models emit this alternative XML format instead of the pipe format above.
+  const xmlToolCallRegex = /<tool_call>([\s\S]*?)<\/tool_call>/gi;
+  let xmlMatch;
+
+  while ((xmlMatch = xmlToolCallRegex.exec(response)) !== null) {
+    const inner = xmlMatch[1];
+    // Tool name is the leading text before the first <arg_key>
+    const nameMatch = /^([^<\n]+)/.exec(inner);
+    if (!nameMatch) continue;
+    const toolName = nameMatch[1].trim();
+
+    // Extract all key-value pairs
+    const args: Record<string, string> = {};
+    const argRegex = /<arg_key>([\s\S]*?)<\/arg_key>\s*<arg_value>([\s\S]*?)<\/arg_value>/gi;
+    let argMatch;
+    while ((argMatch = argRegex.exec(inner)) !== null) {
+      args[argMatch[1].trim()] = argMatch[2].trim();
+    }
+
+    if (toolName) {
+      result.toolCalls.push({
+        id: `call_${callId++}`,
+        type: 'function',
+        function: {
+          name: toolName,
+          arguments: JSON.stringify(args),
+        },
+      });
+      logger.debug(`[Harmony] Parsed XML-format tool call: ${toolName}`);
     }
   }
 
