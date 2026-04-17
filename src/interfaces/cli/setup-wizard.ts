@@ -31,6 +31,18 @@ interface ProviderPreset {
 }
 
 const PROVIDERS: Record<ProviderKey, ProviderPreset> = {
+  sarvam: {
+    label: 'Sarvam',
+    endpoint: 'https://api.sarvam.ai/v1/chat/completions',
+    reasoningModel: 'sarvam-105b',
+    multimodalModel: null, // Sarvam has no multimodal model
+    toolCallingModel: 'sarvam-105b',
+    useHarmonyFormat: false,
+    reasoningEffortStrategy: 'api_param',
+    defaultMaxTokens: 8192,
+    hasMultimodal: false,
+    note: 'Sarvam does not offer a multimodal model. You will need to pick a separate provider for multimodal.',
+  },
   krutrim: {
     label: 'Krutrim',
     endpoint: 'https://cloud.olakrutrim.com/v1/chat/completions',
@@ -50,18 +62,6 @@ const PROVIDERS: Record<ProviderKey, ProviderPreset> = {
     useHarmonyFormat: false,
     reasoningEffortStrategy: 'api_param',
     hasMultimodal: true,
-  },
-  sarvam: {
-    label: 'Sarvam',
-    endpoint: 'https://api.sarvam.ai/v1/chat/completions',
-    reasoningModel: 'sarvam-105b',
-    multimodalModel: null, // Sarvam has no multimodal model
-    toolCallingModel: 'sarvam-105b',
-    useHarmonyFormat: false,
-    reasoningEffortStrategy: 'api_param',
-    defaultMaxTokens: 8192,
-    hasMultimodal: false,
-    note: 'Sarvam does not offer a multimodal model. You will need to pick a separate provider for multimodal.',
   },
   'openai-compatible': {
     label: 'OpenAI-Compatible',

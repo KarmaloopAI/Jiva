@@ -19,6 +19,44 @@ import { formatToolResult } from '../models/harmony.js';
 import { logger } from '../utils/logger.js';
 import { orchestrationLogger } from '../utils/orchestration-logger.js';
 
+/** Max consecutive empty responses before breaking out */
+const MAX_EMPTY_RESPONSES = 4;
+/** Consecutive identical calls that triggers doom-loop break */
+const DOOM_LOOP_THRESHOLD = 3;
+
+/**
+ * Attempt to repair a failed tool call by extracting the intended call from
+ * failed_generation and remapping to a known tool. Handles <|channel|> tokens
+ * and Harmony "functions" namespace prefix. Ported from CodeAgent.
+ */
+function repairFailedToolCall(
+  errorMsg: string,
+  tools: Tool[],
+): { toolName: string; args: Record<string, any> } | null {
+  try {
+    const jsonMatch = errorMsg.match(/API error \(\d+\): (.+)/s);
+    if (!jsonMatch) return null;
+    const errorBody = JSON.parse(jsonMatch[1]);
+    const failedGen: string | undefined = errorBody?.error?.failed_generation;
+    if (!failedGen) return null;
+    const parsed = JSON.parse(failedGen);
+    const rawName: string = parsed?.name ?? '';
+    const args: Record<string, any> = parsed?.arguments ?? {};
+    const stripped = rawName.replace(/<\|[^|]*\|>/g, '').replace(/^functions/i, '').trim();
+    const byName = tools.find((t) => t.name === stripped || t.name === stripped.toLowerCase());
+    if (byName) return { toolName: byName.name, args };
+    const argKeys = Object.keys(args);
+    const byArgs = tools.find((t) => {
+      const required = (t.parameters as any).required ?? [];
+      return required.length > 0 && required.every((r: string) => argKeys.includes(r));
+    });
+    if (byArgs) return { toolName: byArgs.name, args };
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 interface ToolResultWithImages {
   text: string;
   images?: Array<{
@@ -112,10 +150,6 @@ export class WorkerAgent {
 
     const conversationHistory: Message[] = [];
     const toolsUsed: string[] = [];
-    // Tracks every exact tool-call signature (toolName + serialized args) executed
-    // during this subtask. Used to prevent the same call from being repeated in a
-    // later iteration — e.g. reading the same file twice in consecutive turns.
-    const executedToolSignatures = new Set<string>();
     // Tracks consecutive failures per (toolName:args) signature.
     // Drives the per-tool circuit breaker: warn at 2, hard-stop at 3.
     const toolFailureCounts = new Map<string, { count: number; lastError: string }>();
@@ -173,15 +207,16 @@ CRITICAL - File Paths:
 YOUR JOB:
 1. Understand the specific subtask you've been assigned
 2. Use available tools to gather information or perform actions
-3. Report back with clear, factual results
-4. Explain your reasoning and what you found
+3. Keep going until the subtask is completely resolved — do NOT stop early
+4. Report back with clear, factual results
 
-IMPORTANT:
-- Focus ONLY on the assigned subtask
-- Use FULL ABSOLUTE PATHS for all file/directory operations
-- Be thorough but concise
-- Explain what you did and what you found
-- If you can't complete the task, explain why clearly
+PERSISTENCE — READ CAREFULLY:
+- Keep going until the subtask is completely resolved before ending your turn.
+- You MUST iterate and keep going until the problem is fully solved.
+- NEVER end your turn without having truly and completely solved the subtask.
+- When you say you are going to make a tool call, you MUST actually make the tool call.
+- If a tool call fails or returns an error, DO NOT STOP. Analyse the error, try a different approach or arguments, and keep going. Errors are expected — your job is to recover and complete the task.
+- Use FULL ABSOLUTE PATHS for all file/directory operations.
 
 CRITICAL - Avoid Repetitive Actions:
 - NEVER call the same tool with the same arguments more than once
@@ -244,19 +279,42 @@ Please complete this subtask and report your findings.`,
     let finalResult = '';
     let reasoning = '';
     let pendingImages: Array<{ base64: string; mimeType: string }> = [];
-    // Tracks how many consecutive iterations have been short-circuited by the
-    // exact-duplicate dedup guard (same tool + args already executed).  If the
-    // model keeps proposing the same call despite repeated warnings we break out
-    // and fall through to the forced-synthesis path rather than burning the
-    // entire remaining iteration budget on no-op `continue` statements.
-    let consecutiveDedupCount = 0;
-    const MAX_CONSECUTIVE_DEDUP = 3;
+    /** Sliding window of recent (toolName:args) signatures for doom-loop detection */
+    const recentCalls: string[] = [];
+    /** Consecutive iterations with empty content and no tool calls */
+    let emptyResponseCount = 0;
+    /** Ensure each phase nudge fires only once */
+    let continueNudgeInjected = false;
+    let wrapUpNudgeInjected = false;
 
     // Worker execution loop
     for (let iteration = 0; iteration < this.maxIterations; iteration++) {
       iterationCount = iteration + 1;
       logger.debug(`  [Worker] Iteration ${iteration + 1}/${this.maxIterations}`);
       orchestrationLogger.logWorkerIteration(iteration + 1, this.maxIterations);
+
+      // Two-phase nudges: keep-going at 70%, wrap-up at 90%
+      const iterPct = iteration / this.maxIterations;
+      if (iterPct >= 0.7 && !continueNudgeInjected) {
+        continueNudgeInjected = true;
+        logger.warn(`  [Worker] Nearing iteration limit (${iteration + 1}/${this.maxIterations}) — injecting continue nudge`);
+        conversationHistory.push({
+          role: 'user',
+          content:
+            `You are at step ${iteration + 1} of ${this.maxIterations}. Continue making progress — ` +
+            `focus on the most critical remaining work. Complete the core work and note what is left.`,
+        });
+      }
+      if (iterPct >= 0.9 && !wrapUpNudgeInjected) {
+        wrapUpNudgeInjected = true;
+        logger.warn(`  [Worker] Final phase (${iteration + 1}/${this.maxIterations}) — requesting wrap-up`);
+        conversationHistory.push({
+          role: 'user',
+          content:
+            'You are approaching the maximum number of steps. Wrap up the current work, ' +
+            'complete any in-progress actions, and provide a comprehensive summary of everything accomplished.',
+        });
+      }
 
       const mcpTools = this.mcpManager.getClient().getAllTools();
       
@@ -311,6 +369,103 @@ Please complete this subtask and report your findings.`,
         // API error (e.g., invalid tool call parameters)
         const errorMsg = error instanceof Error ? error.message : String(error);
         logger.warn(`  [Worker] API error - ${errorMsg.substring(0, 100)}...`);
+
+        // ── Handler: missing required properties on any MCP tool ─────────────
+        // Fires for schema validation errors like "missing properties: 'ref'"
+        // on any tool — gives the model targeted guidance instead of phase switch.
+        const missingPropsMatch = errorMsg.match(
+          /parameters for tool ([\w]+) did not match schema.*missing properties: '([^']+)'/s,
+        );
+        if (missingPropsMatch) {
+          const failedTool = missingPropsMatch[1];
+          const missingProp = missingPropsMatch[2];
+          logger.warn(`  [Worker] Schema validation: ${failedTool} missing required property '${missingProp}'`);
+          conversationHistory.push({ role: 'assistant', content: '' });
+          conversationHistory.push({
+            role: 'user',
+            content:
+              `Your call to \`${failedTool}\` failed: required property \`${missingProp}\` was missing.\n\n` +
+              `Before calling \`${failedTool}\` again, take a snapshot with the browser snapshot tool ` +
+              `to get current element references (the \`ref\` values from the snapshot), ` +
+              `then re-call \`${failedTool}\` with all required properties including \`ref\`.`,
+          });
+          continue;
+        }
+
+        // ── Handler: edit_file missing new_string ─────────────────────────────
+        const isMissingNewString =
+          errorMsg.includes("missing properties: 'new_string'") ||
+          errorMsg.includes('missing properties: "new_string"') ||
+          (errorMsg.includes('edit_file') && errorMsg.includes('missing propert') && errorMsg.includes('new_string'));
+
+        if (isMissingNewString) {
+          logger.warn('  [Worker] edit_file missing new_string — injecting targeted correction');
+          conversationHistory.push({ role: 'assistant', content: '' });
+          conversationHistory.push({
+            role: 'user',
+            content:
+              'Your edit_file call failed: "new_string" is required but was not provided.\n\n' +
+              'edit_file requires ALL THREE parameters: file_path, old_string, and new_string.\n' +
+              'Call edit_file again with all three parameters.',
+          });
+          continue;
+        }
+
+        // ── Handler: tool content too large ───────────────────────────────────
+        const isContentTooLarge =
+          (errorMsg.includes('write_file') || errorMsg.includes('edit_file')) &&
+          (errorMsg.includes('Failed to parse tool call') || errorMsg.includes('tool_use_failed'));
+
+        if (isContentTooLarge) {
+          let failedToolName = errorMsg.includes('edit_file') && !errorMsg.includes('write_file') ? 'edit_file' : 'write_file';
+          let targetFile = '';
+          try {
+            const jm = errorMsg.match(/API error \(\d+\): (.+)/s);
+            if (jm) {
+              const eb = JSON.parse(jm[1]);
+              const fg: string | undefined = eb?.error?.failed_generation;
+              if (fg) {
+                const p2 = JSON.parse(fg);
+                if (p2?.name) failedToolName = p2.name;
+                const fp = p2?.arguments?.file_path;
+                if (fp) targetFile = ` for \`${fp}\``;
+              }
+            }
+          } catch { /* ignore */ }
+          const isEdit = failedToolName === 'edit_file';
+          logger.warn(`  [Worker] ${isEdit ? 'edit_file' : 'write_file'}${targetFile} content truncated — asking model to write in stages`);
+          conversationHistory.push({ role: 'assistant', content: '' });
+          conversationHistory.push({
+            role: 'user',
+            content: isEdit
+              ? `Your edit_file call${targetFile} failed: new_string was too large (cut off mid-JSON).\n\nMAXIMUM 20 LINES per edit_file call. Split into smaller pieces and call edit_file once per piece.`
+              : `Your write_file call${targetFile} failed: content too large (cut off mid-JSON).\n\nStage 1: write_file — skeleton ONLY (stubs, TODO placeholders) — MAX 20 lines\nStage 2+: edit_file — implement one section at a time (max 20 lines per call)`,
+          });
+          continue;
+        }
+
+        // ── Handler: client-side tool name repair ─────────────────────────────
+        {
+          const mcpToolList = this.mcpManager.getClient().getAllTools();
+          const repaired = repairFailedToolCall(errorMsg, mcpToolList);
+          if (repaired) {
+            const { toolName: repairedName, args: repairedArgs } = repaired;
+            logger.warn(`  [Worker] Repaired tool call: ${repairedName} (invalid token in name)`);
+            try {
+              const repResult = await this.mcpManager.getClient().executeTool(repairedName, repairedArgs);
+              toolsUsed.push(repairedName);
+              const repText = typeof repResult === 'string' ? repResult : JSON.stringify(repResult);
+              conversationHistory.push({ role: 'assistant', content: '' });
+              conversationHistory.push({
+                role: 'user',
+                content: `[Tool call repaired to \`${repairedName}\`]\n<tool_result name="${repairedName}">\n${repText}\n</tool_result>`,
+              });
+              continue;
+            } catch (repErr) {
+              logger.warn(`  [Worker] Repaired call failed: ${repErr instanceof Error ? repErr.message : String(repErr)}`);
+            }
+          }
+        }
 
         // Detect the specific "Failed to parse tool call arguments as JSON" pattern.
         // These 400 errors originate from the model generating malformed JSON for
@@ -474,6 +629,9 @@ Please complete this subtask and report your findings.`,
         continue; // Retry with error feedback
       }
 
+      let _postApiError = false;
+      try {
+
       conversationHistory.push({
         role: 'assistant',
         content: response.content,
@@ -482,49 +640,6 @@ Please complete this subtask and report your findings.`,
       // Check for tool calls
       if (response.toolCalls && response.toolCalls.length > 0) {
         logger.info(`  [Worker] Using ${response.toolCalls.length} tool(s)`);
-
-        // Detect repetitive tool calls BEFORE executing.
-        // Only block exact-same (tool + args) duplicates — calling the same tool
-        // with DIFFERENT arguments (e.g. yfinance_get_ticker_info for MSFT then NVDA)
-        // is intentional and must NOT be blocked.
-        const proposedTools = response.toolCalls.map(tc => {
-          const args = JSON.parse(tc.function.arguments);
-          return `${tc.function.name}:${JSON.stringify(args)}`;
-        });
-
-        const exactDuplicate = proposedTools.some(sig => executedToolSignatures.has(sig));
-
-        if (exactDuplicate) {
-          const dupSig = proposedTools.find(sig => executedToolSignatures.has(sig)) || '';
-          const dupToolName = dupSig.split(':')[0];
-          consecutiveDedupCount++;
-          logger.warn(`  [Worker] Detected repetitive tool usage (${consecutiveDedupCount}/${MAX_CONSECUTIVE_DEDUP}) - interrupting loop`);
-
-          if (consecutiveDedupCount >= MAX_CONSECUTIVE_DEDUP) {
-            // Model is stuck in a dedup loop — it has ignored repeated warnings.
-            // Break out now so the post-loop forced-synthesis path can still
-            // produce a useful result from the tools that DID succeed.
-            logger.warn(`  [Worker] Dedup threshold reached (${MAX_CONSECUTIVE_DEDUP} consecutive) — breaking out to synthesis`);
-            conversationHistory.push({
-              role: 'user',
-              content: `FINAL STOP: You have attempted to call \`${dupToolName}\` with the same arguments ${consecutiveDedupCount} times in a row. This call is permanently blocked. You MUST now write your final summary using only the data already collected — do NOT call any more tools.`,
-            });
-            break; // Exit loop → falls through to forced-synthesis path
-          }
-
-          conversationHistory.push({
-            role: 'user',
-            content: `STOP: You already called \`${dupToolName}\` with these exact arguments in a previous step. Do NOT repeat the same call.
-
-You have two choices:
-1. If more work remains (e.g. other symbols, other queries), call the tool with DIFFERENT arguments now.
-2. If all required work is genuinely complete, respond with a thorough description of everything accomplished — do NOT call any more tools.`,
-          });
-          continue; // Skip executing the repetitive tools, let model reconsider
-        }
-
-        // Successful tool path — reset consecutive dedup counter
-        consecutiveDedupCount = 0;
 
         for (const toolCall of response.toolCalls) {
           const toolName = toolCall.function.name;
@@ -535,6 +650,22 @@ You have two choices:
           let args: Record<string, any> = {};
           try { args = JSON.parse(toolCall.function.arguments); } catch { /* use empty */ }
           const failureSig = `${toolName}:${JSON.stringify(args)}`;
+
+          // Sliding-window doom-loop: only triggers on CONSECUTIVE identical calls
+          const callSig = `${toolName}:${JSON.stringify(args)}`;
+          recentCalls.push(callSig);
+          if (recentCalls.length > DOOM_LOOP_THRESHOLD) recentCalls.shift();
+          if (
+            recentCalls.length === DOOM_LOOP_THRESHOLD &&
+            recentCalls.every((c) => c === recentCalls[0])
+          ) {
+            logger.warn(`  [Worker] Doom loop detected for tool: ${toolName} — same call ${DOOM_LOOP_THRESHOLD} times in a row`);
+            conversationHistory.push({
+              role: 'user',
+              content: `STOP: You are calling \`${toolName}\` with the same arguments ${DOOM_LOOP_THRESHOLD} times in a row. This is not making progress. Try a different approach, different arguments, or a different tool to achieve the same goal.`,
+            });
+            break;
+          }
 
           try {
             orchestrationLogger.logWorkerToolCall(toolName, args);
@@ -554,7 +685,6 @@ You have two choices:
               });
 
               toolsUsed.push(toolName);
-              executedToolSignatures.add(`${toolName}:${JSON.stringify(args)}`);
 
               const resultText = `Sub-agent spawned with persona '${spawnResult.persona}' completed the task.
 
@@ -588,7 +718,6 @@ Tools used: ${spawnResult.toolsUsed.join(', ')}`;
             const result = await this.mcpManager.getClient().executeTool(toolName, args);
 
             toolsUsed.push(toolName);
-            executedToolSignatures.add(`${toolName}:${JSON.stringify(args)}`);
 
             // Check if tool returned images (multimodal support)
             let toolResultText: string;
@@ -649,8 +778,6 @@ Tools used: ${spawnResult.toolsUsed.join(', ')}`;
               logger.warn(`  [Worker] Tool ${toolName} has failed twice — warning injected`);
             } else if (newCount >= 3) {
               // Third failure: hard stop — block the tool and force honest exit
-              // Add to executedToolSignatures so the exact-dedup guard prevents further calls
-              executedToolSignatures.add(failureSig);
               conversationHistory.push({
                 role: 'user',
                 content: `HARD STOP: Tool \`${toolName}\` has failed ${newCount} times and will NOT succeed with these arguments.\nFinal error: ${errorMsg}\n\nYou MUST stop attempting this tool. Respond now with an honest report of what you tried and why it failed. Do not call any more tools — just describe the failure clearly so the user can be informed.`,
@@ -685,33 +812,35 @@ Tools used: ${spawnResult.toolsUsed.join(', ')}`;
           pendingImages = []; // Clear for next iteration
         }
 
-        // After processing tool calls, check if we should prompt for completion
-        // This helps Worker recognize when task is done instead of over-iterating
-        const shouldPromptCompletion = this.shouldPromptForCompletion(
-          toolsUsed,
-          iteration
-        );
-
-        if (shouldPromptCompletion) {
-          logger.debug(`  [Worker] Prompting for task completion check`);
-          conversationHistory.push({
-            role: 'user',
-            content: `Your most recent tools have run. Review the subtask instruction and the tool results above.
-
-Is the subtask fully complete?
-
-- If YES (all required work is done): respond with a thorough, detailed account of exactly what was accomplished — include file paths, content written, commands run, outputs observed, and any other relevant facts. Do NOT call any more tools.
-- If NO (more work remains): continue immediately with the next required tool call. Do not stop early.
-
-IMPORTANT: Do not claim completion unless the core deliverable (e.g. the file written, the data fetched, the action performed) is confirmed done. A directory being created is NOT the same as the file inside it being written.`,
-          });
-        }
-
         // Continue to process tool results
         continue;
       }
 
-      // No tool calls - Worker has finished
+      } catch (unexpectedError) {
+        _postApiError = true;
+        const errMsg = unexpectedError instanceof Error ? unexpectedError.message : String(unexpectedError);
+        logger.error(`  [Worker] Unexpected error during tool processing: ${errMsg}`);
+        conversationHistory.push({
+          role: 'user',
+          content: `An unexpected internal error occurred: "${errMsg}". Please try a different approach.`,
+        });
+      }
+      if (_postApiError) continue;
+
+      // No tool calls — check for empty response before treating as completion
+      if (!response.content && emptyResponseCount < MAX_EMPTY_RESPONSES) {
+        emptyResponseCount++;
+        logger.warn(`  [Worker] Empty response with no tool calls (${emptyResponseCount}/${MAX_EMPTY_RESPONSES}) — nudging`);
+        conversationHistory.push({
+          role: 'user',
+          content: emptyResponseCount <= 2
+            ? 'Your last response was empty. Continue working on the subtask — call a tool or provide a final summary.'
+            : `IMPORTANT (attempt ${emptyResponseCount}/${MAX_EMPTY_RESPONSES}): Response is empty again. You MUST call a tool or provide a final summary now.`,
+        });
+        continue;
+      }
+
+      // Worker has a conclusive response
       finalResult = response.content;
       reasoning = this.extractReasoning(response.content);
 
@@ -821,34 +950,5 @@ IMPORTANT: Do not claim completion unless the core deliverable (e.g. the file wr
     return reasoningMatch ? reasoningMatch[1].trim() : '';
   }
 
-  /**
-   * Determine if we should prompt Worker to check for completion.
-   * Fires every 3 successful tool calls (regardless of tool type) so research
-   * tasks (yfinance, brave-search, etc.) get a "are you done?" nudge just like
-   * file-operation tasks do.  Also fires when we are approaching the iteration
-   * cap so the model has a chance to synthesise before hitting the hard limit.
-   */
-  private shouldPromptForCompletion(
-    toolsUsed: string[],
-    currentIteration: number
-  ): boolean {
-    // Don't prompt on the very first iteration — let Worker do initial work first.
-    if (currentIteration === 0) {
-      return false;
-    }
-
-    // Approaching the iteration limit — give the model one last chance to wrap up.
-    const nearIterationLimit =
-      this.maxIterations > 0 &&
-      currentIteration >= Math.floor(this.maxIterations * 0.7);
-    if (nearIterationLimit) {
-      return true;
-    }
-
-    // Fire every 8 successful tool calls for any tool type
-    // (at 8, 16, 24 … tools accumulated).
-    // Using 8 instead of 3 to give the Worker enough space to complete
-    // multi-step data-gathering workflows before being prompted to stop.
-    return toolsUsed.length >= 8 && toolsUsed.length % 8 === 0;
-  }
 }
+
