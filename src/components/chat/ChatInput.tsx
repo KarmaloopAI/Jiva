@@ -32,6 +32,10 @@ export function ChatInput() {
     el.style.height = Math.min(el.scrollHeight, 200) + 'px'
   }, [value])
 
+  const handleStop = useCallback(() => {
+    window.electron.jiva.stopMessage()
+  }, [])
+
   const handleSend = useCallback(async () => {
     const text = value.trim()
     if (!text || !isConnected || isThinking) return
@@ -127,18 +131,19 @@ export function ChatInput() {
         />
 
         <button
-          onClick={handleSend}
-          disabled={!value.trim() || !isConnected || isThinking}
+          onClick={isThinking ? handleStop : handleSend}
+          disabled={isThinking ? false : (!value.trim() || !isConnected)}
           className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-all disabled:opacity-30 disabled:cursor-not-allowed"
           style={{
-            background:
-              value.trim() && isConnected && !isThinking
+            background: isThinking
+              ? 'var(--bg-secondary)'
+              : value.trim() && isConnected
                 ? 'linear-gradient(135deg, #8B5CF6, #3B82F6)'
                 : 'var(--bg-secondary)',
           }}
         >
           {isThinking ? (
-            <StopCircle size={15} className="text-[var(--text-muted)]" />
+            <StopCircle size={15} className="text-[var(--accent)]" />
           ) : (
             <Send
               size={14}

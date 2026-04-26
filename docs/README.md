@@ -49,6 +49,7 @@ npm run dist:linux   # Package for Linux (AppImage + deb)
 | [architecture/ipc-contract.md](architecture/ipc-contract.md) | All IPC channels with payloads and return types |
 | [architecture/state-management.md](architecture/state-management.md) | Zustand stores, data flow patterns |
 | [architecture/jiva-core-integration.md](architecture/jiva-core-integration.md) | How jiva-core is loaded, called, and configured |
+| [architecture/code-agent-integration.md](architecture/code-agent-integration.md) | Code mode agent architecture and components |
 | [guides/design-guide.md](guides/design-guide.md) | Colors, typography, spacing, components, animations |
 | [guides/adding-features.md](guides/adding-features.md) | Step-by-step guide for adding new IPC-backed features |
 | [release_notes/](release_notes/) | Release notes (see individual version files) |

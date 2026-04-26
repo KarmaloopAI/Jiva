@@ -69,7 +69,7 @@ interface CodeStore {
 
   sendMessage: (content: string) => Promise<void>
   initLogListener: () => void
-  clearSession: () => void
+  clearSession: () => Promise<void>
 }
 
 let logListenerRegistered = false
@@ -173,7 +173,11 @@ export const useCodeStore = create<CodeStore>((set, get) => ({
     }
   },
 
-  clearSession: () => {
+  clearSession: async () => {
+    // Tear down the underlying CodeRunner so next init starts clean
+    try {
+      await window.electron.code.resetSession()
+    } catch { /* ignore — runner may already be stopped */ }
     set({
       messages: [],
       isThinking: false,

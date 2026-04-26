@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { Send, Terminal, FolderCode, Bug, Wrench } from 'lucide-react'
+import { Send, StopCircle, Terminal, FolderCode, Bug, Wrench, RotateCcw } from 'lucide-react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useCodeStore } from '../../store/code.store'
 import { useGitStore } from '../../store/git.store'
@@ -99,7 +99,7 @@ export function CodeChatView() {
   const [value, setValue] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
-  const { messages, isThinking, sendMessage } = useCodeStore()
+  const { messages, isThinking, sendMessage, clearSession, codeWorkspaceDir } = useCodeStore()
   const { refresh: refreshGit } = useGitStore()
 
   // Auto-resize textarea
@@ -114,6 +114,15 @@ export function CodeChatView() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, isThinking])
+
+  const handleStop = useCallback(() => {
+    window.electron.code.stopMessage()
+  }, [])
+
+  const handleNewSession = useCallback(async () => {
+    await clearSession()
+    useGitStore.getState().setWorkspaceDir('')
+  }, [clearSession])
 
   const handleSend = useCallback(async () => {
     const text = value.trim()
@@ -131,8 +140,37 @@ export function CodeChatView() {
     }
   }
 
+  const workspaceName = codeWorkspaceDir
+    ? codeWorkspaceDir.split(/[\\/]/).filter(Boolean).pop() ?? codeWorkspaceDir
+    : ''
+
   return (
     <div className="flex flex-col h-full">
+      {/* Workspace header */}
+      <div
+        className="flex items-center justify-between px-4 py-2 border-b flex-shrink-0"
+        style={{ borderColor: 'var(--topbar-border)', background: 'var(--topbar-bg)' }}
+      >
+        <div className="flex items-center gap-1.5 min-w-0">
+          <FolderCode size={13} className="text-[var(--text-muted)] flex-shrink-0" />
+          <span
+            className="text-xs text-[var(--text-muted)] truncate"
+            title={codeWorkspaceDir ?? ''}
+          >
+            {workspaceName}
+          </span>
+        </div>
+        <button
+          onClick={handleNewSession}
+          disabled={isThinking}
+          className="flex items-center gap-1 text-xs text-[var(--text-subtle)] hover:text-[var(--text)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex-shrink-0 ml-2"
+          title="Start a new code session in a different workspace"
+        >
+          <RotateCcw size={12} />
+          <span>New Session</span>
+        </button>
+      </div>
+
       {/* Message area */}
       {messages.length === 0 && !isThinking ? (
         <EmptyState />
@@ -191,20 +229,25 @@ export function CodeChatView() {
           />
 
           <button
-            onClick={handleSend}
-            disabled={!value.trim() || isThinking}
+            onClick={isThinking ? handleStop : handleSend}
+            disabled={isThinking ? false : !value.trim()}
             className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-all disabled:opacity-30 disabled:cursor-not-allowed"
             style={{
-              background:
-                value.trim() && !isThinking
+              background: isThinking
+                ? 'var(--bg-secondary)'
+                : value.trim()
                   ? 'linear-gradient(135deg, #3B82F6, #8B5CF6)'
                   : 'var(--bg-secondary)',
             }}
           >
-            <Send
-              size={14}
-              className={value.trim() && !isThinking ? 'text-white' : 'text-[var(--text-subtle)]'}
-            />
+            {isThinking ? (
+              <StopCircle size={15} className="text-[var(--accent)]" />
+            ) : (
+              <Send
+                size={14}
+                className={value.trim() ? 'text-white' : 'text-[var(--text-subtle)]'}
+              />
+            )}
           </button>
         </div>
 

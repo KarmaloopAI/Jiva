@@ -111,6 +111,7 @@ export function GitPanel() {
   const {
     isRepo, changedFiles, selectedFile, diffContent,
     isLoadingDiff, isLoadingStatus, refresh, selectFile,
+    branch, ahead, behind,
   } = useGitStore()
 
   // Refresh every time component mounts or regains focus
@@ -152,9 +153,17 @@ export function GitPanel() {
         className="flex items-center justify-between px-3 py-2.5 border-b flex-shrink-0"
         style={{ borderColor: 'var(--card-border)' }}
       >
-        <div className="flex items-center gap-2">
-          <GitBranch size={13} className="text-[var(--text-muted)]" />
-          <span className="text-xs font-medium text-[var(--text-muted)]">Changed Files</span>
+        <div className="flex items-center gap-2 min-w-0">
+          <GitBranch size={13} className="text-[var(--accent)] flex-shrink-0" />
+          {branch && (
+            <span className="text-xs font-medium text-[var(--text)] truncate">{branch}</span>
+          )}
+          {ahead > 0 && (
+            <span className="text-xs font-medium" style={{ color: '#22c55e' }}>↑{ahead}</span>
+          )}
+          {behind > 0 && (
+            <span className="text-xs font-medium" style={{ color: '#f59e0b' }}>↓{behind}</span>
+          )}
           {changedFiles.length > 0 && (
             <Badge variant="tool">{changedFiles.length}</Badge>
           )}

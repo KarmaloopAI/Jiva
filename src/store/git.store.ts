@@ -5,6 +5,9 @@ interface GitStore {
   isRepo: boolean
   workspaceDir: string
   changedFiles: GitFile[]
+  branch: string | null
+  ahead: number
+  behind: number
   selectedFile: string | null
   diffContent: string | null
   isLoadingDiff: boolean
@@ -21,13 +24,16 @@ export const useGitStore = create<GitStore>((set, get) => ({
   isRepo: false,
   workspaceDir: '',
   changedFiles: [],
+  branch: null,
+  ahead: 0,
+  behind: 0,
   selectedFile: null,
   diffContent: null,
   isLoadingDiff: false,
   isLoadingStatus: false,
 
   setWorkspaceDir: (dir: string) => {
-    set({ workspaceDir: dir, selectedFile: null, diffContent: null, changedFiles: [] })
+    set({ workspaceDir: dir, selectedFile: null, diffContent: null, changedFiles: [], branch: null, ahead: 0, behind: 0 })
   },
 
   checkIsRepo: async () => {
@@ -47,8 +53,17 @@ export const useGitStore = create<GitStore>((set, get) => ({
     if (!workspaceDir || !isRepo) return
     set({ isLoadingStatus: true })
     try {
-      const files = await window.electron.git.status(workspaceDir)
-      set({ changedFiles: files, isLoadingStatus: false })
+      const [files, branchInfo] = await Promise.all([
+        window.electron.git.status(workspaceDir),
+        window.electron.git.branchInfo(workspaceDir),
+      ])
+      set({
+        changedFiles: files,
+        branch: branchInfo?.branch ?? null,
+        ahead: branchInfo?.ahead ?? 0,
+        behind: branchInfo?.behind ?? 0,
+        isLoadingStatus: false,
+      })
     } catch {
       set({ isLoadingStatus: false })
     }

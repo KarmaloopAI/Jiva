@@ -3,6 +3,7 @@ import { execSync } from 'child_process'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { pathToFileURL } from 'url'
 import { writeDirective } from './directive-manager'
 import { readConfig } from './config-manager'
 
@@ -66,7 +67,7 @@ export class CodeRunner extends EventEmitter {
     const entry = resolveJivaCoreEntryPath()
     console.log(`[CodeRunner] Loading jiva-core from: ${entry}`)
 
-    const jiva = await import(entry as string)
+    const jiva = await import(pathToFileURL(entry).href)
 
     const {
       configManager,
@@ -175,6 +176,12 @@ export class CodeRunner extends EventEmitter {
     } finally {
       process.stdout.write = origStdoutWrite
       process.stderr.write = origStderrWrite
+    }
+  }
+
+  stop(): void {
+    if (this.agent) {
+      (this.agent as { stop(): void }).stop()
     }
   }
 

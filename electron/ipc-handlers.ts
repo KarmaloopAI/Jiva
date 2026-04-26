@@ -173,6 +173,12 @@ export function setupIpcHandlers(
     }
   })
 
+  // --- Stop active Jiva agent (cooperative: finishes current tool, then exits) ---
+  ipcMain.handle('jiva:stop-message', () => {
+    jivaRunner.stop()
+    return { success: true }
+  })
+
   // --- Reset conversation ---
   ipcMain.handle('jiva:reset-conversation', () => {
     jivaRunner.resetConversation()
@@ -543,6 +549,22 @@ export function setupIpcHandlers(
     }
   })
 
+  // --- Stop active Code agent (cooperative: finishes current tool, then exits) ---
+  ipcMain.handle('code:stop-message', () => {
+    codeRunner.stop()
+    return { success: true }
+  })
+
+  // --- Reset / tear down CodeRunner so next code:init starts fresh ---
+  ipcMain.handle('code:reset-session', async () => {
+    try {
+      await codeRunner.cleanup()
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
   // --- Git: check if directory is a git repo ---
   ipcMain.handle('git:is-repo', (_event, dir: string) => {
     try {
@@ -626,6 +648,34 @@ export function setupIpcHandlers(
       return { success: true }
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // --- Git: get current branch name + ahead/behind vs upstream ---
+  ipcMain.handle('git:branch-info', (_event, dir: string) => {
+    try {
+      const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'],
+        { cwd: dir, timeout: 3000 }).toString().trim()
+
+      let ahead = 0, behind = 0
+      try {
+        const tracking = execFileSync(
+          'git', ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'],
+          { cwd: dir, timeout: 3000 }
+        ).toString().trim()
+        if (tracking) {
+          const ab = execFileSync(
+            'git', ['rev-list', '--left-right', '--count', `${tracking}...HEAD`],
+            { cwd: dir, timeout: 3000 }
+          ).toString().trim().split('\t')
+          behind = parseInt(ab[0]) || 0
+          ahead = parseInt(ab[1]) || 0
+        }
+      } catch { /* no upstream configured — leave 0/0 */ }
+
+      return { branch, ahead, behind }
+    } catch {
+      return null
     }
   })
 

@@ -51,6 +51,7 @@ interface ElectronAPI {
       prompt: string,
       persona?: string
     ) => Promise<{ success: boolean; result?: JivaRunResult; conversationId?: string; error?: string }>
+    stopMessage: () => Promise<{ success: boolean }>
     onPhaseUpdate: (callback: (phase: string) => void) => void
     resetConversation: () => Promise<{ success: boolean }>
     loadConversation: (id: string) => Promise<{ success: boolean; error?: string }>
@@ -97,6 +98,8 @@ interface ElectronAPI {
   }
   code: {
     sendMessage: (prompt: string) => Promise<{ success: boolean; content?: string; toolsUsed?: string[]; iterations?: number; error?: string }>
+    stopMessage: () => Promise<{ success: boolean }>
+    resetSession: () => Promise<{ success: boolean; error?: string }>
     init: (dir: string) => Promise<{ success: boolean; error?: string }>
     onCodeLog: (cb: (event: CodeLogEvent) => void) => void
   }
@@ -105,6 +108,7 @@ interface ElectronAPI {
     status: (dir: string) => Promise<GitFile[]>
     diffFile: (dir: string, file: string, status?: string) => Promise<string | null>
     initRepo: (dir: string) => Promise<{ success: boolean; error?: string }>
+    branchInfo: (dir: string) => Promise<{ branch: string; ahead: number; behind: number } | null>
   }
   directive: {
     get: () => Promise<string>

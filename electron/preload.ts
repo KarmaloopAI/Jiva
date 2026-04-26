@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('electron', {
     },
     sendMessage: (prompt: string, persona?: string) =>
       ipcRenderer.invoke('jiva:send-message', prompt, persona),
+    stopMessage: () => ipcRenderer.invoke('jiva:stop-message'),
     onPhaseUpdate: (callback: (phase: string) => void) => {
       ipcRenderer.on('jiva:phase-update', (_event, phase) => callback(phase))
     },
@@ -55,6 +56,8 @@ contextBridge.exposeInMainWorld('electron', {
   },
   code: {
     sendMessage: (prompt: string) => ipcRenderer.invoke('code:send-message', prompt),
+    stopMessage: () => ipcRenderer.invoke('code:stop-message'),
+    resetSession: () => ipcRenderer.invoke('code:reset-session'),
     init: (dir: string) => ipcRenderer.invoke('code:init', dir),
     onCodeLog: (cb: (event: unknown) => void) => {
       ipcRenderer.on('jiva:code-log', (_event, e) => cb(e))
@@ -65,6 +68,7 @@ contextBridge.exposeInMainWorld('electron', {
     status: (dir: string) => ipcRenderer.invoke('git:status', dir),
     diffFile: (dir: string, file: string, status?: string) => ipcRenderer.invoke('git:diff-file', dir, file, status),
     initRepo: (dir: string) => ipcRenderer.invoke('git:init-repo', dir),
+    branchInfo: (dir: string) => ipcRenderer.invoke('git:branch-info', dir),
   },
   directive: {
     get: () => ipcRenderer.invoke('directive:get'),

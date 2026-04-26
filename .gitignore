@@ -144,3 +144,4 @@ vite.config.ts.timestamp-*
 # Build output directories
 /dist-electron/
 /release/
+/graphify-out/

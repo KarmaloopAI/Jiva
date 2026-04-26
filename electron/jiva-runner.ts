@@ -555,6 +555,12 @@ export class JivaRunner extends EventEmitter {
     this.setStatus('stopped')
   }
 
+  stop(): void {
+    if (this.agent) {
+      (this.agent as { stop(): void }).stop()
+    }
+  }
+
   private setStatus(status: RunnerStatus, error?: string) {
     this.status = status
     this.emit('status-changed', status, { error })
