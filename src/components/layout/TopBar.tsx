@@ -102,7 +102,7 @@ export function TopBar({
       <div className="flex items-center gap-2 no-drag">
         <StatusDot />
 
-        <Button variant="icon" size="sm" title="Restart Jiva" onClick={() => restartServer()}>
+        <Button variant="icon" size="sm" title="Restart Jivam" onClick={() => restartServer()}>
           <RefreshCw size={15} />
         </Button>
 

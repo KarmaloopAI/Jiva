@@ -57,7 +57,7 @@ export function DirectiveTab() {
       <div>
         <h2 className="text-sm font-semibold text-[var(--text)] mb-1">Agent Directive</h2>
         <p className="text-xs text-[var(--text-muted)] leading-relaxed">
-          Write custom instructions that shape how Jiva behaves in every session. Date, time, and
+          Write custom instructions that shape how Jivam behaves in every session. Date, time, and
           recent conversation history are appended automatically — you don't need to include them.
         </p>
       </div>

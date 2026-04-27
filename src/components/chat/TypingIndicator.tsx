@@ -35,7 +35,7 @@ export function TypingIndicator({ startTime }: TypingIndicatorProps) {
             border: '1px solid rgba(139,92,246,0.2)',
           }}
         >
-          <img src={logoUrl} alt="Jiva" className="w-5 h-5 object-contain" />
+          <img src={logoUrl} alt="Jivam" className="w-5 h-5 object-contain" />
         </div>
 
         {/* Bubble */}

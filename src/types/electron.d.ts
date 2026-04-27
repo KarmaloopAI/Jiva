@@ -65,7 +65,7 @@ interface ElectronAPI {
     activate: (name: string) => Promise<{ success: boolean }>
   }
   conversations: {
-    list: () => Promise<Array<{ id: string; summary: string; messageCount: number; lastModified: number }>>
+    list: () => Promise<Array<{ id: string; summary: string; messageCount: number; lastModified: number; type: 'chat' | 'code' }>>
     load: (id: string) => Promise<unknown>
   }
   mcp: {

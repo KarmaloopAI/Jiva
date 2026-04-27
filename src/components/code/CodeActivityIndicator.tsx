@@ -28,7 +28,7 @@ export function CodeActivityIndicator() {
           border: '1px solid rgba(59,130,246,0.25)',
         }}
       >
-        <img src={logoUrl} alt="Jiva" className="w-5 h-5 object-contain" />
+        <img src={logoUrl} alt="Jivam" className="w-5 h-5 object-contain" />
       </div>
 
       {/* Bubble */}

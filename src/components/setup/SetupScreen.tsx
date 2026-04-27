@@ -287,7 +287,7 @@ export function SetupScreen({ checks, onContinue }: Props) {
                     </p>
                     <CopyCommand command="npm install -g jiva-core" />
                     <p className="text-xs text-[var(--text-subtle)] mt-2">
-                      This installs the Jiva AI engine globally. Come back when it's done — the
+                      This installs the Jivam AI engine globally. Come back when it's done — the
                       check will update automatically.
                     </p>
                   </div>

@@ -32,7 +32,7 @@ export function AgentWorkPanel({ work, isExpanded }: AgentWorkPanelProps) {
             {/* Header */}
             <div className="flex items-center justify-between">
               <span className="font-medium text-[var(--text-muted)] text-xs uppercase tracking-wide">
-                Jiva's Work
+                Jivam's Work
               </span>
               <div className="flex items-center gap-3 text-xs text-[var(--text-subtle)]">
                 {iterations != null && (

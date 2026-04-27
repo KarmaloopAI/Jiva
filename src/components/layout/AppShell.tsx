@@ -34,7 +34,7 @@ export function AppShell({ activeTab, onTabChange }: AppShellProps) {
 
       <div className="flex flex-1 overflow-hidden relative">
         {/* Persistent Conversation Sidebar */}
-        <ConversationSidebar isCollapsed={sidebarCollapsed} width={sidebarWidth} />
+        <ConversationSidebar isCollapsed={sidebarCollapsed} width={sidebarWidth} activeTab={activeTab} />
         {!sidebarCollapsed && (
           <ResizeHandle
             onResize={(delta) =>

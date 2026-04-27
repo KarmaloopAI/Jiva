@@ -270,6 +270,7 @@ export function setupIpcHandlers(
               summary,
               messageCount: raw.messages?.length ?? 0,
               lastModified: stat.mtimeMs,
+              type: (raw.metadata?.type ?? 'chat') as 'chat' | 'code',
             }
           } catch {
             return null

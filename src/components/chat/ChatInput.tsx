@@ -61,7 +61,7 @@ export function ChatInput() {
       // Always refresh the sidebar so new conversations appear immediately
       useConversationStore.getState().loadConversationList()
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to get response from Jiva'
+      const msg = err instanceof Error ? err.message : 'Failed to get response from Jivam'
       addErrorMessage(msg)
     }
   }, [value, isConnected, isThinking, activePersonaName, addUserMessage, setThinking, sendMessage, addAgentResponse, addErrorMessage])
@@ -121,8 +121,8 @@ export function ChatInput() {
           onKeyDown={handleKeyDown}
           placeholder={
             isConnected
-              ? 'Message Jiva... (Shift+Enter for new line)'
-              : 'Waiting for Jiva to initialize...'
+              ? 'Message Jivam... (Shift+Enter for new line)'
+              : 'Waiting for Jivam to initialize...'
           }
           disabled={!isConnected || isThinking}
           rows={1}
@@ -154,7 +154,7 @@ export function ChatInput() {
       </div>
 
       <p className="text-center text-[10px] text-[var(--text-subtle)] mt-2">
-        Jiva can make mistakes. Verify important information.
+        Jivam can make mistakes. Verify important information.
       </p>
     </div>
   )

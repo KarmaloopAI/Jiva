@@ -1,8 +1,10 @@
 import { useEffect } from 'react'
-import { MessageSquare, Plus } from 'lucide-react'
+import { MessageSquare, Terminal, Plus } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useConversationStore } from '../../store/conversation.store'
 import { useChatStore } from '../../store/chat.store'
+import { useCodeStore } from '../../store/code.store'
+import type { ActiveTab } from '../../App'
 
 function formatRelativeDate(ts: number): string {
   const now = Date.now()
@@ -27,11 +29,11 @@ function formatConversationTime(ts: number, group: string): string {
 
 interface GroupedConversations {
   label: string
-  items: { id: string; title: string; messageCount: number; lastModified: number }[]
+  items: { id: string; title: string; messageCount: number; lastModified: number; type: 'chat' | 'code' }[]
 }
 
 function groupByDate(
-  convs: { id: string; title: string; messageCount: number; lastModified: number }[]
+  convs: { id: string; title: string; messageCount: number; lastModified: number; type: 'chat' | 'code' }[]
 ): GroupedConversations[] {
   const order = ['Today', 'Yesterday', 'This Week', 'This Month', 'Older']
   const map: Record<string, GroupedConversations['items']> = {}
@@ -48,12 +50,16 @@ function groupByDate(
 interface ConversationSidebarProps {
   isCollapsed: boolean
   width: number
+  activeTab: ActiveTab
 }
 
-export function ConversationSidebar({ isCollapsed, width }: ConversationSidebarProps) {
+export function ConversationSidebar({ isCollapsed, width, activeTab }: ConversationSidebarProps) {
   const { conversations, activeConversationId, isLoading, loadConversationList, startNewConversation, switchToConversation } =
     useConversationStore()
   const { conversationId } = useChatStore()
+  const { clearSession: clearCodeSession, loadConversation: loadCodeConversation } = useCodeStore()
+
+  const isCodeMode = activeTab === 'code'
 
   // Load conversations on mount and whenever active conversation changes (new convs appear)
   useEffect(() => {
@@ -68,7 +74,11 @@ export function ConversationSidebar({ isCollapsed, width }: ConversationSidebarP
     }
   }, [conversationId, loadConversationList])
 
-  const groups = groupByDate(conversations)
+  // Filter by the active mode: code tab shows code conversations, everything else shows chat
+  const filtered = conversations.filter((c) =>
+    isCodeMode ? c.type === 'code' : c.type !== 'code'
+  )
+  const groups = groupByDate(filtered)
 
   return (
     <AnimatePresence initial={false}>
@@ -87,20 +97,35 @@ export function ConversationSidebar({ isCollapsed, width }: ConversationSidebarP
             WebkitBackdropFilter: 'blur(12px)',
           }}
         >
-          {/* New Chat button */}
+          {/* New conversation button */}
           <div className="px-3 py-3 flex-shrink-0">
-            <button
-              onClick={startNewConversation}
-              className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium transition-all"
-              style={{
-                background: 'linear-gradient(135deg, rgba(139,92,246,0.15), rgba(59,130,246,0.10))',
-                border: '1px solid rgba(139,92,246,0.25)',
-                color: 'var(--accent)',
-              }}
-            >
-              <Plus size={15} />
-              New Chat
-            </button>
+            {isCodeMode ? (
+              <button
+                onClick={() => clearCodeSession()}
+                className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium transition-all"
+                style={{
+                  background: 'linear-gradient(135deg, rgba(59,130,246,0.15), rgba(139,92,246,0.10))',
+                  border: '1px solid rgba(59,130,246,0.25)',
+                  color: 'var(--accent-blue)',
+                }}
+              >
+                <Plus size={15} />
+                New Code Session
+              </button>
+            ) : (
+              <button
+                onClick={startNewConversation}
+                className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium transition-all"
+                style={{
+                  background: 'linear-gradient(135deg, rgba(139,92,246,0.15), rgba(59,130,246,0.10))',
+                  border: '1px solid rgba(139,92,246,0.25)',
+                  color: 'var(--accent)',
+                }}
+              >
+                <Plus size={15} />
+                New Chat
+              </button>
+            )}
           </div>
 
           {/* Conversation list */}
@@ -109,10 +134,15 @@ export function ConversationSidebar({ isCollapsed, width }: ConversationSidebarP
               <div className="text-center py-8 text-xs text-[var(--text-subtle)]">Loading...</div>
             )}
 
-            {!isLoading && conversations.length === 0 && (
+            {!isLoading && filtered.length === 0 && (
               <div className="text-center py-8 px-3">
-                <MessageSquare size={24} className="mx-auto mb-2 text-[var(--text-subtle)] opacity-40" />
-                <p className="text-xs text-[var(--text-subtle)]">No conversations yet</p>
+                {isCodeMode
+                  ? <Terminal size={24} className="mx-auto mb-2 text-[var(--text-subtle)] opacity-40" />
+                  : <MessageSquare size={24} className="mx-auto mb-2 text-[var(--text-subtle)] opacity-40" />
+                }
+                <p className="text-xs text-[var(--text-subtle)]">
+                  {isCodeMode ? 'No code sessions yet' : 'No conversations yet'}
+                </p>
               </div>
             )}
 
@@ -125,10 +155,11 @@ export function ConversationSidebar({ isCollapsed, width }: ConversationSidebarP
                   {group.items.map((conv) => {
                     const isActive =
                       conv.id === activeConversationId || conv.id === conversationId
+                    const isCode = conv.type === 'code'
                     return (
                       <button
                         key={conv.id}
-                        onClick={() => switchToConversation(conv.id)}
+                        onClick={() => isCode ? loadCodeConversation(conv.id) : switchToConversation(conv.id)}
                         className="w-full text-left px-3 py-2 rounded-lg transition-all group"
                         style={{
                           background: isActive
@@ -137,6 +168,7 @@ export function ConversationSidebar({ isCollapsed, width }: ConversationSidebarP
                           border: isActive
                             ? '1px solid rgba(139,92,246,0.2)'
                             : '1px solid transparent',
+                          cursor: 'pointer',
                         }}
                       >
                         <p

@@ -26,7 +26,7 @@ export function AgentMessage({ message }: AgentMessageProps) {
           border: '1px solid rgba(139,92,246,0.2)',
         }}
       >
-        <img src={logoUrl} alt="Jiva" className="w-5 h-5 object-contain" />
+        <img src={logoUrl} alt="Jivam" className="w-5 h-5 object-contain" />
       </div>
 
       {/* Content — full width, no constraining bubble (tables and wide content can expand freely) */}
@@ -53,7 +53,7 @@ export function AgentMessage({ message }: AgentMessageProps) {
               className="flex items-center gap-1 text-xs text-[var(--text-subtle)] hover:text-[var(--accent)] transition-colors"
             >
               {message.workExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-              {message.workExpanded ? 'Hide' : 'Show'} Jiva's work
+              {message.workExpanded ? 'Hide' : 'Show'} Jivam's work
             </button>
 
             {message.agentWork && (

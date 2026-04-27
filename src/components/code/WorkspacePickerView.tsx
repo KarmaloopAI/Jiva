@@ -106,7 +106,7 @@ export function WorkspacePickerView() {
           </div>
           <h2 className="text-xl font-semibold gradient-text mb-1">Choose Workspace</h2>
           <p className="text-sm text-[var(--text-muted)] max-w-xs leading-relaxed">
-            Select a directory for this code session. Jiva will read and edit files here.
+            Select a directory for this code session. Jivam will read and edit files here.
           </p>
         </div>
 

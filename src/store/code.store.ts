@@ -66,6 +66,7 @@ interface CodeStore {
   isSessionStarted: boolean
   codeWorkspaceDir: string | null
   startSession: (dir: string) => Promise<{ success: boolean; error?: string }>
+  loadConversation: (id: string) => Promise<void>
 
   sendMessage: (content: string) => Promise<void>
   initLogListener: () => void
@@ -171,6 +172,47 @@ export const useCodeStore = create<CodeStore>((set, get) => ({
         pendingEvents: [],
       }))
     }
+  },
+
+  loadConversation: async (id: string) => {
+    const raw = await window.electron.conversations.load(id) as {
+      metadata?: { workspace?: string }
+      messages?: Array<{ role: string; content: string | Array<{ type: string; text?: string }> }>
+    } | null
+
+    if (!raw) return
+
+    const workspace = raw.metadata?.workspace ?? null
+    const messages: CodeMessage[] = (raw.messages ?? []).map((m, i) => {
+      const content = typeof m.content === 'string'
+        ? m.content
+        : (m.content as Array<{ type: string; text?: string }>)
+            .filter((p) => p.type === 'text' && p.text)
+            .map((p) => p.text!)
+            .join('\n') || ''
+      return {
+        id: `loaded-${i}`,
+        role: m.role === 'user' ? 'user' : 'agent',
+        content,
+        timestamp: new Date(),
+      }
+    })
+
+    // Reset agent and init at the stored workspace so the user can continue
+    try { await window.electron.code.resetSession() } catch { /* ignore */ }
+    if (workspace) {
+      await window.electron.code.init(workspace)
+    }
+
+    set({
+      messages,
+      isThinking: false,
+      thinkingStartTime: null,
+      currentAction: null,
+      pendingEvents: [],
+      isSessionStarted: true,
+      codeWorkspaceDir: workspace,
+    })
   },
 
   clearSession: async () => {

@@ -35,10 +35,10 @@ export function WorkspaceTab() {
       <div>
         <h2 className="text-sm font-semibold text-[var(--text)] mb-1">Workspace Directory</h2>
         <p className="text-xs text-[var(--text-muted)] leading-relaxed">
-          The workspace is where Jiva writes files it creates (reports, documents, code, etc.).
+          The workspace is where Jivam writes files it creates (reports, documents, code, etc.).
           This directory will appear in the{' '}
           <strong className="text-[var(--text)]">Files</strong> tab so you can browse and preview
-          everything Jiva produces.
+          everything Jivam produces.
         </p>
       </div>
 
@@ -92,7 +92,7 @@ export function WorkspaceTab() {
         </div>
 
         <p className="text-[11px] text-[var(--text-subtle)]">
-          Default: your home directory (~). Jiva's filesystem MCP will also use this as its root.
+          Default: your home directory (~). Jivam's filesystem MCP will also use this as its root.
         </p>
       </div>
 
@@ -106,13 +106,13 @@ export function WorkspaceTab() {
       >
         <FolderOpen size={13} className="text-[var(--accent)] mt-0.5 flex-shrink-0" />
         <div>
-          <p className="text-xs font-medium text-[var(--text)] mb-1">Jiva Directive</p>
+          <p className="text-xs font-medium text-[var(--text)] mb-1">Jivam Directive</p>
           <p className="text-[11px] text-[var(--text-muted)] leading-relaxed">
             System instructions live at{' '}
             <code className="text-[var(--accent)] bg-black/10 px-1 py-0.5 rounded text-[10px]">
               ~/.jiva/jiva-directive.md
             </code>
-            . Edit this file to customise Jiva's default behaviour.
+            . Edit this file to customise Jivam's default behaviour.
           </p>
         </div>
       </div>

@@ -19,8 +19,8 @@ export type ActiveTab = 'chat' | 'cowork' | 'code' | 'files'
 function SplashScreen({ status }: { status: string }) {
   const { lastError } = useJivaStore()
   const messages: Record<string, string> = {
-    stopped: 'Initializing Jiva...',
-    starting: 'Starting Jiva agent...',
+    stopped: 'Initializing Jivam...',
+    starting: 'Starting Jivam...',
     initializing: 'Loading models and tools...',
     error: 'Failed to start — check settings',
     running: 'Ready!',

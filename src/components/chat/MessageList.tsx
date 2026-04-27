@@ -34,7 +34,7 @@ export function MessageList() {
             </div>
             <h2 className="text-xl font-semibold gradient-text mb-2">Jivam</h2>
             <p className="text-[var(--text-muted)] text-sm max-w-xs">
-              {isStarting ? 'Starting Jiva agent...' : 'Connecting to Jiva...'}
+              {isStarting ? 'Starting Jivam...' : 'Connecting to Jivam...'}
             </p>
           </div>
         )}
@@ -45,7 +45,7 @@ export function MessageList() {
               style={{ background: 'linear-gradient(135deg, rgba(139,92,246,0.15), rgba(59,130,246,0.1))' }}>
               <img src={logoUrl} alt="Jivam" className="w-10 h-10 object-contain" />
             </div>
-            <h2 className="text-xl font-semibold gradient-text mb-2">How can Jiva help you?</h2>
+            <h2 className="text-xl font-semibold gradient-text mb-2">How can Jivam help you?</h2>
             <p className="text-[var(--text-muted)] text-sm max-w-sm">
               Ask me anything — I can search the web, analyze information, write code, and much more.
             </p>

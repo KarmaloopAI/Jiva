@@ -7,6 +7,7 @@ export interface ConversationItem {
   title: string
   messageCount: number
   lastModified: number
+  type: 'chat' | 'code'
 }
 
 interface ConversationStore {
@@ -40,12 +41,14 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
         summary: string
         messageCount: number
         lastModified: number
+        type: 'chat' | 'code'
       }>
       const conversations: ConversationItem[] = raw.map((c) => ({
         id: c.id,
         title: c.summary || 'Conversation',
         messageCount: c.messageCount,
         lastModified: c.lastModified,
+        type: c.type ?? 'chat',
       }))
       set({ conversations, isLoading: false })
     } catch (err) {
