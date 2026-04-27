@@ -62,6 +62,7 @@ jiva run "Add error handling to the database module" --code
 | `/load` | Resume a saved conversation |
 | `/list` | Browse all saved conversations |
 | `/reset` | Clear conversation history |
+| `/<skill-name>` | Load a skill (e.g. `/graphify`) |
 | `/exit` | Exit Jiva |
 
 ---
@@ -115,6 +116,21 @@ Code mode reduces latency by eliminating inter-agent overhead and running all fi
 | `grep` | Regex content search |
 | `bash` | Run shell commands |
 | `spawn_code_agent` | Delegate a sub-task to a child agent |
+
+**MCP servers in code mode:** Code mode does not load all MCP servers by default (too many tools bloat the context). You opt in explicitly:
+
+```bash
+# Per-invocation: pass server names via --mcp (comma-separated)
+jiva chat --code --mcp browser
+jiva chat --code --mcp browser,postgres
+
+# Persistent: set codeMode:true on any server in your config
+jiva config
+# or edit ~/.config/jiva/config.json:
+# "mcpServers": { "browser": { "command": "...", "codeMode": true } }
+```
+
+When MCP servers are active in code mode, their tool names (e.g. `browser__screenshot`) are listed in the startup banner and the agent's system prompt.
 
 **LSP integration:** After each file edit, Jiva notifies the appropriate language server and appends any compiler errors to the tool result. Language servers are auto-detected from your PATH. If none is installed for a given language, the tool continues silently.
 
@@ -178,7 +194,7 @@ Configuration is stored at `~/.config/jiva-nodejs/config.json` (Linux/macOS) or 
 }
 ```
 
-**Sarvam** — reasoning model with internal chain-of-thought; requires a generous token budget
+**Sarvam (sarvam-105b)** — fully supported reasoning model with internal chain-of-thought. Jiva handles Sarvam's XML-format tool calls transparently and recovers automatically when large file writes hit the token limit.
 ```json
 {
   "models": {
@@ -247,10 +263,12 @@ Code review assistant for a Django web application.
 PostgreSQL backend, GDPR-sensitive user data.
 ```
 
-Jiva searches for directive files automatically:
+Jiva searches for directive files automatically, in this order:
 1. Path given via `--directive`
 2. `jiva-directive.md` in the workspace root
-3. `.jiva/directive.md` in the workspace root
+3. `CLAUDE.md` in the workspace root
+4. `AGENTS.md` in the workspace root
+5. `.jiva/directive.md` in the workspace root
 
 ---
 
@@ -315,9 +333,22 @@ Full guide: [Cloud Run Deployment](docs/deployment/CLOUD_RUN_DEPLOYMENT.md)
 
 ---
 
-## Personas and Skills
+## Skills
 
-Jiva supports persona-based skill management, compatible with Claude's Skills/Plugins format:
+Skills are reusable workflow modules defined by a `SKILL.md` file. They work standalone (no persona needed) and in both chat and code mode.
+
+**Standalone skills** — drop a skill into `~/.claude/skills/<name>/SKILL.md` (Claude-compatible format) and Jiva discovers it automatically at startup. The skill's metadata appears in the agent's system prompt so it can be invoked by description.
+
+**Slash commands** — invoke any skill from the REPL:
+
+```
+/graphify
+> visualise the dependency graph for this repo
+```
+
+Jiva loads the skill's instructions and prepends them to your message before sending it to the agent.
+
+**Persona-based skills** — for teams, skills can be grouped into personas that bundle MCP servers, directives, and model behavior:
 
 ```bash
 jiva persona list
@@ -408,3 +439,4 @@ MIT
 - [Harmony Response Format](https://github.com/openai/harmony)
 - [Model Context Protocol](https://modelcontextprotocol.io/)
 - [Krutrim Cloud API](https://cloud.olakrutrim.com/)
+- [Sarvam AI API](https://www.sarvam.ai/)

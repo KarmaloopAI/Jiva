@@ -11,6 +11,8 @@ import { ConversationManager } from '../core/conversation-manager.js';
 import { formatToolResult } from '../models/harmony.js';
 import type { Message, Tool } from '../models/base.js';
 import { logger } from '../utils/logger.js';
+import type { PersonaManager } from '../personas/persona-manager.js';
+import type { MCPServerManager } from '../mcp/server-manager.js';
 import { LspManager } from './lsp/manager.js';
 import type { CodeToolContext, ICodeTool } from './tools/index.js';
 import {
@@ -85,6 +87,7 @@ export interface CodeAgentConfig {
   orchestrator: ModelOrchestrator;
   workspace: WorkspaceManager;
   conversationManager?: ConversationManager;
+  personaManager?: PersonaManager;
   maxIterations?: number;
   lspEnabled?: boolean;
   depth?: number;
@@ -97,6 +100,16 @@ export interface CodeAgentConfig {
    * Set to 0 to disable in-loop compaction.
    */
   compactionThreshold?: number;
+  /**
+   * MCP server manager to draw external tools from.
+   * Only servers listed in `mcpServerNames` are exposed to the agent.
+   */
+  mcpManager?: MCPServerManager;
+  /**
+   * Names of MCP servers whose tools should be available in code mode.
+   * Sourced from servers with `codeMode: true` in config and/or the --mcp CLI flag.
+   */
+  mcpServerNames?: string[];
 }
 
 const DEFAULT_MAX_ITERATIONS = 50;
@@ -108,7 +121,7 @@ const CODE_MODE_INDICATOR = '[CODE MODE]';
 const DEFAULT_COMPACTION_THRESHOLD = 90_000;
 
 /** System prompt for code mode — focused on precision and persistence (ported from opencode beast.txt) */
-const getSystemPrompt = (workspaceDir: string, directive?: string): string => {
+const _getSystemPromptBase = (workspaceDir: string, directive?: string, skillsBlock?: string, mcpToolNames?: string[]): string => {
   const base = `You are a precise, highly capable coding assistant operating in code mode.
 You have direct access to code tools — use them to explore, understand, and modify code.
 
@@ -124,6 +137,7 @@ PERSISTENCE AND COMPLETION:
 - Always tell the user what you are going to do before making a tool call with a single concise sentence.
 - If the user says "resume", "continue", or "try again", check the conversation history to find the last incomplete step and continue from there.
 - Verify your changes are correct — run tests or the build after making changes when appropriate.
+- If a tool call fails or returns an error, DO NOT STOP. Analyse the error, try a different approach or arguments, and keep going. Errors are expected — your job is to recover and complete the task.
 
 TOOLS AVAILABLE:
 - read_file: Read an existing file or list a directory. Only needed before editing an existing file.
@@ -142,11 +156,19 @@ CODING PRINCIPLES — READ CAREFULLY:
 5. After editing, check LSP errors in the tool result and fix them.
 6. Verify your changes work by running tests or the build when appropriate.
 7. Use bash only for shell commands (tests, builds, git) — NOT for reading files.
-8. LARGE FILES (100+ lines): write in stages — never try to generate a complete large file in one call.
-   - Stage 1: write_file with the skeleton/structure only (HTML tags, empty <style>, empty <script>)
-   - Stage 2: edit_file to add CSS content into the <style> block
-   - Stage 3: edit_file to add JS content into the <script> block
-   - Each individual call must be short enough to fit in one model response.
+8. LARGE FILES — ALWAYS WORK IN SMALL CHUNKS (applies to ALL file types: TS, Python, HTML, CSS, JSON…):
+   "Large" means any file or edit whose total new content exceeds ~80 lines.
+   BEFORE writing or editing: mentally estimate the line count. If > 80 lines, apply the rules below.
+   EDITING large files:
+   - Break every edit into chunks of 50–80 lines maximum.
+   - Never pass a new_string longer than ~80 lines to edit_file.
+   - Split large edits into multiple sequential edit_file calls, one section at a time.
+   CREATING new large files (skeleton-first approach — mandatory for any file > 80 lines):
+   - Stage 1: write_file with a skeleton/scaffold only — class/function stubs, empty bodies,
+     placeholder comments like "// TODO: implement X". Keep the skeleton under 60 lines.
+   - Stage 2+: edit_file to replace each placeholder/stub with the real implementation,
+     50–80 lines per call. Never implement more than one function or section per call.
+   - Reason: model output longer than ~100 lines gets truncated mid-JSON, silently corrupting the file.
 
 TOOL SELECTION RULES (follow exactly):
 - To CREATE a new file → write_file immediately (no reads needed first)
@@ -162,16 +184,63 @@ WHEN TO EXPLORE (only when actually needed):
 - You are debugging or tracing code through multiple files.
 - Do NOT explore before creating brand-new files — just write them directly.`;
 
-  if (directive) {
-    return `${base}\n\n${directive}`;
+  const parts = [base];
+  if (mcpToolNames && mcpToolNames.length > 0) {
+    parts.push(
+      `MCP TOOLS (external servers — call these like any other tool):\n` +
+      mcpToolNames.map((n) => `- ${n}`).join('\n') + '\n\n' +
+      `Use MCP tools when the built-in tools cannot satisfy the request (e.g. browser automation, database queries). ` +
+      `Prefer built-in tools for all file and shell operations.`,
+    );
   }
-  return base;
+  if (skillsBlock) parts.push(skillsBlock);
+  if (directive) parts.push(directive);
+  return parts.join('\n\n');
 };
+
+/**
+ * Wrap selected MCP server tools as ICodeTool adapters so CodeAgent can call them
+ * using the same dispatch path as built-in tools.
+ * Only servers listed in `serverNames` are exposed — keeps context lean.
+ */
+function buildMCPAdapters(mcpManager: MCPServerManager | undefined, serverNames: string[]): ICodeTool[] {
+  if (!mcpManager || serverNames.length === 0) return [];
+
+  const adapters: ICodeTool[] = [];
+  const client = mcpManager.getClient();
+
+  for (const serverName of serverNames) {
+    const serverTools = client.getServerTools(serverName);
+    for (const tool of serverTools) {
+      // tool.name is already prefixed as "serverName__toolName" by MCPClient
+      adapters.push({
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.parameters,
+        async execute(args: Record<string, unknown>): Promise<string> {
+          try {
+            const result = await client.executeTool(tool.name, args);
+            if (typeof result === 'string') return result;
+            if (result && typeof result === 'object' && 'text' in result) {
+              return (result as { text: string }).text;
+            }
+            return JSON.stringify(result, null, 2);
+          } catch (e) {
+            return `Error: ${e instanceof Error ? e.message : String(e)}`;
+          }
+        },
+      });
+    }
+  }
+
+  return adapters;
+}
 
 export class CodeAgent {
   private orchestrator: ModelOrchestrator;
   private workspace: WorkspaceManager;
   private conversationManager?: ConversationManager;
+  private personaManager?: PersonaManager;
   private maxIterations: number;
   private compactionThreshold: number;
   private lsp: LspManager;
@@ -179,12 +248,15 @@ export class CodeAgent {
   private maxDepth: number;
   private history: Message[] = [];
   private tools: ICodeTool[];
+  private _mcpManager?: MCPServerManager;
+  private _mcpServerNames: string[] = [];
   private _stopped = false;
 
   constructor(config: CodeAgentConfig) {
     this.orchestrator = config.orchestrator;
     this.workspace = config.workspace;
     this.conversationManager = config.conversationManager;
+    this.personaManager = config.personaManager;
     this.maxIterations = config.maxIterations ?? DEFAULT_MAX_ITERATIONS;
     this.compactionThreshold = config.compactionThreshold ?? DEFAULT_COMPACTION_THRESHOLD;
     this.depth = config.depth ?? 0;
@@ -195,6 +267,9 @@ export class CodeAgent {
       enabled: config.lspEnabled ?? true,
     });
 
+    this._mcpManager = config.mcpManager;
+    this._mcpServerNames = config.mcpServerNames ?? [];
+
     this.tools = [
       ReadFileTool,
       EditFileTool,
@@ -203,6 +278,7 @@ export class CodeAgent {
       GrepTool,
       BashTool,
       ...(this.depth < this.maxDepth ? [SpawnCodeAgentTool] : []),
+      ...buildMCPAdapters(config.mcpManager, config.mcpServerNames ?? []),
     ];
   }
 
@@ -335,7 +411,11 @@ ${directive ? `\n${directive}` : ''}`;
   async chat(userMessage: string, onChunk?: (text: string) => void): Promise<AgentResponse> {
     const toolsUsed: string[] = [];
     const directive = this.workspace.getDirectivePrompt();
-    const systemPrompt = getSystemPrompt(this.workspace.getWorkspaceDir(), directive || undefined);
+    const skillsBlock = this.personaManager?.getSystemPromptAddition() || undefined;
+    const mcpToolNames = this._mcpManager
+      ? this.tools.filter((t) => t.name.includes('__')).map((t) => t.name)
+      : undefined;
+    const systemPrompt = _getSystemPromptBase(this.workspace.getWorkspaceDir(), directive || undefined, skillsBlock, mcpToolNames);
 
     // Build message history: system + history + new user message
     const messages: Message[] = [
@@ -535,16 +615,16 @@ ${directive ? `\n${directive}` : ''}`;
             logger.warn(`[CodeAgent] ${isEditFile ? 'edit_file' : 'write_file'}${targetFile} content truncated (exceeded output token limit) — asking model to write in stages`);
             const correctionContent = isEditFile
               ? `Your edit_file call${targetFile} failed: new_string was too large and the response was cut off mid-JSON.\n\n` +
-                `MAXIMUM 20 LINES per edit_file call. Write one tiny chunk at a time:\n` +
-                `  - For JavaScript: add just ONE or TWO functions per call\n` +
-                `  - For HTML: add just one row of buttons per call\n\n` +
+                `MAXIMUM 20 LINES per edit_file call. Implement one function or section at a time:\n` +
+                `  - Split the change into smaller pieces and call edit_file once per piece.\n` +
+                `  - Never pass more than 20 lines as new_string.\n\n` +
                 `Call edit_file now with a new_string of at most 20 lines.`
               : `Your write_file call${targetFile} failed: the file content was too large and was cut off mid-JSON.\n\n` +
-                `Write the file in stages — NEVER put CSS or JavaScript in the initial write_file:\n` +
-                `  Stage 1: write_file — HTML skeleton ONLY (empty <style></style> and empty <script></script>) — MAX 20 lines\n` +
-                `  Stage 2: edit_file — add CSS (max 20 lines at a time)\n` +
-                `  Stage 3: edit_file — add JavaScript ONE function at a time\n\n` +
-                `Start with Stage 1 NOW: write_file with just the bare HTML skeleton (20 lines max).`;
+                `Use the skeleton-first approach — write the file in stages:\n` +
+                `  Stage 1: write_file — skeleton/scaffold ONLY (stubs, empty function bodies, TODO placeholders) — MAX 20 lines\n` +
+                `  Stage 2+: edit_file — implement one function or section at a time (max 20 lines per call)\n` +
+                `  Never implement more than one major section per call.\n\n` +
+                `Start with Stage 1 NOW: write_file with just the bare skeleton (20 lines max).`;
 
             messages.push({ role: 'user', content: correctionContent });
             consecutiveToolCallErrors = 0;
@@ -615,6 +695,12 @@ ${directive ? `\n${directive}` : ''}`;
         continue;
       }
 
+      // Wrap all post-API processing in a try/catch so an unexpected exception during tool
+      // execution or message construction doesn't crash the entire chat() call.  Instead,
+      // inject the error as a user message and let the model recover on the next iteration.
+      let _postApiError = false;
+      try {
+
       // Add assistant response to messages, preserving the full structure needed for the next turn.
       //
       // Three cases:
@@ -672,6 +758,39 @@ ${directive ? `\n${directive}` : ''}`;
 
       // No tool calls → model is done (or gave up)
       if (!response.toolCalls || response.toolCalls.length === 0) {
+        // Detect a truncated XML tool call: the model started a <tool_call> block but the
+        // response was cut off before </tool_call> (token limit hit mid-content).
+        // The XML parser in parseHarmonyResponse requires the closing tag, so nothing was
+        // extracted — but we can still detect the open tag and inject the staged-write correction.
+        const truncatedXml =
+          response.content &&
+          response.content.includes('<tool_call>') &&
+          !response.content.includes('</tool_call>');
+
+        if (truncatedXml) {
+          const isEditFile = response.content!.includes('edit_file') && !response.content!.includes('write_file');
+          const fpMatch = response.content!.match(/<arg_key>file_path<\/arg_key>\s*<arg_value>([^<]+)<\/arg_value>/);
+          const targetFile = fpMatch ? ` for \`${fpMatch[1]}\`` : '';
+          logger.warn(`[CodeAgent] Truncated XML tool call${targetFile} — injecting staged-writing correction`);
+
+          const correctionContent = isEditFile
+            ? `Your edit_file call${targetFile} failed: the response was cut off before the tool call completed.\n\n` +
+              `MAXIMUM 20 LINES per edit_file call. Implement one function or section at a time:\n` +
+              `  - Split the change into smaller pieces and call edit_file once per piece.\n` +
+              `  - Never pass more than 20 lines as new_string.\n\n` +
+              `Call edit_file now with a new_string of at most 20 lines.`
+            : `Your write_file call${targetFile} failed: the file content was too large and was cut off mid-response.\n\n` +
+              `Use the skeleton-first approach — write the file in stages:\n` +
+              `  Stage 1: write_file — skeleton/scaffold ONLY (stubs, empty function bodies, TODO placeholders) — MAX 20 lines\n` +
+              `  Stage 2+: edit_file — implement one function or section at a time (max 20 lines per call)\n` +
+              `  Never implement more than one major section per call.\n\n` +
+              `Start with Stage 1 NOW: write_file with just the bare skeleton (20 lines max).`;
+
+          messages.push({ role: 'user', content: correctionContent });
+          emptyResponseCount = 0;
+          continue;
+        }
+
         if (!response.content && emptyResponseCount < MAX_EMPTY_RESPONSES) {
           // Model returned empty content with no tool calls — it got stuck or confused.
           // Inject an escalating recovery nudge and let it try again.
@@ -807,6 +926,17 @@ ${directive ? `\n${directive}` : ''}`;
           break; // exit inner tool loop — model sees the nudge on the next outer iteration
         }
       }
+
+      } catch (unexpectedError) {
+        _postApiError = true;
+        const errMsg = unexpectedError instanceof Error ? unexpectedError.message : String(unexpectedError);
+        logger.error(`[CodeAgent] Unexpected error during tool processing: ${errMsg}`);
+        messages.push({
+          role: 'user',
+          content: `An unexpected internal error occurred: "${errMsg}". Please try a different approach to continue the task.`,
+        });
+      }
+      if (_postApiError) continue;
     }
 
     if (!finalContent) {
@@ -854,7 +984,7 @@ ${directive ? `\n${directive}` : ''}`;
       return messages;
     }
 
-    const systemMsg = messages[0]; // developer/system prompt
+    const systemMsg: Message = { role: 'developer' as any, content: systemPrompt };
     const recentMessages = messages.slice(-KEEP_RECENT);
     const middleMessages = messages.slice(1, -KEEP_RECENT);
 
@@ -961,7 +1091,31 @@ Keep the summary concise but complete. Focus on what would help continue the wor
     getServerStatus(): Array<{ name: string; connected: boolean; enabled: boolean; toolCount: number }>;
     getClient(): { getAllTools(): Array<{ name: string; description: string }> };
   } {
-    // CodeAgent uses in-process tools, not MCP. Return a stub that reflects built-in tools.
+    if (this._mcpManager) {
+      const allowedNames = this._mcpServerNames;
+      const fullManager = this._mcpManager;
+      const builtinTools = this.tools.filter((t) => !t.name.includes('__'));
+      return {
+        getServerStatus: () => [
+          // Always report the built-in code tools as the first entry
+          { name: 'code-tools', connected: true, enabled: true, toolCount: builtinTools.length },
+          // Then the opted-in MCP servers only
+          ...fullManager.getServerStatus().filter((s) => allowedNames.includes(s.name)),
+        ],
+        getClient: () => ({
+          getAllTools: () => [
+            // Built-in code tools
+            ...builtinTools.map((t) => ({ name: t.name, description: t.description })),
+            // Opted-in MCP tools only
+            ...fullManager.getClient().getAllTools().filter((t) =>
+              allowedNames.some((n) => t.name.startsWith(`${n}__`)),
+            ),
+          ],
+        }),
+      };
+    }
+
+    // Fallback stub when no MCP manager is configured — reflects built-in tools only.
     const tools = this.tools;
     return {
       getServerStatus: () => [{

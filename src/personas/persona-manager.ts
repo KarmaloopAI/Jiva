@@ -3,13 +3,15 @@
  * Handles discovery, activation, and integration with the agent system
  */
 
+import * as os from 'os';
+import * as path from 'path';
 import { Persona, Skill } from './types.js';
 import {
   discoverAllPersonas,
   findPersona,
   getDefaultPersonaPaths,
 } from './persona-loader.js';
-import { loadSkillContent } from './skill-loader.js';
+import { discoverSkills, loadSkillContent } from './skill-loader.js';
 import { logger } from '../utils/logger.js';
 import { ConfigManager } from '../core/config.js';
 import { StorageProvider } from '../storage/provider.js';
@@ -17,6 +19,7 @@ import { StorageProvider } from '../storage/provider.js';
 export class PersonaManager {
   private personas: Persona[] = [];
   private activePersona: Persona | null = null;
+  private standaloneSkills: Skill[] = [];
   private additionalSearchPaths: string[] = [];
   private configManager: ConfigManager;
   private storageProvider: StorageProvider | null = null; // Per-tenant storage for cloud mode
@@ -43,7 +46,7 @@ export class PersonaManager {
         `Initialized with ${this.personas.length} personas:`,
         this.personas.map((p) => p.manifest.name).join(', ')
       );
-      
+
       // Restore active persona from config only if not ephemeral
       if (!this.ephemeral) {
         const savedPersonaName = await this.getPersistedActivePersona();
@@ -58,6 +61,35 @@ export class PersonaManager {
         }
       }
     }
+
+    await this.initializeStandaloneSkills();
+  }
+
+  /** Path to Claude-compatible standalone skills directory (~/.claude/skills/). */
+  private getClaudeSkillsDir(): string {
+    return path.join(os.homedir(), '.claude', 'skills');
+  }
+
+  /**
+   * Discover skills installed in ~/.claude/skills/ (Claude-compatible standalone skills).
+   * Non-fatal: silently skips if the directory does not exist.
+   */
+  async initializeStandaloneSkills(): Promise<void> {
+    try {
+      const skillsDir = this.getClaudeSkillsDir();
+      this.standaloneSkills = await discoverSkills(skillsDir, '__standalone__');
+      if (this.standaloneSkills.length > 0) {
+        logger.info(`Found ${this.standaloneSkills.length} standalone skill(s) in ${skillsDir}`);
+      }
+    } catch {
+      // Directory likely doesn't exist — not an error
+      this.standaloneSkills = [];
+    }
+  }
+
+  /** All standalone skills discovered from ~/.claude/skills/. */
+  getStandaloneSkills(): Skill[] {
+    return this.standaloneSkills;
   }
 
   /**
@@ -173,10 +205,11 @@ export class PersonaManager {
 
   /**
    * Generate the <available_skills> XML block for agent system prompt
-   * This is L1 - just metadata for routing
+   * This is L1 - just metadata for routing. Includes both active persona skills and
+   * standalone skills from ~/.claude/skills/.
    */
   generateSkillsPromptBlock(): string {
-    const skills = this.getActiveSkills();
+    const skills = [...this.getActiveSkills(), ...this.standaloneSkills];
 
     if (skills.length === 0) {
       return '';
@@ -217,25 +250,27 @@ ${skillsXml}
   }
 
   /**
-   * Get full system prompt addition (persona + skills)
+   * Get full system prompt addition (persona + skills).
+   * Returns skills block even when no persona is active (standalone skills from ~/.claude/skills/).
    */
   getSystemPromptAddition(): string {
-    if (!this.activePersona) {
-      return '';
-    }
-
     const personaBlock = this.generatePersonaPromptBlock();
     const skillsBlock = this.generateSkillsPromptBlock();
 
-    if (!skillsBlock) {
-      return personaBlock;
+    if (!personaBlock && !skillsBlock) {
+      return '';
     }
 
-    return `${personaBlock}
+    const parts: string[] = [];
+    if (personaBlock) parts.push(personaBlock);
+    if (skillsBlock) {
+      parts.push(skillsBlock);
+      parts.push(
+        'When a user\'s request matches a skill description, read that skill\'s SKILL.md file using the view tool to get detailed instructions. Skills use progressive disclosure - only load what you need when you need it.'
+      );
+    }
 
-${skillsBlock}
-
-When a user's request matches a skill description, read that skill's SKILL.md file using the view tool to get detailed instructions. Skills use progressive disclosure - only load what you need when you need it.`;
+    return parts.join('\n\n');
   }
 
   /**

@@ -337,11 +337,29 @@ export class ModelClient implements IModel {
         };
       } else {
         // Standard OpenAI format response
-        const toolCalls = choice.message?.tool_calls;
+        const nativeToolCalls = choice.message?.tool_calls;
+
+        // Some models (e.g. sarvam-105b) emit tool calls as XML in message.content
+        // instead of using the native tool_calls field. Parse and extract them.
+        let contentText = messageContent;
+        let xmlToolCalls = undefined;
+        if (messageContent && messageContent.includes('<tool_call>')) {
+          const parsed = parseHarmonyResponse(messageContent);
+          if (parsed.toolCalls.length > 0) {
+            xmlToolCalls = parsed.toolCalls;
+            // Strip the parsed tool call XML from the visible content
+            contentText = messageContent.replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '').trim();
+          }
+        }
+
+        const allToolCalls = [
+          ...(nativeToolCalls && nativeToolCalls.length > 0 ? nativeToolCalls : []),
+          ...(xmlToolCalls ?? []),
+        ];
 
         return {
-          content: messageContent,
-          toolCalls: toolCalls && toolCalls.length > 0 ? toolCalls : undefined,
+          content: contentText,
+          toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
           usage: data.usage ? {
             promptTokens: data.usage.prompt_tokens || 0,
             completionTokens: data.usage.completion_tokens || 0,

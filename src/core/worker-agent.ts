@@ -827,6 +827,41 @@ Tools used: ${spawnResult.toolsUsed.join(', ')}`;
       }
       if (_postApiError) continue;
 
+      // Detect truncated XML tool call: model started <tool_call> but response was cut off
+      // before </tool_call> (token limit hit mid-content). Same fix as CodeAgent.
+      const truncatedXml =
+        response.content &&
+        response.content.includes('<tool_call>') &&
+        !response.content.includes('</tool_call>');
+
+      if (truncatedXml) {
+        const contentStr = response.content!;
+        const isEditFile =
+          (contentStr.includes('edit_file') || contentStr.includes('filesystem__edit_file')) &&
+          !contentStr.includes('write_file') &&
+          !contentStr.includes('filesystem__write_file');
+        const fpMatch = contentStr.match(/<arg_key>file_path<\/arg_key>\s*<arg_value>([^<]+)<\/arg_value>/);
+        const targetFile = fpMatch ? ` for \`${fpMatch[1]}\`` : '';
+        logger.warn(`  [Worker] Truncated XML tool call${targetFile} — injecting staged-writing correction`);
+
+        const correctionContent = isEditFile
+          ? `Your edit_file call${targetFile} failed: the response was cut off before the tool call completed.\n\n` +
+            `MAXIMUM 20 LINES per edit_file call. Implement one function or section at a time:\n` +
+            `  - Split the change into smaller pieces and call edit_file once per piece.\n` +
+            `  - Never pass more than 20 lines as new_string.\n\n` +
+            `Call edit_file now with a new_string of at most 20 lines.`
+          : `Your write_file call${targetFile} failed: the file content was too large and was cut off mid-response.\n\n` +
+            `Use the skeleton-first approach — write the file in stages:\n` +
+            `  Stage 1: write_file — skeleton/scaffold ONLY (stubs, empty function bodies, TODO placeholders) — MAX 20 lines\n` +
+            `  Stage 2+: edit_file — implement one function or section at a time (max 20 lines per call)\n` +
+            `  Never implement more than one major section per call.\n\n` +
+            `Start with Stage 1 NOW: write_file with just the bare skeleton (20 lines max).`;
+
+        conversationHistory.push({ role: 'user', content: correctionContent });
+        emptyResponseCount = 0;
+        continue;
+      }
+
       // No tool calls — check for empty response before treating as completion
       if (!response.content && emptyResponseCount < MAX_EMPTY_RESPONSES) {
         emptyResponseCount++;

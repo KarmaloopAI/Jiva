@@ -176,6 +176,8 @@ export class LocalStorageProvider extends StorageProvider {
     // Try multiple locations (matching existing workspace.ts logic)
     const candidates = [
       path.join(workspacePath, 'jiva-directive.md'),
+      path.join(workspacePath, 'CLAUDE.md'),
+      path.join(workspacePath, 'AGENTS.md'),
       path.join(workspacePath, 'directive.md'),
       path.join(workspacePath, '.jiva', 'directive.md'),
     ];
