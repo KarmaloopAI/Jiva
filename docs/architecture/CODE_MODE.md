@@ -32,6 +32,23 @@ jiva chat --code --plan
 }
 ```
 
+**MCP servers in code mode**
+
+By default, code mode exposes no MCP servers — too many tools bloat the context for no benefit. Opt in explicitly via the CLI flag or a per-server config flag:
+
+```bash
+# Per-invocation: comma-separated server names
+jiva chat --code --mcp browser
+jiva chat --code --mcp browser,postgres
+
+# Persistent: mark a server with codeMode:true in config
+# "mcpServers": { "browser": { "command": "...", "codeMode": true } }
+```
+
+Both mechanisms compose: servers from `codeMode:true` are always included; `--mcp` adds extras on top for that invocation.
+
+Active MCP server names appear in the startup banner and in the agent's system prompt so the model knows what tools are available.
+
 **Cloud / HTTP deployment**
 
 ```bash
@@ -205,7 +222,7 @@ interface CodeToolContext {
 }
 ```
 
-Tools run **in-process** — no MCP subprocess, no JSON serialization overhead, direct Node.js `fs` access.
+Built-in tools run **in-process** — no subprocess, no JSON serialization overhead, direct Node.js `fs` access. Opt-in MCP tools run through their respective server subprocesses (same as general mode) and are dispatched via the shared `MCPServerManager`.
 
 ### Tool Reference
 
@@ -340,8 +357,8 @@ The `IAgent` interface (`src/core/agent-interface.ts`) is satisfied by both `Dua
 
 ```
 IAgent
-├── DualAgent   (general mode — Manager/Worker/Client + MCP)
-└── CodeAgent   (code mode   — single loop + in-process tools + LSP)
+├── DualAgent   (general mode — Manager/Worker/Client + all MCP servers)
+└── CodeAgent   (code mode   — single loop + in-process tools + LSP + opt-in MCP)
 ```
 
 Switching between modes requires only a flag or environment variable; no application-layer code changes are needed.

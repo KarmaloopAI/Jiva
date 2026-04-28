@@ -12,6 +12,8 @@ import { orchestrationLogger } from '../../utils/orchestration-logger.js';
 import { formatForCLI } from '../../utils/markdown.js';
 import type { IAgent } from '../../core/agent-interface.js';
 import type { EvaluatorHarness } from '../../evaluator/harness.js';
+import type { PersonaManager } from '../../personas/persona-manager.js';
+import { loadSkillContent } from '../../personas/skill-loader.js';
 
 export type { IAgent };
 
@@ -27,6 +29,11 @@ export interface REPLOptions {
    * calling agent.chat() directly. The harness runs the main agent then the evaluator.
    */
   harness?: EvaluatorHarness;
+  /**
+   * When provided, slash commands matching a skill name (e.g. /graphify) will load
+   * that skill's SKILL.md and prepend its body to the next user message.
+   */
+  personaManager?: PersonaManager;
 }
 
 function exitRepl(rl: readline.Interface): void {
@@ -42,7 +49,7 @@ function exitRepl(rl: readline.Interface): void {
 }
 
 export async function startREPL(options: REPLOptions): Promise<void> {
-  const { agent, planMode = false, harness } = options;
+  const { agent, planMode = false, harness, personaManager } = options;
 
   console.log(chalk.bold.cyan('\n∞ Jiva Agent - Interactive Mode\n'));
   console.log(chalk.gray('Type your message and press Enter. Type /help for commands or /exit to quit.\n'));
@@ -118,9 +125,20 @@ export async function startREPL(options: REPLOptions): Promise<void> {
     });
   }
 
+  // Skill body to prepend to the next user message after a /skill-name command.
+  let pendingSkillBody: string | null = null;
+  // When user types `/skill <request>` inline, bypass the next askForInput and use this instead.
+  let pendingInlineMessage: string | null = null;
+
   // REPL loop
   while (true) {
-    const message = await askForInput();
+    let message: string | null;
+    if (pendingInlineMessage !== null) {
+      message = pendingInlineMessage;
+      pendingInlineMessage = null;
+    } else {
+      message = await askForInput();
+    }
 
     // stdin closed (EOF / pipe ended) — exit cleanly
     if (message === null) break;
@@ -182,6 +200,28 @@ export async function startREPL(options: REPLOptions): Promise<void> {
         continue;
       }
 
+      // Try to match a skill name (e.g. /graphify or /graphify <inline-request>)
+      if (personaManager) {
+        const [skillName, ...inlineArgTokens] = command.split(/\s+/);
+        const allSkills = [
+          ...personaManager.getActiveSkills(),
+          ...personaManager.getStandaloneSkills(),
+        ];
+        const skill = allSkills.find((s) => s.metadata.name === skillName);
+        if (skill) {
+          await loadSkillContent(skill);
+          pendingSkillBody = skill.content ?? null;
+          const inlineRequest = inlineArgTokens.join(' ').trim();
+          if (inlineRequest) {
+            pendingInlineMessage = inlineRequest;
+            console.log(chalk.cyan(`\n✓ Skill "${skill.metadata.name}" loaded\n`));
+          } else {
+            console.log(chalk.cyan(`\n✓ Skill "${skill.metadata.name}" loaded — enter your request:\n`));
+          }
+          continue;
+        }
+      }
+
       // Unknown command
       console.log(chalk.red(`\n✗ Unknown command: /${command}`));
       console.log(chalk.gray('Type /help for available commands\n'));
@@ -192,8 +232,14 @@ export async function startREPL(options: REPLOptions): Promise<void> {
       continue;
     }
 
-    // ── Plan-then-approve flow (code mode + --plan flag) ───────────────────
+    // ── Skill body injection — prepend loaded skill instructions ──────────
     let messageToSend = trimmedMessage;
+    if (pendingSkillBody) {
+      messageToSend = `${pendingSkillBody}\n\n---\n\n${trimmedMessage}`;
+      pendingSkillBody = null;
+    }
+
+    // ── Plan-then-approve flow (code mode + --plan flag) ───────────────────
 
     if (planMode && typeof (agent as any).plan === 'function') {
       const planSpinner = ora({ text: 'Exploring codebase and generating plan...', discardStdin: false }).start();
@@ -355,6 +401,9 @@ function showHelp() {
   console.log('  /save          - Save current conversation');
   console.log('  /load          - Load a saved conversation');
   console.log('  /list          - List all saved conversations');
+  console.log('');
+  console.log(chalk.bold('Skills (from ~/.claude/skills/ or active persona):'));
+  console.log('  /<skill-name>  - Load a skill and enter your request (e.g. /graphify)');
   console.log('');
   console.log(chalk.bold('Harness Modes (CLI flag):'));
   console.log('  --harness evaluator  Pair a supervisor agent that validates completion');

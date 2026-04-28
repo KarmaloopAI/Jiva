@@ -28,3 +28,7 @@ config.json
 
 # Local development files
 oc-dev/
+estater/
+graphify-out/
+CLAUDE.md
+.claude

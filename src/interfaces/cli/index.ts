@@ -126,6 +126,7 @@ program
   .option('--max-iterations <number>', 'Maximum agent iterations', parseInt)
   .option('--code', 'Enable code mode (single-loop agent + LSP integration)')
   .option('--no-lsp', 'Disable LSP in code mode')
+  .option('--mcp <names>', 'Comma-separated MCP server names to include in code mode (e.g. --mcp browser,postgres). Servers with codeMode:true in config are included automatically.')
   .option('--plan', 'Generate an implementation plan for approval before executing (code mode only)')
   .option(
     '--harness <type>',
@@ -339,14 +340,35 @@ program
         const { CodeAgent } = await import('../../code/agent.js');
         const lspEnabled = options.lsp !== false && (codeModeConfig?.lsp?.enabled ?? true);
         const maxIter = options.maxIterations || codeModeConfig?.maxIterations || 50;
+
+        // Resolve which MCP servers to expose in code mode:
+        // 1. Servers with codeMode:true in config (persistent opt-in)
+        // 2. Names passed via --mcp flag (per-invocation override)
+        const cliMcpNames: string[] = options.mcp
+          ? options.mcp.split(',').map((n: string) => n.trim()).filter(Boolean)
+          : [];
+        const configMcpNames = Object.entries(mcpServers as Record<string, any>)
+          .filter(([, cfg]) => cfg.codeMode === true)
+          .map(([name]) => name);
+        const codeMcpServerNames = [...new Set([...configMcpNames, ...cliMcpNames])];
+
+        if (codeMcpServerNames.length > 0) {
+          logger.info(`Code mode MCP servers: ${codeMcpServerNames.join(', ')}`);
+        }
+
         const codeAgent = new CodeAgent({
           orchestrator,
           workspace,
           conversationManager,
+          personaManager,
           maxIterations: maxIter,
           lspEnabled,
+          mcpManager: codeMcpServerNames.length > 0 ? mcpManager : undefined,
+          mcpServerNames: codeMcpServerNames,
         });
-        console.log(chalk.cyan(`\n${CodeAgent.indicator} Code mode active (LSP: ${lspEnabled ? 'on' : 'off'})\n`));
+
+        const mcpNote = codeMcpServerNames.length > 0 ? ` | MCP: ${codeMcpServerNames.join(', ')}` : '';
+        console.log(chalk.cyan(`\n${CodeAgent.indicator} Code mode active (LSP: ${lspEnabled ? 'on' : 'off'}${mcpNote})\n`));
         agent = codeAgent;
       } else {
         // Create agent (dual-agent architecture)
@@ -387,7 +409,7 @@ program
         console.log(chalk.magenta('⚡ Evaluator harness active — a supervisor agent will validate task completion after each response.\n'));
       }
 
-      await startREPL({ agent, planMode, harness });
+      await startREPL({ agent, planMode, harness, personaManager });
 
       // Cleanup
       if (harness) {
@@ -620,6 +642,7 @@ program
   .option('--max-iterations <number>', 'Maximum agent iterations', parseInt)
   .option('--code', 'Enable code mode (single-loop agent + LSP integration)')
   .option('--no-lsp', 'Disable LSP in code mode')
+  .option('--mcp <names>', 'Comma-separated MCP server names to include in code mode (e.g. --mcp browser,postgres). Servers with codeMode:true in config are included automatically.')
   .option('--plan', 'Generate an implementation plan for approval before executing (code mode only)')
   .option('--max-tool-calls <number>', 'Maximum tool calls per subtask', parseInt)
   .action(async (prompt, options) => {
@@ -826,14 +849,28 @@ program
         const { CodeAgent } = await import('../../code/agent.js');
         const lspEnabledRun = options.lsp !== false && (codeModeConfigRun?.lsp?.enabled ?? true);
         const maxIterRun = options.maxIterations || codeModeConfigRun?.maxIterations || 50;
+
+        const cliMcpNamesRun: string[] = options.mcp
+          ? options.mcp.split(',').map((n: string) => n.trim()).filter(Boolean)
+          : [];
+        const configMcpNamesRun = Object.entries(mcpServers as Record<string, any>)
+          .filter(([, cfg]) => cfg.codeMode === true)
+          .map(([name]) => name);
+        const codeMcpServerNamesRun = [...new Set([...configMcpNamesRun, ...cliMcpNamesRun])];
+
         agent = new CodeAgent({
           orchestrator,
           workspace,
           conversationManager,
+          personaManager,
           maxIterations: maxIterRun,
           lspEnabled: lspEnabledRun,
+          mcpManager: codeMcpServerNamesRun.length > 0 ? mcpManager : undefined,
+          mcpServerNames: codeMcpServerNamesRun,
         });
-        console.log(chalk.cyan(`\n[CODE MODE] Code mode active (LSP: ${lspEnabledRun ? 'on' : 'off'})\n`));
+
+        const mcpNoteRun = codeMcpServerNamesRun.length > 0 ? ` | MCP: ${codeMcpServerNamesRun.join(', ')}` : '';
+        console.log(chalk.cyan(`\n[CODE MODE] Code mode active (LSP: ${lspEnabledRun ? 'on' : 'off'}${mcpNoteRun})\n`));
       } else {
         // Create agent (dual-agent architecture)
         agent = new DualAgent({

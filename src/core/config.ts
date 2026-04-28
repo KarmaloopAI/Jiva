@@ -10,12 +10,14 @@ const MCPServerConfigSchema = z.object({
   command: z.string().optional(),
   args: z.array(z.string()).optional(),
   env: z.record(z.string()).optional(),
-  
+
   // HTTP/SSE transport (URL-based)
   url: z.string().url().optional(),
   headers: z.record(z.string()).optional(),
-  
+
   enabled: z.boolean().default(true),
+  /** When true, this server is automatically included in code mode without needing --mcp */
+  codeMode: z.boolean().optional(),
 }).refine(
   (data) => (data.command !== undefined) || (data.url !== undefined),
   { message: "Must specify either 'command' (for stdio) or 'url' (for HTTP/SSE)" }

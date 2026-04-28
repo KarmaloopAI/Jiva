@@ -112,6 +112,8 @@ export class WorkspaceManager {
     const possiblePaths = [
       this.directivePath,
       join(this.workspaceDir, 'jiva-directive.md'),
+      join(this.workspaceDir, 'CLAUDE.md'),
+      join(this.workspaceDir, 'AGENTS.md'),
       join(this.workspaceDir, '.jiva', 'directive.md'),
     ].filter(Boolean) as string[];
 
