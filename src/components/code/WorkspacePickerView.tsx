@@ -1,10 +1,18 @@
 import { useState, useEffect, useCallback } from 'react'
-import { FolderInput, GitBranch, Terminal, Loader2, AlertCircle, CheckCircle2, FolderOpen } from 'lucide-react'
-import { motion } from 'framer-motion'
+import { FolderInput, GitBranch, Terminal, Loader2, AlertCircle, CheckCircle2, FolderOpen, Server, ChevronDown, ChevronRight, Info } from 'lucide-react'
+import { motion, AnimatePresence } from 'framer-motion'
 import { useCodeStore } from '../../store/code.store'
 import { useGitStore } from '../../store/git.store'
 
 type GitStatus = 'checking' | 'repo' | 'not-repo' | 'initing' | 'inited' | 'error'
+
+interface McpServer {
+  name: string
+  enabled: boolean
+  codeMode: boolean
+  command: string
+  url?: string
+}
 
 export function WorkspacePickerView() {
   const [dir, setDir] = useState<string>('')
@@ -13,15 +21,27 @@ export function WorkspacePickerView() {
   const [isStarting, setIsStarting] = useState(false)
   const [startError, setStartError] = useState<string | null>(null)
 
+  const [availableMcp, setAvailableMcp] = useState<McpServer[]>([])
+  const [selectedMcp, setSelectedMcp] = useState<Set<string>>(new Set())
+  const [mcpExpanded, setMcpExpanded] = useState(false)
+
   const { startSession, initLogListener } = useCodeStore()
   const { setWorkspaceDir, initRepo } = useGitStore()
 
-  // Pre-populate with configured workspace dir
+  // Pre-populate workspace dir and load available MCP servers
   useEffect(() => {
     initLogListener()
     window.electron.workspace.getDir().then((d) => {
       if (d) setDir(d)
     })
+    window.electron.code.listMcpForCode().then((servers) => {
+      const enabled = servers.filter((s) => s.enabled)
+      setAvailableMcp(enabled)
+      // Pre-select servers marked codeMode: true
+      setSelectedMcp(new Set(enabled.filter((s) => s.codeMode).map((s) => s.name)))
+      // Auto-expand if any servers are available
+      if (enabled.length > 0) setMcpExpanded(true)
+    }).catch(() => {})
   }, [initLogListener])
 
   // Re-check git status whenever the dir changes
@@ -73,12 +93,21 @@ export function WorkspacePickerView() {
     // Set workspace dir in git store for future git panel ops
     setWorkspaceDir(trimmedDir)
 
-    const result = await startSession(trimmedDir)
+    const result = await startSession(trimmedDir, Array.from(selectedMcp))
     if (!result.success) {
       setIsStarting(false)
       setStartError(result.error ?? 'Failed to start session')
     }
     // On success, CodePage re-renders with isSessionStarted=true automatically
+  }
+
+  function toggleMcp(name: string) {
+    setSelectedMcp((prev) => {
+      const next = new Set(prev)
+      if (next.has(name)) next.delete(name)
+      else next.add(name)
+      return next
+    })
   }
 
   const canStart = dir.trim().length > 0 &&
@@ -214,6 +243,126 @@ export function WorkspacePickerView() {
             </div>
           )}
         </div>
+
+        {/* MCP Server picker */}
+        {availableMcp.length > 0 && (
+          <div
+            className="rounded-2xl overflow-hidden mb-4"
+            style={{
+              background: 'var(--bg-secondary)',
+              border: '1px solid var(--card-border)',
+            }}
+          >
+            {/* Header — always visible, click to expand */}
+            <button
+              type="button"
+              onClick={() => setMcpExpanded((v) => !v)}
+              className="w-full flex items-center justify-between px-4 py-3 text-left transition-colors hover:bg-black/5"
+            >
+              <div className="flex items-center gap-2">
+                <Server size={13} className="text-[var(--accent-blue)] flex-shrink-0" />
+                <span className="text-xs font-semibold text-[var(--text)]">MCP Servers</span>
+                {selectedMcp.size > 0 && (
+                  <span
+                    className="text-[10px] font-medium px-1.5 py-0.5 rounded-full"
+                    style={{ background: 'rgba(59,130,246,0.15)', color: 'var(--accent-blue)' }}
+                  >
+                    {selectedMcp.size} active
+                  </span>
+                )}
+              </div>
+              {mcpExpanded
+                ? <ChevronDown size={13} className="text-[var(--text-muted)]" />
+                : <ChevronRight size={13} className="text-[var(--text-muted)]" />
+              }
+            </button>
+
+            <AnimatePresence initial={false}>
+              {mcpExpanded && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.18, ease: 'easeInOut' }}
+                  className="overflow-hidden"
+                >
+                  <div className="px-4 pb-4 space-y-3">
+                    {/* Warning */}
+                    <div
+                      className="flex items-start gap-2 rounded-lg px-3 py-2"
+                      style={{
+                        background: 'rgba(245,158,11,0.08)',
+                        border: '1px solid rgba(245,158,11,0.2)',
+                      }}
+                    >
+                      <Info size={12} className="text-amber-400 mt-0.5 flex-shrink-0" />
+                      <p className="text-[11px] text-amber-400 leading-relaxed">
+                        Keep active servers to a minimum. Each one adds tools to the model's context window, which can degrade performance on long sessions.
+                      </p>
+                    </div>
+
+                    {/* Server list */}
+                    <div className="space-y-1.5">
+                      {availableMcp.map((server) => {
+                        const isOn = selectedMcp.has(server.name)
+                        return (
+                          <button
+                            key={server.name}
+                            type="button"
+                            onClick={() => toggleMcp(server.name)}
+                            className="w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-all text-left"
+                            style={{
+                              background: isOn
+                                ? 'rgba(59,130,246,0.08)'
+                                : 'rgba(0,0,0,0.03)',
+                              border: isOn
+                                ? '1px solid rgba(59,130,246,0.25)'
+                                : '1px solid transparent',
+                            }}
+                          >
+                            {/* Toggle pill */}
+                            <div
+                              className="flex-shrink-0 w-7 h-4 rounded-full transition-colors relative"
+                              style={{
+                                background: isOn
+                                  ? 'var(--accent-blue)'
+                                  : 'var(--card-border)',
+                              }}
+                            >
+                              <span
+                                className="absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all"
+                                style={{ left: isOn ? '14px' : '2px' }}
+                              />
+                            </div>
+
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-xs font-medium text-[var(--text)] truncate">
+                                  {server.name}
+                                </span>
+                                {server.codeMode && (
+                                  <span
+                                    className="text-[9px] font-semibold px-1 py-0.5 rounded uppercase tracking-wide flex-shrink-0"
+                                    style={{ background: 'rgba(139,92,246,0.12)', color: 'var(--accent)' }}
+                                  >
+                                    default
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-[10px] text-[var(--text-subtle)] truncate">
+                                {server.url ?? server.command}
+                              </p>
+                            </div>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        )}
 
         {/* Start error */}
         {startError && (

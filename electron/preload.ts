@@ -58,7 +58,11 @@ contextBridge.exposeInMainWorld('electron', {
     sendMessage: (prompt: string) => ipcRenderer.invoke('code:send-message', prompt),
     stopMessage: () => ipcRenderer.invoke('code:stop-message'),
     resetSession: () => ipcRenderer.invoke('code:reset-session'),
-    init: (dir: string) => ipcRenderer.invoke('code:init', dir),
+    init: (dir: string, mcpServers?: string[]) => ipcRenderer.invoke('code:init', dir, mcpServers),
+    listMcpForCode: () => ipcRenderer.invoke('code:list-mcp-for-code'),
+    getConversationId: () => ipcRenderer.invoke('code:get-conversation-id'),
+    getMcpSelection: (convId: string) => ipcRenderer.invoke('code:get-mcp-selection', convId),
+    setMcpSelection: (convId: string, servers: string[]) => ipcRenderer.invoke('code:set-mcp-selection', convId, servers),
     onCodeLog: (cb: (event: unknown) => void) => {
       ipcRenderer.on('jiva:code-log', (_event, e) => cb(e))
     },

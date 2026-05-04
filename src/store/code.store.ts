@@ -65,7 +65,8 @@ interface CodeStore {
   // Session management
   isSessionStarted: boolean
   codeWorkspaceDir: string | null
-  startSession: (dir: string) => Promise<{ success: boolean; error?: string }>
+  activeMcpServers: string[]
+  startSession: (dir: string, mcpServers?: string[]) => Promise<{ success: boolean; error?: string }>
   loadConversation: (id: string) => Promise<void>
 
   sendMessage: (content: string) => Promise<void>
@@ -84,6 +85,7 @@ export const useCodeStore = create<CodeStore>((set, get) => ({
 
   isSessionStarted: false,
   codeWorkspaceDir: null,
+  activeMcpServers: [],
 
   initLogListener: () => {
     if (logListenerRegistered || !window.electron?.code?.onCodeLog) return
@@ -109,10 +111,10 @@ export const useCodeStore = create<CodeStore>((set, get) => ({
     })
   },
 
-  startSession: async (dir: string) => {
-    const result = await window.electron.code.init(dir)
+  startSession: async (dir: string, mcpServers: string[] = []) => {
+    const result = await window.electron.code.init(dir, mcpServers.length > 0 ? mcpServers : undefined)
     if (result.success) {
-      set({ isSessionStarted: true, codeWorkspaceDir: dir })
+      set({ isSessionStarted: true, codeWorkspaceDir: dir, activeMcpServers: mcpServers })
     }
     return result
   },
@@ -155,6 +157,18 @@ export const useCodeStore = create<CodeStore>((set, get) => ({
         currentAction: null,
         pendingEvents: [],
       }))
+
+      // Persist MCP selection to sidecar after the first successful message
+      // (the conversation file exists now and has a stable ID)
+      const { activeMcpServers, messages: currentMessages } = get()
+      if (activeMcpServers.length > 0 && currentMessages.length <= 2) {
+        try {
+          const convId = await window.electron.code.getConversationId()
+          if (convId) {
+            await window.electron.code.setMcpSelection(convId, activeMcpServers)
+          }
+        } catch { /* non-critical */ }
+      }
     } catch (err) {
       const agentMsg: CodeMessage = {
         id: `agent-${Date.now()}`,
@@ -175,10 +189,13 @@ export const useCodeStore = create<CodeStore>((set, get) => ({
   },
 
   loadConversation: async (id: string) => {
-    const raw = await window.electron.conversations.load(id) as {
-      metadata?: { workspace?: string }
-      messages?: Array<{ role: string; content: string | Array<{ type: string; text?: string }> }>
-    } | null
+    const [raw, mcpServers] = await Promise.all([
+      window.electron.conversations.load(id) as Promise<{
+        metadata?: { workspace?: string }
+        messages?: Array<{ role: string; content: string | Array<{ type: string; text?: string }> }>
+      } | null>,
+      window.electron.code.getMcpSelection(id),
+    ])
 
     if (!raw) return
 
@@ -198,10 +215,10 @@ export const useCodeStore = create<CodeStore>((set, get) => ({
       }
     })
 
-    // Reset agent and init at the stored workspace so the user can continue
+    // Reset agent and re-init at the stored workspace with the original MCPs
     try { await window.electron.code.resetSession() } catch { /* ignore */ }
     if (workspace) {
-      await window.electron.code.init(workspace)
+      await window.electron.code.init(workspace, mcpServers.length > 0 ? mcpServers : undefined)
     }
 
     set({
@@ -212,6 +229,7 @@ export const useCodeStore = create<CodeStore>((set, get) => ({
       pendingEvents: [],
       isSessionStarted: true,
       codeWorkspaceDir: workspace,
+      activeMcpServers: mcpServers,
     })
   },
 
@@ -228,6 +246,7 @@ export const useCodeStore = create<CodeStore>((set, get) => ({
       pendingEvents: [],
       isSessionStarted: false,
       codeWorkspaceDir: null,
+      activeMcpServers: [],
     })
   },
 }))

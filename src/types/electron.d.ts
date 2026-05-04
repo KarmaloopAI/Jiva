@@ -100,7 +100,11 @@ interface ElectronAPI {
     sendMessage: (prompt: string) => Promise<{ success: boolean; content?: string; toolsUsed?: string[]; iterations?: number; error?: string }>
     stopMessage: () => Promise<{ success: boolean }>
     resetSession: () => Promise<{ success: boolean; error?: string }>
-    init: (dir: string) => Promise<{ success: boolean; error?: string }>
+    init: (dir: string, mcpServers?: string[]) => Promise<{ success: boolean; error?: string }>
+    listMcpForCode: () => Promise<Array<{ name: string; enabled: boolean; codeMode: boolean; command: string; url?: string }>>
+    getConversationId: () => Promise<string | null>
+    getMcpSelection: (convId: string) => Promise<string[]>
+    setMcpSelection: (convId: string, servers: string[]) => Promise<{ success: boolean; error?: string }>
     onCodeLog: (cb: (event: CodeLogEvent) => void) => void
   }
   git: {

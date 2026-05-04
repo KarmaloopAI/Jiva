@@ -57,13 +57,19 @@ export class CodeRunner extends EventEmitter {
   private orchestrator: unknown = null
   private workspace: unknown = null
   private conversationManager: unknown = null
+  private mcpManager: unknown = null
   private ready = false
 
   isReady(): boolean {
     return this.ready
   }
 
-  async initialize(workspaceDir: string): Promise<void> {
+  getConversationId(): string | null {
+    if (!this.conversationManager) return null
+    return (this.conversationManager as Record<string, unknown>).currentConversationId as string ?? null
+  }
+
+  async initialize(workspaceDir: string, mcpServerNames?: string[]): Promise<void> {
     const entry = resolveJivaCoreEntryPath()
     console.log(`[CodeRunner] Loading jiva-core from: ${entry}`)
 
@@ -75,6 +81,7 @@ export class CodeRunner extends EventEmitter {
       WorkspaceManager,
       ConversationManager,
       CodeAgent,
+      MCPServerManager,
       createKrutrimModel,
       createLocalProvider,
     } = jiva as Record<string, unknown>
@@ -113,7 +120,23 @@ export class CodeRunner extends EventEmitter {
     const ConvManagerClass = ConversationManager as new (provider: unknown, orchestrator?: unknown) => unknown
     this.conversationManager = new ConvManagerClass(storageProvider, this.orchestrator)
 
-    // 5. Create CodeAgent
+    // 5. Optionally create MCPServerManager for requested code-mode servers
+    this.mcpManager = null
+    const activeMcpNames = mcpServerNames && mcpServerNames.length > 0 ? mcpServerNames : null
+    if (activeMcpNames && MCPServerManager) {
+      const MgrClass = MCPServerManager as new () => { initialize(servers: Record<string, unknown>): Promise<void> }
+      const mgr = new MgrClass()
+      const allServers = (readConfig() as Record<string, unknown>)?.mcpServers as Record<string, unknown> ?? {}
+      const selectedServers: Record<string, unknown> = {}
+      for (const name of activeMcpNames) {
+        if (allServers[name]) selectedServers[name] = allServers[name]
+      }
+      await mgr.initialize(selectedServers)
+      this.mcpManager = mgr
+      console.log(`[CodeRunner] MCP servers loaded: ${activeMcpNames.join(', ')}`)
+    }
+
+    // 6. Create CodeAgent
     const AgentClass = CodeAgent as new (config: unknown) => {
       chat(prompt: string, onChunk?: (text: string) => void): Promise<{ content: string; toolsUsed: string[]; iterations: number }>
       cleanup(): Promise<void>
@@ -125,6 +148,7 @@ export class CodeRunner extends EventEmitter {
       workspace: this.workspace,
       conversationManager: this.conversationManager,
       maxIterations: 50,
+      ...(this.mcpManager && activeMcpNames ? { mcpManager: this.mcpManager, mcpServerNames: activeMcpNames } : {}),
     })
 
     this.ready = true
@@ -193,10 +217,16 @@ export class CodeRunner extends EventEmitter {
         console.warn('[CodeRunner] Cleanup error:', err)
       }
     }
+    if (this.mcpManager) {
+      try {
+        await (this.mcpManager as { cleanup(): Promise<void> }).cleanup()
+      } catch {}
+    }
     this.agent = null
     this.orchestrator = null
     this.workspace = null
     this.conversationManager = null
+    this.mcpManager = null
     this.ready = false
   }
 }

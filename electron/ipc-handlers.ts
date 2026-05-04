@@ -681,9 +681,59 @@ export function setupIpcHandlers(
   })
 
   // --- Code Mode: explicitly initialise CodeRunner with a chosen directory ---
-  ipcMain.handle('code:init', async (_event, dir: string) => {
+  ipcMain.handle('code:init', async (_event, dir: string, mcpServers?: string[]) => {
     try {
-      await codeRunner.initialize(dir)
+      await codeRunner.initialize(dir, mcpServers)
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // --- Code Mode: list all configured MCP servers available for code mode ---
+  ipcMain.handle('code:list-mcp-for-code', () => {
+    try {
+      const config = readConfig()
+      const servers = (config as Record<string, unknown>)?.mcpServers as Record<string, Record<string, unknown>> ?? {}
+      return Object.entries(servers).map(([name, cfg]) => ({
+        name,
+        enabled: (cfg.enabled ?? true) as boolean,
+        codeMode: cfg.codeMode === true,
+        command: (cfg.command ?? '') as string,
+        url: cfg.url as string | undefined,
+      }))
+    } catch {
+      return []
+    }
+  })
+
+  // --- Code Mode: get the active conversation ID from the runner ---
+  ipcMain.handle('code:get-conversation-id', () => {
+    return codeRunner.getConversationId()
+  })
+
+  // --- Code Mode: read/write per-conversation MCP selections (sidecar store) ---
+  const MCP_SELECTIONS_PATH = path.join(os.homedir(), '.jiva', 'jivam-mcp-selections.json')
+
+  function readMcpSelections(): Record<string, string[]> {
+    try {
+      if (fs.existsSync(MCP_SELECTIONS_PATH)) {
+        return JSON.parse(fs.readFileSync(MCP_SELECTIONS_PATH, 'utf-8')) as Record<string, string[]>
+      }
+    } catch {}
+    return {}
+  }
+
+  ipcMain.handle('code:get-mcp-selection', (_event, convId: string) => {
+    return readMcpSelections()[convId] ?? []
+  })
+
+  ipcMain.handle('code:set-mcp-selection', (_event, convId: string, servers: string[]) => {
+    try {
+      const data = readMcpSelections()
+      data[convId] = servers
+      fs.mkdirSync(path.dirname(MCP_SELECTIONS_PATH), { recursive: true })
+      fs.writeFileSync(MCP_SELECTIONS_PATH, JSON.stringify(data, null, 2))
       return { success: true }
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) }
