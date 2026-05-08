@@ -113,7 +113,7 @@ function searchFile(
   let content: string;
   try { content = fs.readFileSync(filePath, 'utf-8'); } catch { return; }
 
-  const relPath = path.relative(workspaceDir, filePath);
+  const relPath = path.relative(workspaceDir, filePath).replace(/\\/g, '/');
   const lines = content.split('\n');
 
   for (let i = 0; i < lines.length && results.length < opts.max; i++) {

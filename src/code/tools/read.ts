@@ -10,8 +10,8 @@ export const ReadFileTool: ICodeTool = {
   description: `Read the contents of a file or list a directory.
 
 REQUIRED parameter: "path" (string) — absolute path to file or directory.
-Example: {"path": "/workspace/src/index.ts"}
-Example: {"path": "/workspace/src/index.ts", "offset": 100, "limit": 50}
+Example: {"path": "src/index.ts"}
+Example: {"path": "src/index.ts", "offset": 100, "limit": 50}
 
 Do NOT pass "command", "query", or "pattern" to this tool — use bash or grep for those.
 
