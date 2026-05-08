@@ -1,8 +1,10 @@
-import { Settings, Sun, Moon, Users, RefreshCw, PanelLeft } from 'lucide-react'
+import { useState } from 'react'
+import { Settings, Sun, Moon, Users, RefreshCw, PanelLeft, Cloud, LogOut } from 'lucide-react'
 import { NavTab } from './NavTab'
 import { Button } from '../ui/Button'
 import { useSettingsStore } from '../../store/settings.store'
 import { useJivaStore } from '../../store/jiva.store'
+import { useAuthStore } from '../../store/auth.store'
 import { logoUrl } from '../../lib/logo'
 import type { ActiveTab } from '../../App'
 
@@ -43,6 +45,65 @@ function StatusDot() {
   )
 }
 
+function CloudPopover() {
+  const { isCloudMode, cloudUser, signOut } = useAuthStore()
+  const [open, setOpen] = useState(false)
+
+  if (isCloudMode) {
+    return (
+      <div className="relative">
+        <button
+          onClick={() => setOpen((v) => !v)}
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-colors"
+          style={{
+            background: open ? 'rgba(139,92,246,0.18)' : 'rgba(139,92,246,0.1)',
+            border: '1px solid rgba(139,92,246,0.3)',
+            color: 'var(--accent)',
+          }}
+          title={cloudUser?.email}
+        >
+          <Cloud size={11} />
+          Cloud
+        </button>
+        {open && (
+          <>
+            <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+            <div
+              className="absolute right-0 top-full mt-2 z-50 rounded-xl border py-1.5 shadow-xl min-w-[180px]"
+              style={{ background: 'var(--card)', borderColor: 'var(--border)' }}
+            >
+              {cloudUser?.email && (
+                <div className="px-3 py-1.5 text-xs text-[var(--text-subtle)] border-b border-[var(--border)] mb-1">
+                  {cloudUser.email}
+                </div>
+              )}
+              <button
+                onClick={() => { signOut(); setOpen(false) }}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--hover)] transition-colors"
+              >
+                <LogOut size={12} />
+                Switch to local
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    )
+  }
+
+  // Local mode — clicking the cloud button directly opens the cloud window
+  return (
+    <Button
+      variant="icon"
+      size="sm"
+      title="Open Jiva Cloud"
+      onClick={() => window.electron?.cloud?.openWindow()}
+    >
+      <Cloud size={15} />
+    </Button>
+  )
+}
+
 export function TopBar({
   activeTab,
   onTabChange,
@@ -53,6 +114,7 @@ export function TopBar({
 }: TopBarProps) {
   const { theme, toggleTheme } = useSettingsStore()
   const { restartServer } = useJivaStore()
+  const { isCloudMode } = useAuthStore()
 
   return (
     <header
@@ -100,23 +162,29 @@ export function TopBar({
 
       {/* Right Controls */}
       <div className="flex items-center gap-2 no-drag">
-        <StatusDot />
-
-        <Button variant="icon" size="sm" title="Restart Jivam" onClick={() => restartServer()}>
-          <RefreshCw size={15} />
-        </Button>
-
-        <Button variant="icon" size="sm" title="Personas" onClick={onPersonasToggle}>
-          <Users size={16} />
-        </Button>
+        {!isCloudMode && <StatusDot />}
+        {!isCloudMode && (
+          <Button variant="icon" size="sm" title="Restart Jivam" onClick={() => restartServer()}>
+            <RefreshCw size={15} />
+          </Button>
+        )}
+        {!isCloudMode && (
+          <Button variant="icon" size="sm" title="Personas" onClick={onPersonasToggle}>
+            <Users size={16} />
+          </Button>
+        )}
 
         <Button variant="icon" size="sm" title="Toggle theme" onClick={toggleTheme}>
           {theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}
         </Button>
 
-        <Button variant="icon" size="sm" title="Settings" onClick={onSettingsToggle}>
-          <Settings size={16} />
-        </Button>
+        {!isCloudMode && (
+          <Button variant="icon" size="sm" title="Settings" onClick={onSettingsToggle}>
+            <Settings size={16} />
+          </Button>
+        )}
+
+        <CloudPopover />
       </div>
     </header>
   )

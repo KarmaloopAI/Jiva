@@ -11,11 +11,14 @@ contextBridge.exposeInMainWorld('electron', {
     onStatusChange: (callback: (status: string, data?: unknown) => void) => {
       ipcRenderer.on('jiva:server:status-changed', (_event, status, data) => callback(status, data))
     },
-    sendMessage: (prompt: string, persona?: string) =>
-      ipcRenderer.invoke('jiva:send-message', prompt, persona),
+    sendMessage: (prompt: string, persona?: string, opts?: { deepRun?: boolean }) =>
+      ipcRenderer.invoke('jiva:send-message', prompt, persona, opts),
     stopMessage: () => ipcRenderer.invoke('jiva:stop-message'),
     onPhaseUpdate: (callback: (phase: string) => void) => {
       ipcRenderer.on('jiva:phase-update', (_event, phase) => callback(phase))
+    },
+    onJivaLog: (callback: (event: unknown) => void) => {
+      ipcRenderer.on('jiva:jiva-log', (_event, e) => callback(e))
     },
     resetConversation: () => ipcRenderer.invoke('jiva:reset-conversation'),
     loadConversation: (id: string) => ipcRenderer.invoke('jiva:load-conversation', id),
@@ -55,10 +58,10 @@ contextBridge.exposeInMainWorld('electron', {
     isMaximized: () => ipcRenderer.invoke('window:isMaximized'),
   },
   code: {
-    sendMessage: (prompt: string) => ipcRenderer.invoke('code:send-message', prompt),
+    sendMessage: (prompt: string, opts?: { deepRun?: boolean }) => ipcRenderer.invoke('code:send-message', prompt, opts),
     stopMessage: () => ipcRenderer.invoke('code:stop-message'),
     resetSession: () => ipcRenderer.invoke('code:reset-session'),
-    init: (dir: string, mcpServers?: string[]) => ipcRenderer.invoke('code:init', dir, mcpServers),
+    init: (dir: string, mcpServers?: string[], opts?: { deepRun?: boolean; maxIterations?: number }) => ipcRenderer.invoke('code:init', dir, mcpServers, opts),
     listMcpForCode: () => ipcRenderer.invoke('code:list-mcp-for-code'),
     getConversationId: () => ipcRenderer.invoke('code:get-conversation-id'),
     getMcpSelection: (convId: string) => ipcRenderer.invoke('code:get-mcp-selection', convId),
@@ -83,5 +86,25 @@ contextBridge.exposeInMainWorld('electron', {
   },
   setup: {
     check: () => ipcRenderer.invoke('setup:check'),
+  },
+  updater: {
+    check: () => ipcRenderer.invoke('updater:check'),
+    install: () => ipcRenderer.invoke('updater:install'),
+    onAvailable: (cb: (info: { version: string; releaseNotes: string | null }) => void) => {
+      ipcRenderer.on('updater:available', (_event, info) => cb(info))
+    },
+    onProgress: (cb: (percent: number) => void) => {
+      ipcRenderer.on('updater:progress', (_event, pct) => cb(pct))
+    },
+    onReady: (cb: () => void) => {
+      ipcRenderer.on('updater:ready', () => cb())
+    },
+  },
+  cloud: {
+    openWindow: () => ipcRenderer.invoke('cloud:open-window'),
+    signIn: (email: string, password: string) => ipcRenderer.invoke('cloud:sign-in', email, password),
+    signUp: (email: string, password: string) => ipcRenderer.invoke('cloud:sign-up', email, password),
+    signOut: () => ipcRenderer.invoke('cloud:sign-out'),
+    init: (userId: string, sessionId: string) => ipcRenderer.invoke('cloud:init', userId, sessionId),
   },
 })

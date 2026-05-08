@@ -17,8 +17,10 @@
   "keywords": [],
   "author": "Karmaloop AI",
   "license": "MIT",
+  "jivaCompatibleVersion": "0.3.44",
   "dependencies": {
     "clsx": "^2.1.1",
+    "electron-updater": "^6.3.9",
     "framer-motion": "^11.18.2",
     "highlight.js": "^11.11.1",
     "lucide-react": "^0.462.0",

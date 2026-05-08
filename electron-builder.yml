@@ -63,3 +63,8 @@ linux:
         - arm64
     - target: deb
       arch: x64
+
+publish:
+  provider: github
+  owner: KarmaloopAI
+  repo: Jivam

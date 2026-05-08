@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { ChatMessage } from '../types/chat'
 import { useChatStore } from './chat.store'
+import { useJivaStore } from './jiva.store'
 
 export interface ConversationItem {
   id: string
@@ -61,8 +62,9 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
     try {
       // Reset the agent's conversation history
       await window.electron.jiva.resetConversation()
-      // Clear the chat UI
+      // Clear the chat UI and stale plan cache
       useChatStore.getState().clearConversation()
+      useJivaStore.getState().setLastPlan(null)
       set({ activeConversationId: null })
       // Refresh the list after a moment (new conversation file won't exist yet)
     } catch (err) {

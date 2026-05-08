@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { Send, StopCircle, Terminal, FolderCode, Bug, Wrench, RotateCcw } from 'lucide-react'
+import { Send, StopCircle, Terminal, FolderCode, Bug, Wrench, RotateCcw, SlidersHorizontal, Zap, Monitor } from 'lucide-react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useCodeStore } from '../../store/code.store'
 import { useGitStore } from '../../store/git.store'
+import { useAuthStore } from '../../store/auth.store'
 import { CodeActivityIndicator } from './CodeActivityIndicator'
 import { CodeEventCard } from './CodeEventCard'
 import { MarkdownRenderer } from '../markdown/MarkdownRenderer'
@@ -97,10 +98,46 @@ function EmptyState() {
 
 export function CodeChatView() {
   const [value, setValue] = useState('')
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const settingsRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
-  const { messages, isThinking, sendMessage, clearSession, codeWorkspaceDir } = useCodeStore()
+  const { messages, isThinking, sendMessage, clearSession, codeWorkspaceDir, deepRun, setDeepRun, maxIterations, setMaxIterations } = useCodeStore()
   const { refresh: refreshGit } = useGitStore()
+  const { isCloudMode } = useAuthStore()
+
+  // Cloud mode: show local-only overlay
+  if (isCloudMode) {
+    return (
+      <div className="flex flex-col h-full items-center justify-center gap-5 text-center px-8">
+        <div
+          className="w-16 h-16 rounded-2xl flex items-center justify-center"
+          style={{
+            background: 'linear-gradient(135deg, rgba(59,130,246,0.12), rgba(139,92,246,0.08))',
+            border: '1px solid rgba(59,130,246,0.2)',
+          }}
+        >
+          <Monitor size={28} className="text-[var(--accent-blue)]" />
+        </div>
+        <div>
+          <h2 className="text-lg font-semibold text-[var(--text)] mb-2">
+            Code Agent requires a local install
+          </h2>
+          <p className="text-sm text-[var(--text-muted)] max-w-xs leading-relaxed">
+            The Code Agent runs directly on your machine and is not available in Cloud mode.
+          </p>
+        </div>
+        <a
+          href="https://github.com/KarmaloopAI/Jivam#installation"
+          target="_blank"
+          rel="noreferrer"
+          className="text-xs text-[var(--accent)] hover:underline"
+        >
+          Install Jivam locally →
+        </a>
+      </div>
+    )
+  }
 
   // Auto-resize textarea
   useEffect(() => {
@@ -114,6 +151,18 @@ export function CodeChatView() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, isThinking])
+
+  // Close settings popover on outside click
+  useEffect(() => {
+    if (!settingsOpen) return
+    const handler = (e: MouseEvent) => {
+      if (settingsRef.current && !settingsRef.current.contains(e.target as Node)) {
+        setSettingsOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [settingsOpen])
 
   const handleStop = useCallback(() => {
     window.electron.code.stopMessage()
@@ -227,6 +276,77 @@ export function CodeChatView() {
             className="flex-1 resize-none bg-transparent border-none outline-none text-sm text-[var(--text)] placeholder:text-[var(--text-subtle)] leading-relaxed disabled:opacity-50"
             style={{ maxHeight: '200px' }}
           />
+
+          {/* Settings */}
+          <div ref={settingsRef} className="relative flex-shrink-0 self-end mb-0.5">
+            <button
+              onClick={() => setSettingsOpen(o => !o)}
+              className="w-7 h-7 rounded-full flex items-center justify-center transition-all"
+              style={{
+                background: settingsOpen ? 'rgba(59,130,246,0.15)' : 'transparent',
+                color: settingsOpen ? '#3B82F6' : 'var(--text-subtle)',
+              }}
+              title="Run settings"
+            >
+              <SlidersHorizontal size={14} />
+            </button>
+
+            {settingsOpen && (
+              <div
+                className="absolute bottom-10 right-0 z-50 rounded-xl p-3 w-[220px]"
+                style={{
+                  background: 'var(--topbar-bg)',
+                  border: '1px solid var(--topbar-border)',
+                  boxShadow: '0 4px 20px rgba(0,0,0,0.2)',
+                  backdropFilter: 'blur(12px)',
+                }}
+              >
+                {/* Max Iterations */}
+                <p className="text-[10px] font-medium text-[var(--text-subtle)] mb-1.5 uppercase tracking-wide">Max Iterations</p>
+                <div className="flex gap-1.5 mb-3">
+                  {([10, 50, 100] as const).map((val) => {
+                    const label = val === 10 ? 'Quick' : val === 50 ? 'Medium' : 'Long'
+                    const selected = maxIterations === val
+                    return (
+                      <button
+                        key={val}
+                        onClick={() => setMaxIterations(val)}
+                        className="flex-1 py-1 rounded-lg text-[11px] font-medium transition-all"
+                        style={{
+                          background: selected ? 'rgba(59,130,246,0.2)' : 'var(--bg-secondary)',
+                          color: selected ? '#3B82F6' : 'var(--text-subtle)',
+                          border: selected ? '1px solid rgba(59,130,246,0.4)' : '1px solid transparent',
+                        }}
+                      >
+                        {label}
+                      </button>
+                    )
+                  })}
+                </div>
+
+                {/* Deep Run */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <Zap size={12} className="text-[var(--accent)]" />
+                    <span className="text-xs font-medium text-[var(--text)]">Deep Run</span>
+                  </div>
+                  <button
+                    onClick={() => setDeepRun(!deepRun)}
+                    className="relative flex-shrink-0 w-9 h-5 rounded-full transition-colors duration-200"
+                    style={{ background: deepRun ? 'var(--accent)' : 'var(--bg-secondary)' }}
+                  >
+                    <span
+                      className="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200"
+                      style={{ left: deepRun ? '18px' : '2px' }}
+                    />
+                  </button>
+                </div>
+                <p className="text-[10px] text-[var(--text-subtle)] mt-1.5 leading-relaxed">
+                  Evaluates results and re-runs if needed
+                </p>
+              </div>
+            )}
+          </div>
 
           <button
             onClick={isThinking ? handleStop : handleSend}

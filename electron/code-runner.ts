@@ -6,6 +6,8 @@ import path from 'path'
 import { pathToFileURL } from 'url'
 import { writeDirective } from './directive-manager'
 import { readConfig } from './config-manager'
+import * as harness from './harness'
+import type { Completer } from './harness'
 
 export interface CodeLogEvent {
   timestamp: string
@@ -41,7 +43,7 @@ function resolveJivaCoreEntryPath(): string {
 // Format: "2026-03-13T10:28:32.695Z [INFO] [CodeAgent] Tool: glob"
 const LOG_RE = /^(\d{4}-\d{2}-\d{2}T[\d:.Z]+)\s+\[(INFO|WARN|ERROR)\]\s+\[(\w+)\]\s+(.+)$/
 
-function parseLogLine(line: string): CodeLogEvent | null {
+export function parseLogLine(line: string): CodeLogEvent | null {
   const m = LOG_RE.exec(line.trim())
   if (!m) return null
   return {
@@ -59,6 +61,8 @@ export class CodeRunner extends EventEmitter {
   private conversationManager: unknown = null
   private mcpManager: unknown = null
   private ready = false
+  private deepRun = false
+  private maxIterations = 50
 
   isReady(): boolean {
     return this.ready
@@ -69,7 +73,10 @@ export class CodeRunner extends EventEmitter {
     return (this.conversationManager as Record<string, unknown>).currentConversationId as string ?? null
   }
 
-  async initialize(workspaceDir: string, mcpServerNames?: string[]): Promise<void> {
+  async initialize(workspaceDir: string, mcpServerNames?: string[], opts?: { deepRun?: boolean; maxIterations?: number }): Promise<void> {
+    this.deepRun = opts?.deepRun ?? false
+    this.maxIterations = opts?.maxIterations ?? 50
+
     const entry = resolveJivaCoreEntryPath()
     console.log(`[CodeRunner] Loading jiva-core from: ${entry}`)
 
@@ -147,15 +154,47 @@ export class CodeRunner extends EventEmitter {
       orchestrator: this.orchestrator,
       workspace: this.workspace,
       conversationManager: this.conversationManager,
-      maxIterations: 50,
+      maxIterations: this.maxIterations,
       ...(this.mcpManager && activeMcpNames ? { mcpManager: this.mcpManager, mcpServerNames: activeMcpNames } : {}),
     })
 
     this.ready = true
-    console.log('[CodeRunner] Initialized successfully')
+    console.log(`[CodeRunner] Initialized (maxIterations=${this.maxIterations}, deepRun=${this.deepRun})`)
+  }
+
+  private makeCompleter(): Completer {
+    const orch = this.orchestrator as Record<string, unknown>
+    return async (systemPrompt: string, userPrompt: string): Promise<string | null> => {
+      for (const method of ['complete', 'generateResponse', 'generate', 'chat', 'invoke']) {
+        if (typeof orch[method] !== 'function') continue
+        try {
+          const fn = (orch[method] as (msgs: Array<{ role: string; content: string }>) => Promise<{ content: string }>).bind(orch)
+          const result = await fn([
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+          ])
+          return result.content ?? null
+        } catch {
+          // try next method
+        }
+      }
+      return null
+    }
   }
 
   async chat(
+    prompt: string,
+    onLog: (event: CodeLogEvent) => void,
+    opts?: { deepRun?: boolean }
+  ): Promise<CodeRunResult> {
+    const useDeepRun = opts?.deepRun ?? this.deepRun
+    if (useDeepRun) {
+      return harness.run(prompt, this.makeCompleter(), p => this.runChat(p, onLog))
+    }
+    return this.runChat(prompt, onLog)
+  }
+
+  private async runChat(
     prompt: string,
     onLog: (event: CodeLogEvent) => void
   ): Promise<CodeRunResult> {

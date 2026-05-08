@@ -1,4 +1,4 @@
-import { app, BrowserWindow, nativeTheme, Menu } from 'electron'
+import { app, BrowserWindow, ipcMain, nativeTheme, Menu } from 'electron'
 import { execSync } from 'child_process'
 import fs from 'fs'
 import os from 'os'
@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url'
 import { setupIpcHandlers } from './ipc-handlers'
 import { JivaRunner } from './jiva-runner'
 import { CodeRunner } from './code-runner'
+import { initAutoUpdater, checkForUpdates } from './updater'
 
 /**
  * Augment process.env.PATH so that npm/npx/node are findable in packaged apps.
@@ -55,6 +56,7 @@ process.env.VITE_PUBLIC = app.isPackaged
   : path.join(process.env.DIST, '../public')
 
 let win: BrowserWindow | null
+let cloudWin: BrowserWindow | null = null
 let jivaRunner: JivaRunner | null = null
 let codeRunner: CodeRunner | null = null
 
@@ -175,6 +177,45 @@ function createWindow() {
   return win
 }
 
+function createCloudWindow() {
+  // If cloud window already open, just focus it instead of spawning a duplicate
+  if (cloudWin && !cloudWin.isDestroyed()) {
+    cloudWin.focus()
+    return cloudWin
+  }
+
+  cloudWin = new BrowserWindow({
+    width: 1100,
+    height: 780,
+    minWidth: 780,
+    minHeight: 560,
+    titleBarStyle: 'hiddenInset',
+    trafficLightPosition: { x: 18, y: 18 },
+    vibrancy: 'under-window',
+    visualEffectState: 'active',
+    backgroundColor: '#F5F3FF',
+    title: 'Jivam Cloud',
+    show: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  })
+
+  cloudWin.once('ready-to-show', () => cloudWin?.show())
+  cloudWin.on('closed', () => { cloudWin = null })
+
+  if (VITE_DEV_SERVER_URL) {
+    cloudWin.loadURL(`${VITE_DEV_SERVER_URL}?mode=cloud`)
+  } else {
+    cloudWin.loadFile(path.join(process.env.DIST!, 'index.html'), { query: { mode: 'cloud' } })
+  }
+
+  return cloudWin
+}
+
 function initJivaRunner() {
   jivaRunner = new JivaRunner()
   return jivaRunner
@@ -209,5 +250,18 @@ app.whenReady().then(() => {
   const cRunner = initCodeRunner()
   setupIpcHandlers(runner, cRunner, () => win)
   createAppMenu()
-  createWindow()
+
+  // Cloud window — open on renderer request
+  ipcMain.handle('cloud:open-window', () => { createCloudWindow() })
+
+  const mainWin = createWindow()
+
+  // Auto-updater: init after window is created, check silently after load
+  if (app.isPackaged) {
+    mainWin.webContents.once('did-finish-load', () => {
+      initAutoUpdater(mainWin)
+      // Small delay so the user sees the app first before any update notification
+      setTimeout(checkForUpdates, 5000)
+    })
+  }
 })

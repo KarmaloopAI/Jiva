@@ -49,10 +49,12 @@ interface ElectronAPI {
     onStatusChange: (callback: (status: string, data?: unknown) => void) => void
     sendMessage: (
       prompt: string,
-      persona?: string
+      persona?: string,
+      opts?: { deepRun?: boolean }
     ) => Promise<{ success: boolean; result?: JivaRunResult; conversationId?: string; error?: string }>
     stopMessage: () => Promise<{ success: boolean }>
     onPhaseUpdate: (callback: (phase: string) => void) => void
+    onJivaLog: (callback: (event: CodeLogEvent) => void) => void
     resetConversation: () => Promise<{ success: boolean }>
     loadConversation: (id: string) => Promise<{ success: boolean; error?: string }>
   }
@@ -97,10 +99,10 @@ interface ElectronAPI {
     isMaximized: () => Promise<boolean>
   }
   code: {
-    sendMessage: (prompt: string) => Promise<{ success: boolean; content?: string; toolsUsed?: string[]; iterations?: number; error?: string }>
+    sendMessage: (prompt: string, opts?: { deepRun?: boolean }) => Promise<{ success: boolean; content?: string; toolsUsed?: string[]; iterations?: number; error?: string }>
     stopMessage: () => Promise<{ success: boolean }>
     resetSession: () => Promise<{ success: boolean; error?: string }>
-    init: (dir: string, mcpServers?: string[]) => Promise<{ success: boolean; error?: string }>
+    init: (dir: string, mcpServers?: string[], opts?: { deepRun?: boolean; maxIterations?: number }) => Promise<{ success: boolean; error?: string }>
     listMcpForCode: () => Promise<Array<{ name: string; enabled: boolean; codeMode: boolean; command: string; url?: string }>>
     getConversationId: () => Promise<string | null>
     getMcpSelection: (convId: string) => Promise<string[]>
@@ -125,7 +127,23 @@ interface ElectronAPI {
       jivaCore: { ok: boolean; version?: string }
       config:   { ok: boolean; path: string }
       platform: string
+      jivaVersionMismatch?: boolean
+      requiredJivaVersion?: string
     }>
+  }
+  updater: {
+    check: () => Promise<void>
+    install: () => Promise<void>
+    onAvailable: (cb: (info: { version: string; releaseNotes: string | null }) => void) => void
+    onProgress: (cb: (percent: number) => void) => void
+    onReady: (cb: () => void) => void
+  }
+  cloud: {
+    openWindow: () => Promise<void>
+    signIn: (email: string, password: string) => Promise<{ userId: string; email: string } | { error: string }>
+    signUp: (email: string, password: string) => Promise<{ userId: string; email: string } | { error: string }>
+    signOut: () => Promise<void>
+    init: (userId: string, sessionId: string) => Promise<{ success: boolean; error?: string }>
   }
 }
 

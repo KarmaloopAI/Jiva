@@ -1,18 +1,27 @@
 import { AnimatePresence, motion } from 'framer-motion'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Terminal } from 'lucide-react'
 import { useCodeStore } from '../../store/code.store'
 import { logoUrl } from '../../lib/logo'
+import { CodeEventCard } from './CodeEventCard'
 
 export function CodeActivityIndicator() {
-  const { isThinking, currentAction, thinkingStartTime } = useCodeStore()
+  const { isThinking, currentAction, thinkingStartTime, liveEvents } = useCodeStore()
   const [elapsed, setElapsed] = useState(0)
+  const logRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!thinkingStartTime) { setElapsed(0); return }
     const interval = setInterval(() => setElapsed(Date.now() - thinkingStartTime), 1000)
     return () => clearInterval(interval)
   }, [thinkingStartTime])
+
+  // Auto-scroll log to bottom when new events arrive
+  useEffect(() => {
+    if (logRef.current) {
+      logRef.current.scrollTop = logRef.current.scrollHeight
+    }
+  }, [liveEvents.length])
 
   if (!isThinking) return null
 
@@ -33,38 +42,57 @@ export function CodeActivityIndicator() {
 
       {/* Bubble */}
       <div
-        className="glass-card rounded-2xl rounded-tl-sm px-4 py-2.5 flex items-center gap-2.5"
-        style={{ minWidth: '200px', maxWidth: '380px' }}
+        className="glass-card rounded-2xl rounded-tl-sm px-4 py-2.5"
+        style={{ minWidth: '200px', maxWidth: '480px' }}
       >
-        {/* Code icon pulse */}
-        <motion.div
-          animate={{ opacity: [0.5, 1, 0.5] }}
-          transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}
-        >
-          <Terminal size={13} className="text-[var(--accent-blue)] flex-shrink-0" />
-        </motion.div>
+        {/* Top row: icon + action + elapsed */}
+        <div className="flex items-center gap-2.5">
+          {/* Code icon pulse */}
+          <motion.div
+            animate={{ opacity: [0.5, 1, 0.5] }}
+            transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}
+          >
+            <Terminal size={13} className="text-[var(--accent-blue)] flex-shrink-0" />
+          </motion.div>
 
-        {/* Rotating action text */}
-        <div className="flex-1 overflow-hidden min-w-0">
-          <AnimatePresence mode="wait">
-            <motion.span
-              key={currentAction ?? 'thinking'}
-              initial={{ opacity: 0, y: 5 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -5 }}
-              transition={{ duration: 0.18 }}
-              className="text-sm text-[var(--text-muted)] block truncate"
-            >
-              {currentAction ?? 'Thinking...'}
-            </motion.span>
-          </AnimatePresence>
+          {/* Rotating action text */}
+          <div className="flex-1 overflow-hidden min-w-0">
+            <AnimatePresence mode="wait">
+              <motion.span
+                key={currentAction ?? 'thinking'}
+                initial={{ opacity: 0, y: 5 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -5 }}
+                transition={{ duration: 0.18 }}
+                className="text-sm text-[var(--text-muted)] block truncate"
+              >
+                {currentAction ?? 'Thinking...'}
+              </motion.span>
+            </AnimatePresence>
+          </div>
+
+          {/* Elapsed time after 10s */}
+          {seconds >= 10 && (
+            <span className="text-xs text-[var(--text-subtle)] flex-shrink-0">
+              {seconds}s
+            </span>
+          )}
         </div>
 
-        {/* Elapsed time after 10s */}
-        {seconds >= 10 && (
-          <span className="text-xs text-[var(--text-subtle)] flex-shrink-0">
-            {seconds}s
-          </span>
+        {/* Live event log */}
+        {liveEvents.length > 0 && (
+          <div
+            ref={logRef}
+            className="mt-2 pt-2 space-y-1 overflow-y-auto"
+            style={{
+              maxHeight: '180px',
+              borderTop: '1px solid rgba(255,255,255,0.06)',
+            }}
+          >
+            {liveEvents.map((event) => (
+              <CodeEventCard key={event.id} event={event} />
+            ))}
+          </div>
         )}
       </div>
     </div>

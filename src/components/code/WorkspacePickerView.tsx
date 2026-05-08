@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { FolderInput, GitBranch, Terminal, Loader2, AlertCircle, CheckCircle2, FolderOpen, Server, ChevronDown, ChevronRight, Info } from 'lucide-react'
+import { FolderInput, GitBranch, Terminal, Loader2, AlertCircle, CheckCircle2, FolderOpen, Server, ChevronDown, ChevronRight, Info, Zap } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useCodeStore } from '../../store/code.store'
 import { useGitStore } from '../../store/git.store'
@@ -24,6 +24,10 @@ export function WorkspacePickerView() {
   const [availableMcp, setAvailableMcp] = useState<McpServer[]>([])
   const [selectedMcp, setSelectedMcp] = useState<Set<string>>(new Set())
   const [mcpExpanded, setMcpExpanded] = useState(false)
+
+  const [maxIterations, setMaxIterations] = useState<10 | 50 | 100>(50)
+  const [deepRun, setDeepRun] = useState(false)
+  const [runConfigExpanded, setRunConfigExpanded] = useState(true)
 
   const { startSession, initLogListener } = useCodeStore()
   const { setWorkspaceDir, initRepo } = useGitStore()
@@ -93,7 +97,7 @@ export function WorkspacePickerView() {
     // Set workspace dir in git store for future git panel ops
     setWorkspaceDir(trimmedDir)
 
-    const result = await startSession(trimmedDir, Array.from(selectedMcp))
+    const result = await startSession(trimmedDir, Array.from(selectedMcp), { deepRun, maxIterations })
     if (!result.success) {
       setIsStarting(false)
       setStartError(result.error ?? 'Failed to start session')
@@ -363,6 +367,100 @@ export function WorkspacePickerView() {
             </AnimatePresence>
           </div>
         )}
+
+        {/* Run Configuration */}
+        <div
+          className="rounded-2xl overflow-hidden mb-4"
+          style={{
+            background: 'var(--bg-secondary)',
+            border: '1px solid var(--card-border)',
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => setRunConfigExpanded((v) => !v)}
+            className="w-full flex items-center justify-between px-4 py-3 text-left transition-colors hover:bg-black/5"
+          >
+            <div className="flex items-center gap-2">
+              <Zap size={13} className="text-[var(--accent-blue)] flex-shrink-0" />
+              <span className="text-xs font-semibold text-[var(--text)]">Run Configuration</span>
+            </div>
+            {runConfigExpanded
+              ? <ChevronDown size={13} className="text-[var(--text-muted)]" />
+              : <ChevronRight size={13} className="text-[var(--text-muted)]" />
+            }
+          </button>
+
+          <AnimatePresence initial={false}>
+            {runConfigExpanded && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.18, ease: 'easeInOut' }}
+                className="overflow-hidden"
+              >
+                <div className="px-4 pb-4 space-y-4">
+                  {/* Max Iterations */}
+                  <div className="space-y-2">
+                    <p className="text-[11px] font-semibold text-[var(--text)]">Max Iterations</p>
+                    <p className="text-[10px] text-[var(--text-subtle)] leading-relaxed">
+                      How many tool steps the agent can take per task.
+                    </p>
+                    <div className="flex gap-2">
+                      {([10, 50, 100] as const).map((val) => {
+                        const label = val === 10 ? 'Quick' : val === 50 ? 'Medium' : 'Long'
+                        const isSelected = maxIterations === val
+                        return (
+                          <button
+                            key={val}
+                            type="button"
+                            onClick={() => setMaxIterations(val)}
+                            className="flex-1 py-2 rounded-lg text-xs font-medium transition-all"
+                            style={{
+                              background: isSelected
+                                ? 'linear-gradient(135deg, rgba(59,130,246,0.18), rgba(139,92,246,0.12))'
+                                : 'rgba(0,0,0,0.03)',
+                              border: isSelected
+                                ? '1px solid rgba(59,130,246,0.4)'
+                                : '1px solid var(--card-border)',
+                              color: isSelected ? 'var(--accent-blue)' : 'var(--text-muted)',
+                            }}
+                          >
+                            {label}
+                            <span className="block text-[9px] opacity-60 mt-0.5">{val} steps</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Deep Run toggle */}
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <p className="text-[11px] font-semibold text-[var(--text)]">Deep Run</p>
+                      <p className="text-[10px] text-[var(--text-subtle)] leading-relaxed">
+                        Jivam evaluates results and re-runs if needed.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setDeepRun((v) => !v)}
+                      className="flex-shrink-0 w-9 h-5 rounded-full transition-colors relative"
+                      style={{ background: deepRun ? 'var(--accent-blue)' : 'var(--card-border)' }}
+                      aria-label="Toggle Deep Run"
+                    >
+                      <span
+                        className="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all"
+                        style={{ left: deepRun ? '18px' : '2px' }}
+                      />
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
 
         {/* Start error */}
         {startError && (

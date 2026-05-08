@@ -60,13 +60,18 @@ interface CodeStore {
   currentAction: string | null
 
   pendingEvents: CodeEvent[]   // events accumulating for the current turn
+  liveEvents: CodeEvent[]      // events shown in real-time while agent runs
   messages: CodeMessage[]
 
   // Session management
   isSessionStarted: boolean
   codeWorkspaceDir: string | null
   activeMcpServers: string[]
-  startSession: (dir: string, mcpServers?: string[]) => Promise<{ success: boolean; error?: string }>
+  deepRun: boolean
+  maxIterations: number
+  setDeepRun: (value: boolean) => void
+  setMaxIterations: (value: 10 | 50 | 100) => void
+  startSession: (dir: string, mcpServers?: string[], opts?: { deepRun?: boolean; maxIterations?: number }) => Promise<{ success: boolean; error?: string }>
   loadConversation: (id: string) => Promise<void>
 
   sendMessage: (content: string) => Promise<void>
@@ -81,11 +86,17 @@ export const useCodeStore = create<CodeStore>((set, get) => ({
   thinkingStartTime: null,
   currentAction: null,
   pendingEvents: [],
+  liveEvents: [],
   messages: [],
 
   isSessionStarted: false,
   codeWorkspaceDir: null,
   activeMcpServers: [],
+  deepRun: false,
+  maxIterations: 50,
+
+  setDeepRun: (value) => set({ deepRun: value }),
+  setMaxIterations: (value) => set({ maxIterations: value }),
 
   initLogListener: () => {
     if (logListenerRegistered || !window.electron?.code?.onCodeLog) return
@@ -106,15 +117,20 @@ export const useCodeStore = create<CodeStore>((set, get) => ({
           detail: eventLabel(event),
           timestamp: event.timestamp,
         }
-        set(state => ({ pendingEvents: [...state.pendingEvents, entry] }))
+        set(state => ({
+          pendingEvents: [...state.pendingEvents, entry],
+          liveEvents: [...state.liveEvents, entry],
+        }))
       }
     })
   },
 
-  startSession: async (dir: string, mcpServers: string[] = []) => {
-    const result = await window.electron.code.init(dir, mcpServers.length > 0 ? mcpServers : undefined)
+  startSession: async (dir: string, mcpServers: string[] = [], opts?: { deepRun?: boolean; maxIterations?: number }) => {
+    const deepRun = opts?.deepRun ?? false
+    const maxIterations = opts?.maxIterations ?? 50
+    const result = await window.electron.code.init(dir, mcpServers.length > 0 ? mcpServers : undefined, { deepRun, maxIterations })
     if (result.success) {
-      set({ isSessionStarted: true, codeWorkspaceDir: dir, activeMcpServers: mcpServers })
+      set({ isSessionStarted: true, codeWorkspaceDir: dir, activeMcpServers: mcpServers, deepRun, maxIterations })
     }
     return result
   },
@@ -133,10 +149,12 @@ export const useCodeStore = create<CodeStore>((set, get) => ({
       thinkingStartTime: Date.now(),
       currentAction: 'Thinking...',
       pendingEvents: [],
+      liveEvents: [],
     }))
 
     try {
-      const response = await window.electron.code.sendMessage(content)
+      const { deepRun } = get()
+      const response = await window.electron.code.sendMessage(content, { deepRun })
 
       const turnEvents = get().pendingEvents
 
@@ -156,6 +174,7 @@ export const useCodeStore = create<CodeStore>((set, get) => ({
         thinkingStartTime: null,
         currentAction: null,
         pendingEvents: [],
+        liveEvents: [],
       }))
 
       // Persist MCP selection to sidecar after the first successful message
@@ -184,6 +203,7 @@ export const useCodeStore = create<CodeStore>((set, get) => ({
         thinkingStartTime: null,
         currentAction: null,
         pendingEvents: [],
+        liveEvents: [],
       }))
     }
   },
@@ -227,6 +247,7 @@ export const useCodeStore = create<CodeStore>((set, get) => ({
       thinkingStartTime: null,
       currentAction: null,
       pendingEvents: [],
+      liveEvents: [],
       isSessionStarted: true,
       codeWorkspaceDir: workspace,
       activeMcpServers: mcpServers,
@@ -244,9 +265,12 @@ export const useCodeStore = create<CodeStore>((set, get) => ({
       thinkingStartTime: null,
       currentAction: null,
       pendingEvents: [],
+      liveEvents: [],
       isSessionStarted: false,
       codeWorkspaceDir: null,
       activeMcpServers: [],
+      deepRun: false,
+      maxIterations: 50,
     })
   },
 }))

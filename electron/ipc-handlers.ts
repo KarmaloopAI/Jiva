@@ -5,9 +5,14 @@ import type { CodeRunner } from './code-runner'
 import { readConfig, writeConfig, getJivaConfigPath } from './config-manager'
 import { writeDirective } from './directive-manager'
 import { listPersonas, activatePersona, getActivePersona } from './persona-manager'
+import { cloudSignIn, cloudSignUp, cloudSignOut, initCloudSession } from './cloud-auth'
+import { CloudRunner } from './cloud-runner'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
+
+// Singleton CloudRunner — configured when user signs into cloud mode
+const cloudRunner = new CloudRunner()
 
 export function setupIpcHandlers(
   jivaRunner: JivaRunner,
@@ -93,11 +98,31 @@ export function setupIpcHandlers(
       } catch {}
     }
 
+    // 4. jiva-core version compatibility
+    let jivaVersionMismatch = false
+    let requiredJivaVersion: string | undefined
+    try {
+      // Read jivaCompatibleVersion from the bundled package.json
+      const appPkgPath = path.join(__dirname, '..', 'package.json')
+      const appPkg = JSON.parse(fs.readFileSync(appPkgPath, 'utf-8')) as Record<string, unknown>
+      requiredJivaVersion = appPkg.jivaCompatibleVersion as string | undefined
+      if (requiredJivaVersion && jivaCoreVersion) {
+        // Compare major.minor — patch differences are fine
+        const [reqMaj, reqMin] = requiredJivaVersion.split('.').map(Number)
+        const [instMaj, instMin] = jivaCoreVersion.split('.').map(Number)
+        if (reqMaj !== instMaj || reqMin !== instMin) {
+          jivaVersionMismatch = true
+        }
+      }
+    } catch {}
+
     return {
       nodejs:   { ok: nodejsOk,   version: nodejsVersion },
       jivaCore: { ok: jivaCoreOk, version: jivaCoreVersion },
       config:   { ok: configOk,   path: foundConfigPath || configCandidates[0] },
       platform: process.platform,
+      jivaVersionMismatch,
+      requiredJivaVersion,
     }
   })
 
@@ -154,17 +179,31 @@ export function setupIpcHandlers(
   // NOTE: Persona switching is intentionally NOT done here on every message.
   // The `persona` parameter is accepted but ignored to avoid destroying conversation history.
   // Persona switches happen only via the explicit `personas:activate` IPC call.
-  ipcMain.handle('jiva:send-message', async (_event, prompt: string, _persona?: string) => {
-    const win = getWindow()
+  ipcMain.handle('jiva:send-message', async (event, prompt: string, _persona?: string, opts?: { deepRun?: boolean }) => {
+    // Send phase and log events back to whichever window invoked this handler
+    // (works for both the main local window and the separate cloud window)
+    const sender = event.sender
 
     try {
-      // Initialize if not ready
+      // Route to cloud runner if active
+      if (cloudRunner.isActive()) {
+        const result = await cloudRunner.chat(prompt, (phase) => {
+          sender.send('jiva:phase-update', phase)
+        }, opts, (logEvent) => {
+          sender.send('jiva:jiva-log', logEvent)
+        })
+        return { success: true, result, conversationId: result.conversationId }
+      }
+
+      // Initialize local runner if not ready
       if (jivaRunner.getStatus() === 'stopped' || jivaRunner.getStatus() === 'error') {
         await jivaRunner.initialize()
       }
 
       const result = await jivaRunner.chat(prompt, (phase) => {
-        win?.webContents.send('jiva:phase-update', phase)
+        sender.send('jiva:phase-update', phase)
+      }, opts, (logEvent) => {
+        sender.send('jiva:jiva-log', logEvent)
       })
 
       return { success: true, result, conversationId: result.conversationId }
@@ -530,7 +569,7 @@ export function setupIpcHandlers(
   })
 
   // --- Code Mode: send message via CodeAgent ---
-  ipcMain.handle('code:send-message', async (_event, prompt: string) => {
+  ipcMain.handle('code:send-message', async (_event, prompt: string, opts?: { deepRun?: boolean }) => {
     const win = getWindow()
     try {
       if (!codeRunner.isReady()) {
@@ -542,7 +581,7 @@ export function setupIpcHandlers(
 
       const result = await codeRunner.chat(prompt, (event) => {
         win?.webContents.send('jiva:code-log', event)
-      })
+      }, opts)
 
       return { success: true, ...result }
     } catch (err) {
@@ -681,9 +720,9 @@ export function setupIpcHandlers(
   })
 
   // --- Code Mode: explicitly initialise CodeRunner with a chosen directory ---
-  ipcMain.handle('code:init', async (_event, dir: string, mcpServers?: string[]) => {
+  ipcMain.handle('code:init', async (_event, dir: string, mcpServers?: string[], opts?: { deepRun?: boolean; maxIterations?: number }) => {
     try {
-      await codeRunner.initialize(dir, mcpServers)
+      await codeRunner.initialize(dir, mcpServers, opts)
       return { success: true }
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) }
@@ -754,5 +793,39 @@ export function setupIpcHandlers(
     // Rewrite the directive file immediately so it is up-to-date for the next agent session
     writeDirective(content || undefined)
     return { success: true }
+  })
+
+  // --- Cloud Mode: auth + session routing ---
+
+  ipcMain.handle('cloud:sign-in', async (_event, email: string, password: string) => {
+    try {
+      const user = await cloudSignIn(email, password)
+      return { userId: user.userId, email: user.email }
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  ipcMain.handle('cloud:sign-up', async (_event, email: string, password: string) => {
+    try {
+      const user = await cloudSignUp(email, password)
+      return { userId: user.userId, email: user.email }
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  ipcMain.handle('cloud:sign-out', async () => {
+    cloudRunner.deactivate()
+  })
+
+  ipcMain.handle('cloud:init', async (_event, userId: string, sessionId: string) => {
+    try {
+      await initCloudSession(userId, sessionId)
+      cloudRunner.configure(userId, sessionId)
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
   })
 }

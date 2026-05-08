@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   CheckCircle2, XCircle, Clock, Copy, Check,
-  RefreshCw, ArrowRight, Loader2, Settings,
+  RefreshCw, ArrowRight, Loader2, Settings, Zap, AlertTriangle,
 } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { logoUrl } from '../../lib/logo'
@@ -13,6 +13,8 @@ interface SetupChecks {
   jivaCore: { ok: boolean; version?: string }
   config:   { ok: boolean; path: string }
   platform: string
+  jivaVersionMismatch?: boolean
+  requiredJivaVersion?: string
 }
 
 interface Props {
@@ -325,6 +327,23 @@ export function SetupScreen({ checks, onContinue }: Props) {
             />
           </div>
 
+          {/* jiva-core version mismatch advisory */}
+          {allOk && localChecks?.jivaVersionMismatch && (
+            <motion.div
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="flex items-start gap-2.5 rounded-xl border border-amber-400/25 bg-amber-400/8 px-4 py-3 mb-4 text-xs"
+            >
+              <AlertTriangle size={14} className="text-amber-400 mt-0.5 flex-shrink-0" />
+              <div className="text-amber-300/90">
+                <span className="font-medium">jiva-core update recommended — </span>
+                this version of Jivam was built for jiva-core v{localChecks.requiredJivaVersion}.
+                You have v{localChecks.jivaCore.version}. Run{' '}
+                <code className="font-mono text-amber-200">npm install -g jiva-core</code> to update.
+              </div>
+            </motion.div>
+          )}
+
           {/* Auto-check hint */}
           {localChecks && !allOk && (
             <p className="text-xs text-center text-[var(--text-subtle)] mb-4">
@@ -356,6 +375,24 @@ export function SetupScreen({ checks, onContinue }: Props) {
               <ArrowRight size={14} />
             </Button>
           </div>
+
+          {/* Cloud quick-start divider + button */}
+          <div className="flex items-center gap-3 my-5">
+            <div className="flex-1 h-px bg-[var(--border)]" />
+            <span className="text-xs text-[var(--text-subtle)]">or</span>
+            <div className="flex-1 h-px bg-[var(--border)]" />
+          </div>
+
+          <button
+            onClick={() => window.electron?.cloud?.openWindow()}
+            className="w-full flex items-center justify-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)]/50 px-4 py-3 text-sm text-[var(--text-muted)] hover:text-[var(--text)] hover:border-[rgba(139,92,246,0.4)] hover:bg-[rgba(139,92,246,0.06)] transition-all duration-200"
+          >
+            <Zap size={14} className="text-[var(--accent)]" />
+            <span>
+              <span className="font-medium text-[var(--text)]">Start with Cloud</span>
+              <span className="ml-1.5">— no installation required</span>
+            </span>
+          </button>
         </motion.div>
       </div>
 

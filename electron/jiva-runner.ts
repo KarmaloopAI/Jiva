@@ -6,6 +6,10 @@ import path from 'path'
 import { pathToFileURL } from 'url'
 import { writeDirective } from './directive-manager'
 import { readConfig } from './config-manager'
+import * as harness from './harness'
+import type { Completer } from './harness'
+import { parseLogLine } from './code-runner'
+import type { CodeLogEvent } from './code-runner'
 
 /**
  * Resolve the absolute path to jiva-core's main entry point.
@@ -85,6 +89,7 @@ export class JivaRunner extends EventEmitter {
   private workspace: unknown = null      // WorkspaceManager
   private conversationManager: unknown = null
   private personaManager: unknown = null
+  private jivaLogger: unknown = null     // jiva-core logger singleton (for direct hook)
   private currentPersona: string | null = null
   private currentConversationId: string | null = null
 
@@ -277,6 +282,9 @@ export class JivaRunner extends EventEmitter {
         condensingThreshold: 30,
       })
 
+      // Store the jiva-core logger so runChat() can hook into it per call
+      this.jivaLogger = logger
+
       this.currentPersona = persona ?? null
       this.setStatus('ready')
       console.log('[JivaRunner] Initialized successfully')
@@ -289,6 +297,181 @@ export class JivaRunner extends EventEmitter {
     }
   }
 
+  private makeCompleter(): Completer {
+    const orch = this.orchestrator as Record<string, unknown>
+    return async (systemPrompt: string, userPrompt: string): Promise<string | null> => {
+      for (const method of ['complete', 'generateResponse', 'generate', 'chat', 'invoke']) {
+        if (typeof orch[method] !== 'function') continue
+        try {
+          const fn = (orch[method] as (msgs: Array<{ role: string; content: string }>) => Promise<{ content: string }>).bind(orch)
+          const result = await fn([
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+          ])
+          return result.content ?? null
+        } catch {
+          // try next method
+        }
+      }
+      return null
+    }
+  }
+
+  /**
+   * Send a message to the Jiva agent and return the result.
+   * Emits 'phase-update' events as execution progresses.
+   *
+   * Since DualAgent.chat() is synchronous end-to-end (no event emitter),
+   * we emit a simulated phase timeline based on typical durations.
+   */
+  /**
+   * Attach a per-call handler to the jiva-core logger.
+   * Tries multiple hook patterns since we can't guarantee the logger's exact API.
+   * Returns a cleanup function that removes the handler.
+   */
+  private hookLogger(onLog: (event: CodeLogEvent) => void): () => void {
+    const log = this.jivaLogger as Record<string, unknown> | null
+    if (!log) return () => {}
+
+    const emit = (level: string, tag: string, message: string) => {
+      const lvl = level.toLowerCase()
+      onLog({
+        timestamp: new Date().toISOString(),
+        level: (lvl === 'warn' || lvl === 'error' ? lvl : 'info') as CodeLogEvent['level'],
+        tag,
+        message,
+      })
+    }
+
+    // Pattern 1: EventEmitter 'log' event — common for custom loggers
+    // Signature variants: (level, tag, msg) or ({ level, tag, message }) or (level, msg)
+    if (typeof log.on === 'function') {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const handler = (...args: any[]) => {
+        if (args.length >= 3 && typeof args[0] === 'string') {
+          emit(args[0], args[1] ?? 'jiva', args[2])
+        } else if (args.length >= 2 && typeof args[0] === 'string') {
+          emit('info', 'jiva', args[1])
+        } else if (args.length >= 1 && typeof args[0] === 'object') {
+          const e = args[0] as Record<string, unknown>
+          emit(String(e.level ?? 'info'), String(e.tag ?? e.name ?? 'jiva'), String(e.message ?? e.msg ?? ''))
+        }
+      }
+      try {
+        ;(log.on as (e: string, fn: unknown) => void)('log', handler)
+        return () => {
+          if (typeof log.off === 'function') (log.off as (e: string, fn: unknown) => void)('log', handler)
+          else if (typeof log.removeListener === 'function') (log.removeListener as (e: string, fn: unknown) => void)('log', handler)
+        }
+      } catch {}
+    }
+
+    // Pattern 2: addTransport / addHandler
+    for (const addMethod of ['addTransport', 'addHandler', 'addSink']) {
+      if (typeof log[addMethod] !== 'function') continue
+      const removeMethod = addMethod.replace('add', 'remove')
+      const transport = {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        write: (entry: Record<string, unknown>) => {
+          emit(String(entry.level ?? 'info'), String(entry.tag ?? entry.name ?? 'jiva'), String(entry.message ?? entry.msg ?? ''))
+        },
+        // Some loggers call log() instead of write()
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        log: (entry: Record<string, unknown>) => {
+          emit(String(entry.level ?? 'info'), String(entry.tag ?? entry.name ?? 'jiva'), String(entry.message ?? entry.msg ?? ''))
+        },
+      }
+      try {
+        ;(log[addMethod] as (t: unknown) => void)(transport)
+        return () => {
+          if (typeof log[removeMethod] === 'function') {
+            try { (log[removeMethod] as (t: unknown) => void)(transport) } catch {}
+          }
+        }
+      } catch {}
+    }
+
+    // Pattern 3: stdout interception — last resort for loggers that only write to stdout
+    const origWrite = process.stdout.write.bind(process.stdout)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    process.stdout.write = (data: string | Uint8Array, ...args: any[]) => {
+      const text = typeof data === 'string' ? data : Buffer.from(data).toString()
+      for (const line of text.split('\n')) {
+        // Try strict structured format first
+        const structured = parseLogLine(line)
+        if (structured) { onLog(structured); continue }
+        // Lenient fallback: any line mentioning a tool call
+        const toolMatch = /(?:tool(?:\s+call)?|calling|executing)[:\s]+([^\s(]+)/i.exec(line.trim())
+        if (toolMatch) {
+          onLog({ timestamp: new Date().toISOString(), level: 'info', tag: 'jiva', message: `Tool: ${toolMatch[1]}` })
+        }
+      }
+      return origWrite(data, ...args)
+    }
+    return () => { process.stdout.write = origWrite }
+  }
+
+  private async runChat(
+    prompt: string,
+    startTime: number,
+    onLog?: (event: CodeLogEvent) => void
+  ): Promise<JivaRunResult> {
+    const unhook = onLog ? this.hookLogger(onLog) : null
+
+    const agent = this.agent as {
+      chat(prompt: string): Promise<{
+        content: string
+        iterations: number
+        toolsUsed: string[]
+        plan?: { subtasks: string[]; reasoning: string }
+      }>
+    }
+
+    let response: { content: string; iterations: number; toolsUsed: string[]; plan?: { subtasks: string[]; reasoning: string } }
+    try {
+      response = await agent.chat(prompt)
+    } finally {
+      unhook?.()
+    }
+
+    // Synthesise tool events from toolsUsed if none were emitted during execution
+    // (covers the case where DualAgent doesn't log intermediately)
+    if (onLog && response.toolsUsed?.length) {
+      for (const tool of response.toolsUsed) {
+        onLog({ timestamp: new Date().toISOString(), level: 'info', tag: 'jiva', message: `Tool: ${tool}` })
+      }
+    }
+
+    // Capture conversation ID (auto-saved by DualAgent).
+    let convId: string | null = null
+    try {
+      convId = (this.conversationManager as {
+        getCurrentConversationId?(): string | null
+      }).getCurrentConversationId?.() ?? null
+    } catch {}
+
+    if (!convId) {
+      try {
+        convId = await (this.agent as {
+          saveConversation(): Promise<string | null>
+        }).saveConversation()
+      } catch {}
+    }
+
+    if (convId) this.currentConversationId = convId
+
+    return {
+      content: response.content,
+      iterations: response.iterations,
+      toolsUsed: response.toolsUsed ?? [],
+      plan: response.plan
+        ? { subtasks: response.plan.subtasks ?? [], reasoning: response.plan.reasoning }
+        : null,
+      durationMs: Date.now() - startTime,
+      conversationId: this.currentConversationId ?? undefined,
+    }
+  }
+
   /**
    * Send a message to the Jiva agent and return the result.
    * Emits 'phase-update' events as execution progresses.
@@ -298,7 +481,9 @@ export class JivaRunner extends EventEmitter {
    */
   async chat(
     prompt: string,
-    onPhase: (phase: PhaseUpdate) => void
+    onPhase: (phase: PhaseUpdate) => void,
+    opts?: { deepRun?: boolean },
+    onLog?: (event: CodeLogEvent) => void
   ): Promise<JivaRunResult> {
     if (!this.agent) {
       throw new Error('JivaRunner not initialized. Call initialize() first.')
@@ -310,65 +495,24 @@ export class JivaRunner extends EventEmitter {
     this.setStatus('busy')
     const startTime = Date.now()
 
-    // Emit simulated phase updates since DualAgent has no event emitter
-    // Phase timing based on observed real-world durations:
-    // - Planning: starts immediately
-    // - Executing: ~3-8s after planning starts
-    // - Synthesizing: toward the end
     onPhase('planning')
     const executingTimer = setTimeout(() => onPhase('executing'), 5000)
     const synthesizingTimer = setTimeout(() => onPhase('synthesizing'), 20000)
 
     try {
-      const agent = this.agent as {
-        chat(prompt: string): Promise<{
-          content: string
-          iterations: number
-          toolsUsed: string[]
-          plan?: { subtasks: string[]; reasoning: string }
-        }>
-      }
+      let result: JivaRunResult
 
-      const response = await agent.chat(prompt)
+      if (opts?.deepRun) {
+        result = await harness.run(prompt, this.makeCompleter(), p => this.runChat(p, startTime, onLog))
+      } else {
+        result = await this.runChat(prompt, startTime, onLog)
+      }
 
       clearTimeout(executingTimer)
       clearTimeout(synthesizingTimer)
       onPhase('done')
-
-      // Capture conversation ID after chat completes (auto-saved by DualAgent).
-      // Try getCurrentConversationId() first; fall back to saveConversation() if unavailable.
-      let convId: string | null = null
-      try {
-        convId = (this.conversationManager as {
-          getCurrentConversationId?(): string | null
-        }).getCurrentConversationId?.() ?? null
-      } catch {}
-
-      if (!convId) {
-        try {
-          convId = await (this.agent as {
-            saveConversation(): Promise<string | null>
-          }).saveConversation()
-        } catch {}
-      }
-
-      if (convId) this.currentConversationId = convId
-
       this.setStatus('ready')
-
-      return {
-        content: response.content,
-        iterations: response.iterations,
-        toolsUsed: response.toolsUsed ?? [],
-        plan: response.plan
-          ? {
-              subtasks: response.plan.subtasks ?? [],
-              reasoning: response.plan.reasoning,
-            }
-          : null,
-        durationMs: Date.now() - startTime,
-        conversationId: this.currentConversationId ?? undefined,
-      }
+      return result
     } catch (err) {
       clearTimeout(executingTimer)
       clearTimeout(synthesizingTimer)
