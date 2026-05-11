@@ -184,9 +184,16 @@ export function setupIpcHandlers(
     // (works for both the main local window and the separate cloud window)
     const sender = event.sender
 
+    // Detect cloud window by URL param so we can wait for runner init
+    const senderUrl = sender.getURL()
+    const isCloudSender = senderUrl.includes('mode=cloud')
+
     try {
-      // Route to cloud runner if active
-      if (cloudRunner.isActive()) {
+      // Cloud window path: wait for runner if init is in flight, then route to cloud
+      if (isCloudSender) {
+        if (!cloudRunner.isActive()) {
+          await cloudRunner.waitUntilReady(30_000)
+        }
         const result = await cloudRunner.chat(prompt, (phase) => {
           sender.send('jiva:phase-update', phase)
         }, opts, (logEvent) => {
@@ -820,11 +827,13 @@ export function setupIpcHandlers(
   })
 
   ipcMain.handle('cloud:init', async (_event, userId: string, sessionId: string) => {
+    cloudRunner.startInit()
     try {
       await initCloudSession(userId, sessionId)
       cloudRunner.configure(userId, sessionId)
       return { success: true }
     } catch (err) {
+      cloudRunner.deactivate()
       return { success: false, error: err instanceof Error ? err.message : String(err) }
     }
   })

@@ -19,31 +19,69 @@ export interface CloudRunResult {
   conversationId?: string
 }
 
-interface SSEEvent {
-  type: 'status' | 'response' | 'error' | 'done'
-  data: unknown
-}
 
 export class CloudRunner {
   private userId: string | null = null
   private sessionId: string | null = null
   private _active = false
   private _abortController: AbortController | null = null
+  private _readyPromise: Promise<void> | null = null
+  private _readyResolve: (() => void) | null = null
+  private _readyReject: ((err: Error) => void) | null = null
+
+  /** Call this as soon as cloud:init starts — before the async session HTTP call. */
+  startInit(): void {
+    if (this._active) return
+    if (!this._readyPromise) {
+      this._readyPromise = new Promise<void>((resolve, reject) => {
+        this._readyResolve = resolve
+        this._readyReject = reject
+      })
+    }
+  }
 
   configure(userId: string, sessionId: string): void {
     this.userId = userId
     this.sessionId = sessionId
     this._active = true
+    this._readyResolve?.()
+    this._readyResolve = null
+    this._readyReject = null
+  }
+
+  /**
+   * Wait until the runner is configured, up to timeoutMs.
+   * Resolves immediately if already active.
+   * Rejects if init was never started or times out.
+   */
+  waitUntilReady(timeoutMs: number): Promise<void> {
+    if (this._active) return Promise.resolve()
+    if (!this._readyPromise) return Promise.reject(new Error('Cloud runner init not started'))
+    return Promise.race([
+      this._readyPromise,
+      new Promise<void>((_, reject) =>
+        setTimeout(() => reject(new Error(`Cloud runner not ready after ${timeoutMs}ms`)), timeoutMs)
+      ),
+    ])
   }
 
   isActive(): boolean {
     return this._active
   }
 
+  isInitializing(): boolean {
+    return !this._active && this._readyPromise !== null
+  }
+
   deactivate(): void {
     this._active = false
     this.userId = null
     this.sessionId = null
+    // Reject any pending waitUntilReady callers
+    this._readyReject?.(new Error('Cloud session deactivated'))
+    this._readyPromise = null
+    this._readyResolve = null
+    this._readyReject = null
   }
 
   stop(): void {
@@ -119,8 +157,10 @@ export class CloudRunner {
     let iterations = 0
     const toolsUsed: string[] = []
     let plan: CloudRunResult['plan'] = null
+    // Track the current SSE event type from `event:` lines (per SSE spec)
+    let currentEventType: string | null = null
 
-    while (true) {
+    outer: while (true) {
       const { done, value } = await reader.read()
       if (done) break
 
@@ -129,19 +169,27 @@ export class CloudRunner {
       buffer = lines.pop() ?? ''
 
       for (const line of lines) {
+        if (line.startsWith('event: ')) {
+          currentEventType = line.slice(7).trim()
+          continue
+        }
         if (!line.startsWith('data: ')) continue
         const raw = line.slice(6).trim()
         if (!raw || raw === '[DONE]') continue
 
-        let evt: SSEEvent
+        let d: Record<string, unknown>
         try {
-          evt = JSON.parse(raw) as SSEEvent
+          d = JSON.parse(raw) as Record<string, unknown>
         } catch {
           continue
         }
 
-        if (evt.type === 'status') {
-          const msg = (evt.data as Record<string, unknown>)?.message as string | undefined
+        // Use the SSE `event:` type; fall back to a `type` field in the payload
+        const evtType = currentEventType ?? (d.type as string | undefined)
+        currentEventType = null
+
+        if (evtType === 'status') {
+          const msg = d.message as string | undefined
           if (msg) {
             onPhase('executing')
             onLog?.({
@@ -151,16 +199,15 @@ export class CloudRunner {
               message: `Tool: ${msg}`,
             })
           }
-        } else if (evt.type === 'response') {
-          const d = evt.data as Record<string, unknown>
-          content = (d.response ?? d.content ?? '') as string
+        } else if (evtType === 'response') {
+          content = (d.content ?? d.response ?? '') as string
           iterations = (d.iterations ?? 0) as number
           if (Array.isArray(d.toolsUsed)) toolsUsed.push(...(d.toolsUsed as string[]))
           if (d.plan) plan = d.plan as CloudRunResult['plan']
-        } else if (evt.type === 'error') {
-          throw new Error((evt.data as Record<string, unknown>)?.message as string ?? 'Stream error')
-        } else if (evt.type === 'done') {
-          break
+        } else if (evtType === 'error') {
+          throw new Error(d.message as string ?? 'Stream error')
+        } else if (evtType === 'done') {
+          break outer
         }
       }
     }

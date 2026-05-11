@@ -141,7 +141,7 @@ function App() {
   // null = pre-flight check in progress, false = setup needed, true = ready to start
   const [setupDone, setSetupDone] = useState<boolean | null>(window.electron ? null : true)
   const [setupChecks, setSetupChecks] = useState<SetupChecks | null>(null)
-  const { startServer, serverStatus, setServerStatus, initPhaseListener, initJivaLogListener } = useJivaStore()
+  const { startServer, serverStatus, setServerStatus, setConnectionStatus, initPhaseListener, initJivaLogListener } = useJivaStore()
   const { loadPersonas } = usePersonaStore()
   const { theme, setTheme } = useSettingsStore()
   const { isCloudMode, cloudUser, restoreSession } = useAuthStore()
@@ -209,7 +209,10 @@ function App() {
 
     const init = async () => {
       try {
-        if (!isCloudMode) {
+        if (isCloudMode) {
+          // Cloud mode has no local server — mark as connected so the chat view renders
+          setConnectionStatus('connected')
+        } else {
           await startServer()
         }
       } catch (err) {

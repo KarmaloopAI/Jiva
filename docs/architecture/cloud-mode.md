@@ -37,7 +37,7 @@ The abstraction that makes this work is `src/lib/cloud-api.ts`.
 
 | Issue | File | Notes |
 |-------|------|-------|
-| **Chat does not work end-to-end** | `electron/cloud-runner.ts` | `cloudRunner.isActive()` returns false if `cloudApiInit` hasn't completed yet — which is now fire-and-forget. The `jiva:send-message` handler falls through to the local runner instead of cloud. Need to either (a) await `cloudApiInit` before enabling chat, or (b) have `cloudRunner.chat()` call `initCloudSession` lazily if not yet configured |
+| **Chat does not work end-to-end** | `electron/cloud-runner.ts` | ~~FIXED~~ `cloudRunner.startInit()` is called in `cloud:init` handler before the async HTTP call. `jiva:send-message` detects cloud senders via `event.sender.getURL().includes('mode=cloud')` and calls `cloudRunner.waitUntilReady(30_000)` if not yet active. Cloud Run cold starts up to 30s are handled. |
 | **Supabase email confirmation** | `electron/cloud-auth.ts` + `src/lib/cloud-api.ts` | If the Supabase project has email confirmation enabled, `cloudSignUp` returns the user object at top-level with no `access_token`. This is handled defensively now (`data.user ?? data`), but the UX shows no "check your email" message — user just sees the app with an unconfigured session |
 | **Session restoration** | `src/store/auth.store.ts` | `restoreSession()` fires and forgets `cloudApiInit`. If the cloud runner is never actually configured before a chat message, the message silently routes to the local runner |
 | **Sign-out in cloud window** | `src/store/auth.store.ts` | `signOut` clears `localStorage` and calls `cloudApiSignOut`. But `cloudRunner.deactivate()` is called from `ipc-handlers.ts cloud:sign-out` — this path works. What doesn't work: the `cloudSignOut` IPC handler in `ipc-handlers.ts` passes no `accessToken` (it just calls `cloudRunner.deactivate()`), so Supabase session is not actually revoked server-side |
@@ -130,25 +130,16 @@ electron/
 
 ## What Needs to Be Fixed Next
 
-### Priority 1 — Chat must actually work
+### Priority 1 — Chat must actually work ✓ FIXED
 
-`cloudRunner.configure(userId, sessionId)` is called inside `cloud:init` IPC,
-which is fired-and-forgotten from `auth.store.ts`. By the time the user sends
-their first message, `cloudRunner.isActive()` may still be `false` (if `cloud:init`
-hasn't completed), causing silent fallthrough to the local runner.
+`cloudRunner.startInit()` is now called at the top of `cloud:init` before the async
+`initCloudSession` HTTP call. `jiva:send-message` detects cloud senders via
+`event.sender.getURL().includes('mode=cloud')` and awaits `cloudRunner.waitUntilReady(30_000)`
+before routing. Cloud Run cold starts up to 30 s are handled.
 
-**Option A (recommended):** Make `jiva:send-message` wait for the cloud runner
-to become active. Add a `cloudRunner.waitUntilReady(timeoutMs)` method that
-returns a promise resolving when `_active` is set to true, or rejects on timeout.
-Call this at the top of the cloud branch in `ipc-handlers.ts`.
+### Priority 2 — Confirm Cloud Run API contract ✓ VERIFIED
 
-**Option B:** In `cloudRunner.chat()`, lazy-call `initCloudSession` if not yet
-configured (requires storing `userId`/`sessionId` from sign-in before `configure`
-is called).
-
-### Priority 2 — Confirm Cloud Run API contract
-
-The Cloud Run endpoints are assumed to be:
+The Cloud Run endpoints are confirmed via `~/dev/Jiva/docs/deployment/HTTP_API.md`:
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
@@ -164,13 +155,22 @@ Request headers: `x-tenant-id: userId`, `x-session-id: sessionId`
 The Cloud Run service may have a different API. Check the backend source or
 deploy logs before debugging further.
 
-SSE event types expected by `cloud-runner.ts`:
-```json
-{ "type": "status",   "data": { "message": "tool name" } }
-{ "type": "response", "data": { "response": "...", "iterations": 1, "toolsUsed": [...] } }
-{ "type": "done",     "data": {} }
-{ "type": "error",    "data": { "message": "error text" } }
+SSE event format (per `docs/deployment/HTTP_API.md` in the jiva-core repo):
 ```
+event: status
+data: {"message":"Processing request..."}
+
+event: response
+data: {"content":"...","iterations":3,"toolsUsed":[...]}
+
+event: done
+data: {"success":true}
+
+event: error
+data: {"message":"error text"}
+```
+The event type is carried in the SSE `event:` line, **not** as a `type` field inside the JSON body.
+Non-streaming `/api/chat` response field is `response` (not `content`).
 
 ### Priority 3 — Supabase email confirmation
 
