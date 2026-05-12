@@ -67,4 +67,4 @@ linux:
 publish:
   provider: github
   owner: KarmaloopAI
-  repo: Jivam
+  repo: JivamAI

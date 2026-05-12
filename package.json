@@ -11,11 +11,18 @@
     "dist:win": "cross-env NODE_OPTIONS= npm run build && electron-builder --win",
     "dist:linux": "cross-env NODE_OPTIONS= npm run build && electron-builder --linux",
     "dist:all": "cross-env NODE_OPTIONS= npm run build && electron-builder --mac --win --linux",
+    "dist:publish:mac": "cross-env NODE_OPTIONS= npm run build && electron-builder --mac --publish always",
+    "dist:publish:win": "cross-env NODE_OPTIONS= npm run build && electron-builder --win --publish always",
+    "dist:publish:linux": "cross-env NODE_OPTIONS= npm run build && electron-builder --linux --publish always",
+    "dist:publish:all": "cross-env NODE_OPTIONS= npm run build && electron-builder --mac --win --linux --publish always",
     "preview": "vite preview",
     "start": "npm run dev"
   },
   "keywords": [],
-  "author": "Karmaloop AI",
+  "author": {
+    "name": "Karmaloop AI",
+    "email": "achatterjee@gritsa.com"
+  },
   "license": "MIT",
   "jivaCompatibleVersion": "0.3.44",
   "dependencies": {
