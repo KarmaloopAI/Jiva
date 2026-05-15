@@ -17,7 +17,7 @@ import { AgentContext } from './types/agent-context.js';
 import { WorkerResult } from './worker-agent.js';
 import { Message } from '../models/base.js';
 import { logger } from '../utils/logger.js';
-import { orchestrationLogger } from '../utils/orchestration-logger.js';
+import { OrchestrationLogger, orchestrationLogger } from '../utils/orchestration-logger.js';
 
 export interface ManagerTask {
   userRequest: string;
@@ -42,11 +42,18 @@ export class ManagerAgent {
   private workspace: WorkspaceManager;
   private personaManager?: PersonaManager;
   private conversationHistory: Message[] = [];
+  private readonly orchLogger: OrchestrationLogger;
 
-  constructor(orchestrator: ModelOrchestrator, workspace: WorkspaceManager, personaManager?: PersonaManager) {
+  constructor(
+    orchestrator: ModelOrchestrator,
+    workspace: WorkspaceManager,
+    personaManager?: PersonaManager,
+    orchLogger?: OrchestrationLogger,
+  ) {
     this.orchestrator = orchestrator;
     this.workspace = workspace;
     this.personaManager = personaManager;
+    this.orchLogger = orchLogger ?? orchestrationLogger;
     
     // Set persona context for logging
     if (personaManager) {
@@ -135,7 +142,7 @@ IMPORTANT:
    */
   async createPlan(task: ManagerTask, agentContext?: AgentContext): Promise<ManagerPlan> {
     logger.info('[Manager] Creating plan...');
-    orchestrationLogger.logManagerCreatePlan(task.userRequest, task.context || '');
+    this.orchLogger.logManagerCreatePlan(task.userRequest, task.context || '');
 
     const planPrompt = `User Request: ${task.userRequest}
 ${task.context ? `\nContext: ${task.context}` : ''}
@@ -219,7 +226,7 @@ Respond ONLY with valid JSON in this exact format (no other text before or after
       plan.subtasks.forEach((task, i) => logger.info(`  ${i + 1}. ${task}`));
     }
 
-    orchestrationLogger.logManagerPlanCreated(plan.subtasks, plan.reasoning);
+    this.orchLogger.logManagerPlanCreated(plan.subtasks, plan.reasoning);
 
     return { subtasks: plan.subtasks, reasoning: plan.reasoning, conversational: isConversational };
   }
@@ -229,7 +236,7 @@ Respond ONLY with valid JSON in this exact format (no other text before or after
    */
   async reviewResults(subtask: string, workerResult: string): Promise<ManagerDecision> {
     logger.info(`[Manager] Reviewing: "${subtask}"`);
-    orchestrationLogger.logManagerReview(subtask, workerResult);
+    this.orchLogger.logManagerReview(subtask, workerResult);
 
     const reviewPrompt = `The Worker completed this subtask:
 Subtask: ${subtask}
@@ -270,7 +277,7 @@ NEXT_ACTION: <what to do next, if CONTINUE>`;
     logger.info(`[Manager] Decision: ${decision}`);
 
     const isComplete = decision.toUpperCase().includes('COMPLETE');
-    orchestrationLogger.logManagerDecision(isComplete, reasoning, nextAction || undefined);
+    this.orchLogger.logManagerDecision(isComplete, reasoning, nextAction || undefined);
 
     return {
       isComplete,
@@ -354,7 +361,7 @@ REJECT: <one sentence explaining what specific data is still missing>`;
    */
   async synthesizeResponse(allResults: { subtask: string; result: string; accepted?: boolean }[], agentContext?: AgentContext): Promise<string> {
     logger.info('[Manager] Synthesizing final response...');
-    orchestrationLogger.logManagerSynthesize(allResults.length);
+    this.orchLogger.logManagerSynthesize(allResults.length);
 
     const acceptedResults = allResults.filter(r => r.accepted !== false);
     const failedResults = allResults.filter(r => r.accepted === false);

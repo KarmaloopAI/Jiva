@@ -662,18 +662,44 @@ For the full reference see [Code Mode Architecture](../architecture/CODE_MODE.md
 
 ## Cloud Run Configuration
 
-For Cloud Run deployments, configuration is loaded dynamically from GCS bucket using the StorageProvider. See [CLOUD_RUN_DEPLOYMENT.md](./CLOUD_RUN_DEPLOYMENT.md) for details.
+For Cloud Run deployments, configuration is loaded dynamically from GCS using a per-session scoped `StorageProvider`. See [CLOUD_RUN_DEPLOYMENT.md](../deployment/CLOUD_RUN_DEPLOYMENT.md) for full deployment details.
 
-Configuration storage path:
+### Configuration storage path
+
+All per-tenant configuration lives in a **single JSON file** per tenant:
+
 ```
-gs://your-bucket/{tenantId}/config/models.json
-gs://your-bucket/{tenantId}/config/mcpServers.json
+gs://your-bucket/{tenantId}/config.json
 ```
 
-The SessionManager automatically:
-1. Loads config from storage on session creation
-2. Falls back to environment variables if not found
-3. Saves default config back to storage
+The file combines model config and MCP server list — there is no separate `models.json` / `mcpServers.json` split.
+
+### What SessionManager does on session creation
+
+1. Calls `storageProvider.createSessionScoped({ tenantId, sessionId })` to get an isolated provider instance with a fixed, immutable GCS path prefix — concurrent tenants can never corrupt each other's paths.
+2. Reads `{tenantId}/config.json` from GCS (cache is invalidated per-tenant on each new session).
+3. Falls back to server-level environment variables (`JIVA_MODEL_*`, etc.) if no per-tenant config file is found.
+4. Saves the resolved config back to `{tenantId}/config.json` so subsequent sessions inherit it.
+
+### Uploading per-tenant config
+
+```bash
+cat > config.json <<'EOF'
+{
+  "models": {
+    "reasoning": {
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions",
+      "apiKey": "gsk_...",
+      "model": "openai/gpt-oss-120b"
+    }
+  },
+  "mcpServers": [
+    { "name": "tavily-mcp", "command": "npx", "args": ["-y", "tavily-mcp@latest"], "env": { "TAVILY_API_KEY": "tvly-..." } }
+  ]
+}
+EOF
+gsutil cp config.json gs://your-bucket/my-tenant/config.json
+```
 
 ### Programmatic Configuration
 

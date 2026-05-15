@@ -20,7 +20,7 @@ import { WorkspaceManager } from '../../core/workspace.js';
 import { ConversationManager } from '../../core/conversation-manager.js';
 import { StorageProvider } from '../../storage/provider.js';
 import { logger } from '../../utils/logger.js';
-import { orchestrationLogger } from '../../utils/orchestration-logger.js';
+import { OrchestrationLogger } from '../../utils/orchestration-logger.js';
 import { createModelClient } from '../../models/model-client.js';
 import { Message } from '../../models/base.js';
 import { PersonaManager } from '../../personas/persona-manager.js';
@@ -48,12 +48,19 @@ interface ActiveSession {
   workspace: WorkspaceManager;
   conversationManager: ConversationManager;
   personaManager: PersonaManager;
+  /** Session-scoped storage provider — has a fixed (tenantId, sessionId) context
+   *  and does NOT share mutable state with other sessions. */
+  storageProvider: StorageProvider;
+  /** Per-session orchestration logger — never shared across tenants. */
+  orchestrationLogger: OrchestrationLogger;
   info: SessionInfo;
   idleTimer?: NodeJS.Timeout;
 }
 
 export class SessionManager extends EventEmitter {
   private sessions: Map<string, ActiveSession> = new Map();
+  /** Deduplicates concurrent creation requests for the same session key. */
+  private pendingSessions: Map<string, Promise<ActiveSession>> = new Map();
   private config: SessionConfig;
 
   constructor(config: SessionConfig) {
@@ -63,12 +70,16 @@ export class SessionManager extends EventEmitter {
   }
 
   /**
-   * Get or create a session
+   * Get or create a session.
+   *
+   * Concurrent calls for the same (tenantId, sessionId) are deduplicated:
+   * the second caller awaits the same creation Promise so only one session
+   * object (and its MCP sub-processes) is ever created per key.
    */
   async getOrCreateSession(tenantId: string, sessionId: string): Promise<IAgent> {
     const key = this.getSessionKey(tenantId, sessionId);
 
-    // Return existing session
+    // Fast path — session already active
     if (this.sessions.has(key)) {
       const session = this.sessions.get(key)!;
       this.resetIdleTimer(key);
@@ -78,29 +89,41 @@ export class SessionManager extends EventEmitter {
       return session.agent;
     }
 
+    // Deduplication — a concurrent request is already creating this session
+    if (this.pendingSessions.has(key)) {
+      logger.debug(`[SessionManager] Awaiting pending session creation: ${key}`);
+      const session = await this.pendingSessions.get(key)!;
+      return session.agent;
+    }
+
     // Check session limit
     if (this.sessions.size >= this.config.maxConcurrentSessions) {
-      // Try to clean up idle sessions
       await this.cleanupIdleSessions();
-      
       if (this.sessions.size >= this.config.maxConcurrentSessions) {
         throw new Error(`Maximum concurrent sessions reached (${this.config.maxConcurrentSessions})`);
       }
     }
 
-    // Create new session
+    // Create new session; register the Promise before awaiting so concurrent
+    // callers that arrive while we await find it in pendingSessions.
     logger.info(`[SessionManager] Creating session: ${key}`);
     const codeModeEnabled = process.env.JIVA_CODE_MODE === 'true';
-    const session = await this.createSession(tenantId, sessionId, codeModeEnabled);
-    this.sessions.set(key, session);
-    this.resetIdleTimer(key);
+    const creationPromise = this.createSession(tenantId, sessionId, codeModeEnabled);
+    this.pendingSessions.set(key, creationPromise);
 
-    // Configure logger and orchestration logger for this session
-    logger.setSessionId(sessionId);
-    orchestrationLogger.setStorageProvider(this.config.storageProvider, sessionId);
+    try {
+      const session = await creationPromise;
+      this.sessions.set(key, session);
+      this.resetIdleTimer(key);
 
-    this.emit('sessionCreated', { tenantId, sessionId });
-    return session.agent;
+      logger.setSessionId(sessionId);
+
+      this.emit('sessionCreated', { tenantId, sessionId });
+      return session.agent;
+    } finally {
+      // Always remove from pending, even on error
+      this.pendingSessions.delete(key);
+    }
   }
 
   /**
@@ -117,11 +140,21 @@ export class SessionManager extends EventEmitter {
     };
 
     try {
-      // Set storage context
-      this.config.storageProvider.setContext({ tenantId, sessionId });
+      // Obtain a session-scoped storage provider.  This is a new, isolated
+      // instance whose context (tenantId / sessionId) is fixed for the lifetime
+      // of this session.  It shares the underlying GCS bucket connection and
+      // per-tenant config cache with the singleton parent, but has its own
+      // mutable state (logBuffer, context), so concurrent sessions from
+      // different tenants never clobber each other's GCS paths.
+      const storageProvider = this.config.storageProvider.createSessionScoped({ tenantId, sessionId });
+
+      // Per-session orchestration logger.  Instantiated here (not via the
+      // module-level singleton) so every session writes to its own buffer and
+      // GCS path — concurrent tenants no longer cross-contaminate log output.
+      const orchLogger = new OrchestrationLogger(storageProvider, sessionId);
 
       // Load or create config
-      let modelConfig = await this.config.storageProvider.getConfig<{
+      let modelConfig = await storageProvider.getConfig<{
         reasoning: {
           provider: string;
           apiKey: string;
@@ -147,7 +180,7 @@ export class SessionManager extends EventEmitter {
           },
           multimodal: null, // Optional
         };
-        await this.config.storageProvider.setConfig('models', modelConfig);
+        await storageProvider.setConfig('models', modelConfig);
       } else {
         // Override stored config with environment variables if present
         if (envEndpoint) modelConfig.reasoning.endpoint = envEndpoint;
@@ -215,7 +248,7 @@ export class SessionManager extends EventEmitter {
       }
       
       // Load MCP server config from storage
-      const mcpConfig = await this.config.storageProvider.getConfig<Array<{
+      const mcpConfig = await storageProvider.getConfig<Array<{
         name: string;
         command: string;
         args?: string[];
@@ -237,15 +270,15 @@ export class SessionManager extends EventEmitter {
       await mcpManager.initialize(baseMcpServers);
 
       // Initialize workspace
-      const workspace = new WorkspaceManager(this.config.storageProvider);
+      const workspace = new WorkspaceManager(storageProvider);
       await workspace.initialize();
 
       // Initialize conversation manager
-      const conversationManager = new ConversationManager(this.config.storageProvider);
+      const conversationManager = new ConversationManager(storageProvider);
 
       // Initialize persona manager with per-tenant storage provider
       // This ensures persona config is isolated per tenant, not shared globally
-      const personaManager = new PersonaManager([], false, this.config.storageProvider);
+      const personaManager = new PersonaManager([], false, storageProvider);
       await personaManager.initialize();
 
       // Merge persona MCP servers with session MCP servers
@@ -264,7 +297,7 @@ export class SessionManager extends EventEmitter {
       }
 
       // Load or create conversation
-      const existingConversation = await this.config.storageProvider.loadConversation(sessionId);
+      const existingConversation = await storageProvider.loadConversation(sessionId);
       let conversationHistory: Message[] = [];
       
       if (existingConversation) {
@@ -296,6 +329,7 @@ export class SessionManager extends EventEmitter {
           maxSubtasks: 20,
           maxIterations: 10,
           autoSave: true,
+          orchestrationLogger: orchLogger,
         });
       }
 
@@ -307,6 +341,8 @@ export class SessionManager extends EventEmitter {
         workspace,
         conversationManager,
         personaManager,
+        storageProvider,
+        orchestrationLogger: orchLogger,
         info,
       };
 
@@ -337,11 +373,16 @@ export class SessionManager extends EventEmitter {
     }
 
     try {
+      // Use the session's own scoped provider and logger so we write to the
+      // right tenant path regardless of which tenant's context is currently
+      // set on the shared singleton.
+      const { storageProvider, orchestrationLogger: orchLogger } = session;
+
       // Persist conversation state
       const conversationHistory = session.agent.getConversationHistory();
       if (conversationHistory.length > 0) {
         const tokenUsage = session.agent.getTokenUsage();
-        await this.config.storageProvider.saveConversation({
+        await storageProvider.saveConversation({
           metadata: {
             id: sessionId,
             created: session.info.createdAt.toISOString(),
@@ -356,11 +397,11 @@ export class SessionManager extends EventEmitter {
         logger.debug(`[SessionManager] Persisted ${conversationHistory.length} messages`);
       }
 
-      // Flush orchestration logs
-      await orchestrationLogger.flush();
+      // Flush orchestration logs for this session
+      await orchLogger.flush();
 
       // Flush structured logs
-      await this.config.storageProvider.flushLogs();
+      await storageProvider.flushLogs();
 
       // Clean up session-specific logger context
       logger.clearSessionContext(sessionId);

@@ -17,23 +17,41 @@ interface OrchestrationEvent {
   details: Record<string, any>;
 }
 
-class OrchestrationLogger {
+export class OrchestrationLogger {
   private static instance: OrchestrationLogger;
   private logFilePath: string | null = null;
   private logStream: fs.WriteStream | null = null;
   private sessionStart: Date;
-  
+
   // Cloud-aware: buffer logs and flush to storage provider
   private storageProvider: StorageProvider | null = null;
   private sessionId: string | null = null;
   private logBuffer: string[] = [];
   private maxBufferSize: number = 100;
 
-  private constructor() {
+  /**
+   * Create an OrchestrationLogger.
+   *
+   * Called with no arguments → CLI mode: writes to a timestamped file in
+   * ~/.jiva/logs/ (backward-compatible singleton behaviour).
+   *
+   * Called with (storageProvider, sessionId) → HTTP/cloud mode: buffers events
+   * in memory and flushes them to the session-scoped storage provider.  No
+   * filesystem log file is created.  Each HTTP session should own its own
+   * instance so events never cross-contaminate between tenants.
+   */
+  constructor(storageProvider?: StorageProvider, sessionId?: string) {
     this.sessionStart = new Date();
-    this.initializeLogFile();
+    if (storageProvider && sessionId) {
+      this.storageProvider = storageProvider;
+      this.sessionId = sessionId;
+      // Cloud mode: skip filesystem logging
+    } else {
+      this.initializeLogFile();
+    }
   }
 
+  /** @deprecated Use per-session constructor instead — see class jsdoc. */
   static getInstance(): OrchestrationLogger {
     if (!OrchestrationLogger.instance) {
       OrchestrationLogger.instance = new OrchestrationLogger();
@@ -42,7 +60,8 @@ class OrchestrationLogger {
   }
 
   /**
-   * Configure for cloud/HTTP mode with storage provider
+   * @deprecated Pass storageProvider + sessionId to the constructor instead.
+   * Kept for backward compatibility; will be removed in a future version.
    */
   setStorageProvider(storageProvider: StorageProvider, sessionId: string) {
     this.storageProvider = storageProvider;

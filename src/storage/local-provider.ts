@@ -60,6 +60,19 @@ export class LocalStorageProvider extends StorageProvider {
   }
 
   /**
+   * For local storage each session is cheap to create — just fork a new
+   * instance with the same basePath and a fixed context.  The in-memory
+   * configCache is not shared intentionally: local provider is single-session
+   * (CLI), so sharing is unnecessary and isolation keeps the semantics clean.
+   */
+  override createSessionScoped(context: import('./types.js').StorageContext): LocalStorageProvider {
+    const scoped = new LocalStorageProvider(this.infraConfig);
+    scoped.initialized = this.initialized;
+    scoped.setContext(context);
+    return scoped;
+  }
+
+  /**
    * Update session ID (useful for CLI when starting new conversation)
    */
   setSessionId(sessionId: string): void {

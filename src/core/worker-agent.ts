@@ -17,7 +17,7 @@ import { AgentContext } from './types/agent-context.js';
 import { Message, MessageContent, ModelResponse, Tool } from '../models/base.js';
 import { formatToolResult } from '../models/harmony.js';
 import { logger } from '../utils/logger.js';
-import { orchestrationLogger } from '../utils/orchestration-logger.js';
+import { OrchestrationLogger, orchestrationLogger } from '../utils/orchestration-logger.js';
 
 /** Max consecutive empty responses before breaking out */
 const MAX_EMPTY_RESPONSES = 4;
@@ -101,19 +101,22 @@ export class WorkerAgent {
   private agentSpawner?: AgentSpawner;
   private maxIterations: number;
   private contextMemory: WorkerContextMemory;
+  private readonly orchLogger: OrchestrationLogger;
 
   constructor(
     orchestrator: ModelOrchestrator,
     mcpManager: MCPServerManager,
     workspace: WorkspaceManager,
     maxIterations: number = 20,
-    personaManager?: PersonaManager
+    personaManager?: PersonaManager,
+    orchLogger?: OrchestrationLogger,
   ) {
     this.orchestrator = orchestrator;
     this.mcpManager = mcpManager;
     this.workspace = workspace;
     this.personaManager = personaManager;
     this.maxIterations = maxIterations;
+    this.orchLogger = orchLogger ?? orchestrationLogger;
     this.contextMemory = {
       recentFileReads: new Map(),
       filesJustModified: new Set(),
@@ -140,7 +143,7 @@ export class WorkerAgent {
    */
   async executeSubtask(subtask: WorkerSubtask, agentContext?: AgentContext): Promise<WorkerResult> {
     logger.info(`[Worker] Starting: "${subtask.instruction}"`);
-    orchestrationLogger.logWorkerStart(subtask.instruction, subtask.context || '');
+    this.orchLogger.logWorkerStart(subtask.instruction, subtask.context || '');
 
     // Reset context memory for new subtask
     this.contextMemory = {
@@ -291,7 +294,7 @@ Please complete this subtask and report your findings.`,
     for (let iteration = 0; iteration < this.maxIterations; iteration++) {
       iterationCount = iteration + 1;
       logger.debug(`  [Worker] Iteration ${iteration + 1}/${this.maxIterations}`);
-      orchestrationLogger.logWorkerIteration(iteration + 1, this.maxIterations);
+      this.orchLogger.logWorkerIteration(iteration + 1, this.maxIterations);
 
       // Two-phase nudges: keep-going at 70%, wrap-up at 90%
       const iterPct = iteration / this.maxIterations;
@@ -668,7 +671,7 @@ Please complete this subtask and report your findings.`,
           }
 
           try {
-            orchestrationLogger.logWorkerToolCall(toolName, args);
+            this.orchLogger.logWorkerToolCall(toolName, args);
 
             // Handle spawn_agent specially
             if (toolName === 'spawn_agent') {
@@ -694,7 +697,7 @@ ${spawnResult.result}
 Iterations: ${spawnResult.iterations}
 Tools used: ${spawnResult.toolsUsed.join(', ')}`;
 
-              orchestrationLogger.logWorkerToolResult(toolName, true, false);
+              this.orchLogger.logWorkerToolResult(toolName, true, false);
 
               const toolMessage = formatToolResult(toolCall.id, toolName, resultText);
               conversationHistory.push(toolMessage);
@@ -735,7 +738,7 @@ Tools used: ${spawnResult.toolsUsed.join(', ')}`;
               toolResultText = typeof result === 'string' ? result : JSON.stringify(result);
             }
 
-            orchestrationLogger.logWorkerToolResult(toolName, true, hasImages);
+            this.orchLogger.logWorkerToolResult(toolName, true, hasImages);
 
             const toolMessage = formatToolResult(toolCall.id, toolName, toolResultText);
             conversationHistory.push(toolMessage);
@@ -754,7 +757,7 @@ Tools used: ${spawnResult.toolsUsed.join(', ')}`;
           } catch (error) {
             const errorMsg = error instanceof Error ? error.message : String(error);
             logger.error(`  ✗ [Worker] Tool ${toolName} failed:`, error);
-            orchestrationLogger.logWorkerToolResult(toolName, false, false);
+            this.orchLogger.logWorkerToolResult(toolName, false, false);
 
             // Always push the raw tool error so the LLM sees what happened
             conversationHistory.push({
@@ -968,7 +971,7 @@ Tools used: ${spawnResult.toolsUsed.join(', ')}`;
                    !finalResult.includes('encountered errors') &&
                    !finalResult.includes('Max iterations reached') &&
                    !finalResult.includes('Validation required');
-    orchestrationLogger.logWorkerComplete(success, toolsUsed, iterationCount);
+    this.orchLogger.logWorkerComplete(success, toolsUsed, iterationCount);
 
     return {
       success,

@@ -17,7 +17,7 @@ import { WorkerAgent } from './worker-agent.js';
 import { AgentContext } from './types/agent-context.js';
 import { serializeAgentContext } from './utils/serialize-agent-context.js';
 import { logger } from '../utils/logger.js';
-import { orchestrationLogger } from '../utils/orchestration-logger.js';
+import { OrchestrationLogger, orchestrationLogger } from '../utils/orchestration-logger.js';
 import { Message } from '../models/base.js';
 
 export interface DualAgentConfig {
@@ -43,6 +43,12 @@ export interface DualAgentConfig {
    */
   maxMessagesBeforeCondense?: number;
   maxToolCalls?: number; // Maximum tool calls per subtask
+  /**
+   * Per-session OrchestrationLogger instance.  When provided (HTTP mode) each
+   * session owns its own logger so events never cross-contaminate between
+   * tenants.  Omit to use the module-level singleton (CLI mode).
+   */
+  orchestrationLogger?: OrchestrationLogger;
 }
 
 export interface DualAgentResponse {
@@ -74,6 +80,7 @@ export class DualAgent {
   private condensingThreshold: number;
   private compactionThreshold: number;
   private maxMessagesBeforeCondense: number;
+  private readonly orchLogger: OrchestrationLogger;
 
   private userConversationHistory: Message[] = [];
   private _stopped = false;
@@ -96,9 +103,13 @@ export class DualAgent {
       logger.warn('[DualAgent] condensingThreshold is deprecated — use compactionThreshold + maxMessagesBeforeCondense instead');
     }
 
+    // Use the per-session logger when running under the HTTP server, fall back
+    // to the module-level singleton for CLI (backward compatible).
+    this.orchLogger = config.orchestrationLogger ?? orchestrationLogger;
+
     // Initialize agents (Manager + Worker architecture)
-    this.manager = new ManagerAgent(this.orchestrator, this.workspace, this.personaManager || undefined);
-    this.worker = new WorkerAgent(this.orchestrator, this.mcpManager, this.workspace, this.maxIterations, this.personaManager || undefined);
+    this.manager = new ManagerAgent(this.orchestrator, this.workspace, this.personaManager || undefined, this.orchLogger);
+    this.worker = new WorkerAgent(this.orchestrator, this.mcpManager, this.workspace, this.maxIterations, this.personaManager || undefined, this.orchLogger);
 
     // Initialize AgentSpawner - always available as a baseline tool
     // Create a PersonaManager if one wasn't provided
@@ -239,7 +250,7 @@ VALIDATION GUIDANCE:
     logger.info(`>> User: ${userMessage}`);
     logger.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
-    orchestrationLogger.logUserMessage(userMessage);
+    this.orchLogger.logUserMessage(userMessage);
 
     // Check if conversation needs condensing BEFORE adding new message.
     // Token-based trigger: compacts when the last prompt was close to the context limit.
@@ -284,14 +295,14 @@ VALIDATION GUIDANCE:
     logger.info('─────────────────────────────────────────');
 
     const phaseStartTime = Date.now();
-    orchestrationLogger.logPhaseStart('PLANNING');
+    this.orchLogger.logPhaseStart('PLANNING');
 
     const plan = await this.manager.createPlan({
       userRequest: userMessage,
       context: serializeAgentContext(agentContext, 'manager'),
     }, agentContext);
 
-    orchestrationLogger.logPhaseEnd('PLANNING', Date.now() - phaseStartTime);
+    this.orchLogger.logPhaseEnd('PLANNING', Date.now() - phaseStartTime);
 
     // Conversational short-circuit: skip execution entirely for greetings, thank-yous, etc.
     if (plan.conversational) {
@@ -331,7 +342,7 @@ VALIDATION GUIDANCE:
     logger.info('─────────────────────────────────────────');
 
     const executionStartTime = Date.now();
-    orchestrationLogger.logPhaseStart('EXECUTION');
+    this.orchLogger.logPhaseStart('EXECUTION');
 
     const results: { subtask: string; result: string; accepted: boolean }[] = [];
     const subtasksToExecute = plan.subtasks.slice(0, this.maxSubtasks);
@@ -387,19 +398,19 @@ VALIDATION GUIDANCE:
       }
     }
 
-    orchestrationLogger.logPhaseEnd('EXECUTION', Date.now() - executionStartTime);
+    this.orchLogger.logPhaseEnd('EXECUTION', Date.now() - executionStartTime);
 
     // PHASE 3: Synthesize final response
     logger.info('\n[PHASE 3: Synthesis]');
     logger.info('─────────────────────────────────────────');
 
     const synthesisStartTime = Date.now();
-    orchestrationLogger.logPhaseStart('SYNTHESIS');
+    this.orchLogger.logPhaseStart('SYNTHESIS');
 
     const finalResponse = await this.synthesizeResponse(plan, results, agentContext);
     totalIterations += 1;
 
-    orchestrationLogger.logPhaseEnd('SYNTHESIS', Date.now() - synthesisStartTime);
+    this.orchLogger.logPhaseEnd('SYNTHESIS', Date.now() - synthesisStartTime);
 
     // Add assistant response to user conversation history
     this.userConversationHistory.push({
@@ -423,7 +434,7 @@ VALIDATION GUIDANCE:
     logger.info(`[+] Complete: ${totalIterations} iterations, ${allToolsUsed.length} tools used`);
     logger.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
-    orchestrationLogger.logFinalResponse(finalResponse, totalIterations, allToolsUsed);
+    this.orchLogger.logFinalResponse(finalResponse, totalIterations, allToolsUsed);
 
     return {
       content: finalResponse,
