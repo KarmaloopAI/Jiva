@@ -42,6 +42,26 @@ export abstract class StorageProvider {
     return this.initialized;
   }
 
+  /**
+   * Create an isolated, session-scoped copy of this provider with a fixed context.
+   *
+   * IMPORTANT for multi-tenancy: the shared provider singleton holds a single
+   * mutable `context` field.  If many concurrent requests each call setContext()
+   * on it, they corrupt each other's GCS paths.  Callers (SessionManager) must
+   * call this method instead and use the returned instance for all session I/O.
+   *
+   * The base implementation just sets context on `this` and returns `this` –
+   * which is only safe for single-session scenarios (e.g. CLI).  Subclasses
+   * that serve concurrent HTTP sessions MUST override this to return a new,
+   * context-isolated instance that shares connection/cache resources with the
+   * parent but has its own immutable context.
+   */
+  createSessionScoped(context: StorageContext): StorageProvider {
+    // Base/CLI fallback: mutate self (safe for single-session use).
+    this.setContext(context);
+    return this;
+  }
+
   // ─────────────────────────────────────────────────────────────
   // Context Management (CRITICAL for multi-tenancy)
   // ─────────────────────────────────────────────────────────────

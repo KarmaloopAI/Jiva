@@ -60,6 +60,9 @@ function determineProviderType(infraConfig?: StorageInfraConfig): StorageProvide
   // Explicit environment variable takes precedence
   const envProvider = process.env[ENV_VARS.PROVIDER];
   if (envProvider) {
+    // Normalise common aliases so ops can use short names in Cloud Run env vars
+    if (envProvider === 'gcp') return StorageProviderType.GCP_BUCKET;
+    if (envProvider === 's3' || envProvider === 'aws') return StorageProviderType.AWS_S3;
     return envProvider as StorageProviderType;
   }
 

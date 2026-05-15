@@ -16,7 +16,7 @@ import { AgentContext } from './types/agent-context.js';
 import { CompletionSignal } from './types/completion-signal.js';
 import { serializeAgentContext } from './utils/serialize-agent-context.js';
 import { logger } from '../utils/logger.js';
-import { orchestrationLogger } from '../utils/orchestration-logger.js';
+import { OrchestrationLogger, orchestrationLogger } from '../utils/orchestration-logger.js';
 import { MCPClient } from '../mcp/client.js';
 import { WorkerResult } from './worker-agent.js';
 
@@ -71,14 +71,20 @@ export class ClientAgent {
   private mcpManager: MCPServerManager;
   private mcpClient: MCPClient;
   private failureCount: number = 0;
+  private readonly orchLogger: OrchestrationLogger;
 
   // Lazily cached list of all available tool names (populated on first use)
   private _availableTools: string[] | null = null;
 
-  constructor(orchestrator: ModelOrchestrator, mcpManager: MCPServerManager) {
+  constructor(
+    orchestrator: ModelOrchestrator,
+    mcpManager: MCPServerManager,
+    orchLogger?: OrchestrationLogger,
+  ) {
     this.orchestrator = orchestrator;
     this.mcpManager = mcpManager;
     this.mcpClient = mcpManager.getClient();
+    this.orchLogger = orchLogger ?? orchestrationLogger;
   }
 
   // ─── Tool Discovery ───────────────────────────────────────────────────────
@@ -293,7 +299,7 @@ CRITICAL RULES for requirements:
     logger.info(`[Client] Validating with ${level.toUpperCase()} involvement`);
 
     // Log the analysis for orchestration tracing
-    orchestrationLogger.logClientAnalysis(
+    this.orchLogger.logClientAnalysis(
       level, requirements.length,
       `Requirements: ${requirements.map(r => r.type).join(', ')}`
     );
@@ -315,7 +321,7 @@ CRITICAL RULES for requirements:
     // Layer 0.5: Result-vs-Evidence Coherence Check (always done, catches hallucinated accomplishments)
     // This detects when the Worker claims to have done things its tool usage doesn't support
     const coherenceAnalysis = await this.analyzeResultCoherence(userMessage, workerResult, agentContext);
-    orchestrationLogger.logClientCoherenceCheck(
+    this.orchLogger.logClientCoherenceCheck(
       coherenceAnalysis.isCoherent,
       coherenceAnalysis.unsupportedClaims,
       coherenceAnalysis.reasoning
@@ -371,7 +377,7 @@ CRITICAL RULES for requirements:
     );
 
     // Log the validation outcome
-    orchestrationLogger.logClientValidation(
+    this.orchLogger.logClientValidation(
       result.approved, result.issues, result.nextAction
     );
 

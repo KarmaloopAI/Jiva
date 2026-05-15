@@ -20,6 +20,7 @@
  */
 
 import { StorageProvider } from './provider.js';
+import { logger } from '../utils/logger.js';
 import {
   StorageInfraConfig,
   SavedConversation,
@@ -77,15 +78,20 @@ export class GCPBucketProvider extends StorageProvider {
 
   private async readJson<T>(path: string): Promise<T | null> {
     if (!this.bucket) throw new Error('Provider not initialized');
-    
+
     try {
       const file = this.bucket.file(path);
       const [exists] = await file.exists();
-      if (!exists) return null;
-      
+      if (!exists) {
+        logger.debug(`GCS readJson: file not found: ${path}`);
+        return null;
+      }
       const [content] = await file.download();
-      return JSON.parse(content.toString('utf-8'));
+      const parsed = JSON.parse(content.toString('utf-8'));
+      logger.debug(`GCS readJson: loaded ${path}`);
+      return parsed;
     } catch (error) {
+      logger.warn(`GCS readJson error for ${path}: ${error instanceof Error ? error.message : String(error)}`);
       return null;
     }
   }
@@ -110,15 +116,20 @@ export class GCPBucketProvider extends StorageProvider {
 
   private async readText(path: string): Promise<string | null> {
     if (!this.bucket) throw new Error('Provider not initialized');
-    
+
     try {
       const file = this.bucket.file(path);
       const [exists] = await file.exists();
-      if (!exists) return null;
-      
+      if (!exists) {
+        logger.debug(`GCS readText: file not found: ${path}`);
+        return null;
+      }
       const [content] = await file.download();
-      return content.toString('utf-8');
+      const text = content.toString('utf-8');
+      logger.debug(`GCS readText: read ${text.length} chars from ${path}`);
+      return text;
     } catch (error) {
+      logger.warn(`GCS readText error for ${path}: ${error instanceof Error ? error.message : String(error)}`);
       return null;
     }
   }
@@ -145,20 +156,65 @@ export class GCPBucketProvider extends StorageProvider {
   }
 
   // ─────────────────────────────────────────────────────────────
+  // Session scoping — return an isolated provider per HTTP session
+  // ─────────────────────────────────────────────────────────────
+
+  /**
+   * Returns a new GCPBucketProvider instance that shares the underlying GCS
+   * bucket connection and the per-tenant config cache with this parent, but has
+   * its own immutable context (tenantId / sessionId).
+   *
+   * This means concurrent sessions from different tenants each read/write their
+   * own GCS paths without ever touching this.context on the shared singleton.
+   */
+  override createSessionScoped(context: import('./types.js').StorageContext): GCPBucketProvider {
+    const scoped = new GCPBucketProvider(this.infraConfig);
+    // Share the GCS Bucket client — it is stateless and safe for concurrent use
+    scoped.bucket = this.bucket;
+    // Share the config cache — it is keyed by tenantId, so reads/writes from
+    // different tenants are naturally isolated.  Same-tenant concurrent writes
+    // are idempotent (same GCS source → same value).
+    scoped.configCache = this.configCache;
+    scoped.initialized = true;
+    scoped.setContext(context);
+    return scoped;
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // Context override — invalidate config cache on context change
+  // ─────────────────────────────────────────────────────────────
+
+  override setContext(context: import('./types.js').StorageContext): void {
+    super.setContext(context);
+    // Invalidate config cache whenever a new context is set so that
+    // updated GCS config (e.g. new mcpServers) is always picked up
+    // on the next session rather than serving a stale in-memory copy.
+    const hadCache = this.configCache.has(context.tenantId);
+    this.configCache.delete(context.tenantId);
+    // Use process.stderr to bypass logger for guaranteed output
+    process.stderr.write(`[GCS-DIAG] setContext called: tenant=${context.tenantId}, hadCache=${hadCache}\n`);
+    logger.info(`[GCS] setContext: tenant=${context.tenantId}, cacheInvalidated=${hadCache}`);
+  }
+
+  // ─────────────────────────────────────────────────────────────
   // Configuration (per-tenant, cached)
   // ─────────────────────────────────────────────────────────────
 
   private async loadConfigCache(): Promise<Record<string, any>> {
     const ctx = this.requireContext();
-    
+
     // Check memory cache first
     if (this.configCache.has(ctx.tenantId)) {
+      logger.info(`[GCS] loadConfigCache: using cached config for ${ctx.tenantId}`);
       return this.configCache.get(ctx.tenantId)!;
     }
-    
+
     // Load from storage
     const configPath = this.getConfigPath();
+    logger.info(`[GCS] loadConfigCache: reading from GCS: ${configPath}`);
     const config = (await this.readJson<Record<string, any>>(configPath)) || {};
+    const keys = Object.keys(config);
+    logger.info(`[GCS] loadConfigCache: loaded keys=[${keys.join(',')}] from ${configPath}`);
     this.configCache.set(ctx.tenantId, config);
     return config;
   }
@@ -169,12 +225,15 @@ export class GCPBucketProvider extends StorageProvider {
   }
 
   async setConfig<T>(key: string, value: T): Promise<void> {
+    // Capture context and derived paths BEFORE any await so that a concurrent
+    // setContext() call on a shared parent instance cannot corrupt them.
+    const ctx = this.requireContext();
+    const configPath = this.getConfigPath();
+
     const config = await this.loadConfigCache();
     config[key] = value;
-    
-    const ctx = this.requireContext();
     this.configCache.set(ctx.tenantId, config);
-    await this.writeJson(this.getConfigPath(), config);
+    await this.writeJson(configPath, config);
   }
 
   async getAllConfig(): Promise<Record<string, any>> {

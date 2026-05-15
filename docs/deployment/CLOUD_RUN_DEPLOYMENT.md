@@ -5,30 +5,36 @@ This guide walks you through deploying Jiva as a stateless, auto-scaling service
 ## Architecture Overview
 
 ```
-┌─────────────┐
-│   Client    │
-│ (React UI)  │
-└──────┬──────┘
-       │ WebSocket/HTTP
-       ▼
+┌─────────────┐  ┌─────────────┐
+│  Tenant A   │  │  Tenant B   │
+│ (React UI)  │  │ (React UI)  │
+└──────┬──────┘  └──────┬──────┘
+       │ WebSocket/HTTP  │
+       ▼                 ▼
 ┌──────────────────────────────────────┐
 │         Cloud Run Service            │
 │  ┌────────────────────────────────┐  │
 │  │  Jiva HTTP/WebSocket Server    │  │
-│  │  - Session Manager              │  │
-│  │  - DualAgent Instances          │  │
-│  │  - StorageProvider              │  │
+│  │  - SessionManager               │  │
+│  │    ├─ Session(tenantA)          │  │
+│  │    │    ├─ ScopedStorageProvider│  │  ← isolated per tenant
+│  │    │    ├─ OrchestrationLogger  │  │  ← isolated per session
+│  │    │    └─ DualAgent            │  │
+│  │    └─ Session(tenantB)          │  │
+│  │         ├─ ScopedStorageProvider│  │
+│  │         ├─ OrchestrationLogger  │  │
+│  │         └─ DualAgent            │  │
 │  └────────────┬───────────────────┘  │
 └───────────────┼──────────────────────┘
                 │
                 ▼
-    ┌───────────────────────┐
-    │  GCS Bucket           │
-    │  - Conversations      │
-    │  - Configuration      │
-    │  - Workspace Files    │
-    │  - Logs               │
-    └───────────────────────┘
+    ┌───────────────────────────────────┐
+    │  GCS Bucket                       │
+    │  {tenantId}/config.json           │  ← per-tenant MCP + LLM config
+    │  {tenantId}/conversations/        │
+    │  {tenantId}/directives/           │
+    │  {tenantId}/logs/                 │
+    └───────────────────────────────────┘
 ```
 
 ## Prerequisites
@@ -138,7 +144,7 @@ Key environment variables are set in `cloud-run.yaml`:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `JIVA_STORAGE_PROVIDER` | Storage backend | `gcp` |
+| `JIVA_STORAGE_PROVIDER` | Storage backend | `gcp-bucket` |
 | `JIVA_GCP_BUCKET` | GCS bucket name | `jiva-state-{project}` |
 | `MAX_CONCURRENT_SESSIONS` | Max sessions per instance | `100` |
 | `SESSION_IDLE_TIMEOUT_MS` | Session timeout | `1800000` (30 min) |
@@ -369,20 +375,67 @@ Common causes:
    - Configure VPC connector if needed
    - Use Cloud Armor for DDoS protection
 
+## Multi-Tenant Configuration
+
+Each tenant's MCP servers, LLM model, and directives are driven by a single JSON file stored in GCS at `{tenantId}/config.json`. The file is read fresh on every new session creation (the in-memory cache is invalidated per tenant). If the file is missing, the service falls back to the server-level defaults from environment variables.
+
+### Per-Tenant config.json
+
+Upload to `gs://your-bucket/{tenantId}/config.json`:
+
+```json
+{
+  "models": {
+    "reasoning": {
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions",
+      "apiKey": "gsk_...",
+      "model": "openai/gpt-oss-120b"
+    },
+    "multimodal": null
+  },
+  "mcpServers": [
+    {
+      "name": "tavily-mcp",
+      "command": "npx",
+      "args": ["-y", "tavily-mcp@latest"],
+      "env": { "TAVILY_API_KEY": "tvly-..." }
+    },
+    {
+      "name": "filesystem",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+    }
+  ]
+}
+```
+
+```bash
+gsutil cp config.json gs://your-bucket/my-tenant/config.json
+```
+
+### Session Isolation Model
+
+Every HTTP session gets its own storage provider instance that shares the stateless GCS client and per-tenant config cache, but holds a fixed, immutable context (`tenantId` + `sessionId`). Concurrent requests from different tenants can never corrupt each other's GCS paths. See [release notes v0.3.46](../release_notes/v0.3.46.md) for full details.
+
+### Per-Tenant Directives
+
+Store a workspace directive at `{tenantId}/directives/{hash}.md`. It is loaded automatically on session start and shapes agent behaviour for that tenant. Upload via:
+
+```bash
+gsutil cp my-directive.md gs://your-bucket/my-tenant/directives/$(echo -n "$(cat my-directive.md)" | md5sum | cut -d' ' -f1).md
+```
+
+---
+
 ## Next Steps
 
 1. **React UI Integration**
    - See `docs/REACT_INTEGRATION.md` (TODO)
-   
-2. **Custom MCP Servers**
-   - Add MCP server configs to GCS
-   - Upload to `gs://bucket/config/mcpServers.json`
 
-3. **Multi-tenancy**
-   - Configure tenantId extraction from JWT
-   - Implement per-tenant quotas
+2. **Per-Tenant Quotas**
+   - Implement rate limiting / token budget checks in `SessionManager.getOrCreateSession()`
 
-4. **Monitoring & Alerting**
+3. **Monitoring & Alerting**
    - Setup Cloud Monitoring dashboards
    - Configure alerting policies
 

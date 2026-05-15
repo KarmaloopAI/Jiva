@@ -47,6 +47,7 @@ Output is truncated at ${MAX_OUTPUT_LINES} lines / ${MAX_OUTPUT_BYTES / 1024}KB.
   async execute(args, ctx: CodeToolContext): Promise<string> {
     const command = args.command as string;
     const timeout = Math.min((args.timeout_ms as number) || DEFAULT_TIMEOUT, MAX_TIMEOUT);
+    const isWindows = process.platform === 'win32';
 
     return new Promise<string>((resolve) => {
       const proc = exec(command, {
@@ -54,6 +55,7 @@ Output is truncated at ${MAX_OUTPUT_LINES} lines / ${MAX_OUTPUT_BYTES / 1024}KB.
         timeout,
         maxBuffer: 10 * 1024 * 1024, // 10MB raw buffer; we truncate before returning
         env: { ...process.env },
+        ...(isWindows && { shell: 'powershell.exe' }),
       }, (error, stdout, stderr) => {
         const output: string[] = [];
 
