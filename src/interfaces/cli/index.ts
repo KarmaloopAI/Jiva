@@ -699,7 +699,7 @@ program
         multimodalModel = createModelClient({
           endpoint: multimodalModelConfig.endpoint,
           apiKey: multimodalModelConfig.apiKey,
-          model: multimodalModelConfig.defaultModel,
+          model: multimodalModelConfig.model || multimodalModelConfig.defaultModel || '',
           type: 'multimodal',
         });
       }
@@ -712,7 +712,7 @@ program
         toolCallingModel = createModelClient({
           endpoint: toolCallingModelCfg.endpoint,
           apiKey: toolCallingModelCfg.apiKey,
-          model: toolCallingModelCfg.defaultModel,
+          model: toolCallingModelCfg.model || toolCallingModelCfg.defaultModel || '',
           type: 'tool-calling',
           useHarmonyFormat: toolCallingModelCfg.useHarmonyFormat,
           defaultReasoningEffort: 'medium',

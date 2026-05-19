@@ -635,9 +635,21 @@ Please complete this subtask and report your findings.`,
       let _postApiError = false;
       try {
 
+      // When the model responded in Harmony format, store the raw Harmony tokens
+      // as the assistant message content. Harmony providers (Vertex AI MaaS,
+      // Krutrim) need to see their own token markers in history to continue the
+      // tool-call sequence on the next turn. In Harmony mode do NOT add tool_calls
+      // in standard OpenAI format — the tool call is encoded in the content itself.
+      //
+      // For standard OpenAI providers (Groq, etc.), use the cleaned content and
+      // add tool_calls so role:'tool' messages can be matched by tool_call_id.
+      const isHarmonyResponse = !!response.rawHarmonyContent;
       conversationHistory.push({
         role: 'assistant',
-        content: response.content,
+        content: isHarmonyResponse ? response.rawHarmonyContent! : response.content,
+        ...(!isHarmonyResponse && response.toolCalls && response.toolCalls.length > 0
+          ? { tool_calls: response.toolCalls }
+          : {}),
       });
 
       // Check for tool calls
@@ -727,7 +739,7 @@ Tools used: ${spawnResult.toolsUsed.join(', ')}`;
             let hasImages = false;
             if (typeof result === 'object' && result !== null && 'images' in result) {
               const typedResult = result as ToolResultWithImages;
-              toolResultText = typedResult.text;
+              toolResultText = typedResult.text || '[Image content returned]';
 
               if (typedResult.images && typedResult.images.length > 0) {
                 hasImages = true;

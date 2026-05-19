@@ -24,16 +24,28 @@ const MCPServerConfigSchema = z.object({
 );
 
 const ModelConfigSchema = z.object({
-  name: z.string(),
+  name: z.string().optional(),
   endpoint: z.string().url(),
-  apiKey: z.string(),
-  type: z.enum(['reasoning', 'multimodal', 'tool-calling']),
-  defaultModel: z.string(),
+  /**
+   * Static API key. Not required (may be empty string) when useGoogleADC is true,
+   * in which case short-lived GCP OAuth2 tokens are fetched automatically.
+   */
+  apiKey: z.string().default(''),
+  type: z.enum(['reasoning', 'multimodal', 'tool-calling']).default('reasoning'),
+  model: z.string().optional(),
+  defaultModel: z.string().optional(),
   useHarmonyFormat: z.boolean().optional(),
   /** How to send reasoning effort: 'api_param' | 'system_prompt' | 'both' */
   reasoningEffortStrategy: z.enum(['api_param', 'system_prompt', 'both']).optional(),
   /** Default max tokens — required for reasoning models like Sarvam-105B */
   defaultMaxTokens: z.number().optional(),
+  /**
+   * Use Google Application Default Credentials instead of a static apiKey.
+   * Required for Vertex AI MaaS endpoints (aiplatform.googleapis.com).
+   * On Cloud Run the service account token is fetched automatically;
+   * locally falls back to google-auth-library / `gcloud auth application-default`.
+   */
+  useGoogleADC: z.boolean().optional(),
 });
 
 const CodeModeConfigSchema = z.object({
@@ -84,7 +96,9 @@ export class ConfigManager {
 
   isConfigured(): boolean {
     const config = this.store.store;
-    return !!(config.models?.reasoning?.apiKey || config.models?.multimodal?.apiKey);
+    const r = config.models?.reasoning;
+    const m = config.models?.multimodal;
+    return !!(r?.apiKey || r?.useGoogleADC || m?.apiKey || m?.useGoogleADC);
   }
 
   getConfig(): JivaConfig {
@@ -220,16 +234,18 @@ export class ConfigManager {
       );
     }
 
-    if (!config.models.reasoning.apiKey) {
+    if (!config.models.reasoning.apiKey && !config.models.reasoning.useGoogleADC) {
       throw new ConfigurationError(
-        'API key for reasoning model not configured.'
+        'API key for reasoning model not configured. ' +
+        'Either set apiKey or enable useGoogleADC for Vertex AI MaaS.'
       );
     }
 
     // Multimodal model is optional
-    if (config.models.multimodal && !config.models.multimodal.apiKey) {
+    if (config.models.multimodal && !config.models.multimodal.apiKey && !config.models.multimodal.useGoogleADC) {
       throw new ConfigurationError(
-        'API key for multimodal model not configured.'
+        'API key for multimodal model not configured. ' +
+        'Either set apiKey or enable useGoogleADC for Vertex AI MaaS.'
       );
     }
   }

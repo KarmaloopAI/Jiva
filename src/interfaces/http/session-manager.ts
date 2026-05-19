@@ -156,46 +156,57 @@ export class SessionManager extends EventEmitter {
       // Load or create config
       let modelConfig = await storageProvider.getConfig<{
         reasoning: {
-          provider: string;
-          apiKey: string;
+          provider?: string;
+          apiKey?: string;
           endpoint: string;
-          model: string;
+          model?: string;
+          defaultModel?: string;
+          useHarmonyFormat?: boolean;
+          useGoogleADC?: boolean;
+          reasoningEffortStrategy?: 'api_param' | 'system_prompt' | 'both';
+          defaultMaxTokens?: number;
         };
         multimodal: null;
       }>('models');
       
-      // Always use environment variables if set, otherwise use stored config or defaults
+      // Environment variables are SERVER-LEVEL DEFAULTS only.
+      // Per-tenant GCS config takes full precedence — env vars are only applied
+      // when no GCS config exists for this tenant (first-ever session).
       const envEndpoint = process.env.JIVA_MODEL_BASE_URL;
       const envApiKey = process.env.JIVA_MODEL_API_KEY;
       const envModel = process.env.JIVA_MODEL_NAME;
-      
+
       if (!modelConfig) {
-        // Use environment defaults
+        // No per-tenant config yet — bootstrap from environment defaults
         modelConfig = {
           reasoning: {
-            provider: process.env.JIVA_MODEL_PROVIDER || 'krutrim',
+            provider: process.env.JIVA_MODEL_PROVIDER || 'sarvam',
             apiKey: envApiKey || '',
-            endpoint: envEndpoint || 'https://cloud.olakrutrim.com/v1/chat/completions',
-            model: envModel || 'gpt-oss-120b',
+            endpoint: envEndpoint || 'https://api.sarvam.ai/v1/chat/completions',
+            model: envModel || 'sarvam-105b',
+            useHarmonyFormat: false,
+            reasoningEffortStrategy: 'api_param' as const,
+            defaultMaxTokens: 4096,
           },
-          multimodal: null, // Optional
+          multimodal: null,
         };
         await storageProvider.setConfig('models', modelConfig);
-      } else {
-        // Override stored config with environment variables if present
-        if (envEndpoint) modelConfig.reasoning.endpoint = envEndpoint;
-        if (envApiKey) modelConfig.reasoning.apiKey = envApiKey;
-        if (envModel) modelConfig.reasoning.model = envModel;
       }
+      // Per-tenant GCS config exists → use it as-is; do NOT override with env vars.
+      // To change a tenant's model, update their config.json in GCS directly.
 
       // Create model orchestrator
+      const rm = modelConfig.reasoning as any;
       const reasoningModel = createModelClient({
-        endpoint: modelConfig.reasoning.endpoint,
-        apiKey: modelConfig.reasoning.apiKey,
-        model: modelConfig.reasoning.model || (modelConfig.reasoning as any).defaultModel,
+        endpoint: rm.endpoint,
+        apiKey: rm.apiKey || '',
+        model: rm.model || rm.defaultModel,
         type: 'reasoning',
-        useHarmonyFormat: (modelConfig.reasoning as any).useHarmonyFormat ?? false,
+        useHarmonyFormat: rm.useHarmonyFormat ?? false,
+        useGoogleADC: rm.useGoogleADC ?? false,
+        reasoningEffortStrategy: rm.reasoningEffortStrategy,
         defaultReasoningEffort: 'high',
+        defaultMaxTokens: rm.defaultMaxTokens,
       });
 
       // Tool-calling model: when configured, serves as the PRIMARY model for tool-call
@@ -327,7 +338,7 @@ export class SessionManager extends EventEmitter {
           conversationManager,
           personaManager,
           maxSubtasks: 20,
-          maxIterations: 10,
+          maxIterations: 20,
           autoSave: true,
           orchestrationLogger: orchLogger,
         });

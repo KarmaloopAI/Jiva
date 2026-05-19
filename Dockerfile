@@ -22,8 +22,8 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Install dumb-init for proper signal handling
-RUN apk add --no-cache dumb-init
+# Install dumb-init and bash (bash required by zx in @mkusaka/mcp-shell-server)
+RUN apk add --no-cache dumb-init bash
 
 # Copy package files
 COPY package*.json ./
@@ -50,7 +50,7 @@ USER nodejs
 ENV NODE_ENV=production \
     PORT=8080 \
     LOG_LEVEL=info \
-    JIVA_STORAGE_PROVIDER=gcp \
+    JIVA_STORAGE_PROVIDER=gcp-bucket \
     MAX_CONCURRENT_SESSIONS=100 \
     SESSION_IDLE_TIMEOUT_MS=1800000
 
