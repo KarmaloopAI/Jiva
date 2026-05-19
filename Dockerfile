@@ -37,6 +37,10 @@ RUN npm install -g @modelcontextprotocol/server-filesystem
 # Copy built application from builder
 COPY --from=builder /app/dist ./dist
 
+# Copy agent scripts and pre-install their dependencies
+COPY scripts ./scripts
+RUN cd scripts && npm install @google/genai mime --no-save --silent && npm cache clean --force
+
 # Create workspace directory and set permissions
 RUN mkdir -p /workspace && \
     addgroup -g 1001 -S nodejs && \

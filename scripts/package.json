@@ -1,0 +1,7 @@
+{
+  "name": "jiva-agent-scripts",
+  "version": "1.0.0",
+  "description": "Agent scripts for Gritsa auto-blogger pipeline",
+  "type": "commonjs",
+  "private": true
+}

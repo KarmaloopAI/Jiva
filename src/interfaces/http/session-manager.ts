@@ -337,8 +337,8 @@ export class SessionManager extends EventEmitter {
           workspace,
           conversationManager,
           personaManager,
-          maxSubtasks: 20,
-          maxIterations: 20,
+          maxSubtasks: 1,
+          maxIterations: 15,
           autoSave: true,
           orchestrationLogger: orchLogger,
         });
