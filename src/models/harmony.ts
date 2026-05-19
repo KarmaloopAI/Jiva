@@ -187,7 +187,8 @@ export function parseHarmonyResponse(response: string): ParsedHarmonyResponse {
   }
 
   // Parse tool calls — Harmony pipe format: <|call|>fn({"k":"v"})<|return|>
-  const toolCallRegex = /<\|call\|>([\s\S]*?)<\|return\|>/g;
+  // Also handles malformed variants where the closing |> is missing: <|return|<|end|>
+  const toolCallRegex = /<\|call\|>([\s\S]*?)<\|return\|>?(?=<|\s*$)/g;
   let toolMatch;
   let callId = 0;
 
@@ -274,6 +275,37 @@ export function parseHarmonyResponse(response: string): ParsedHarmonyResponse {
     }
   }
 
+  // Parse tool calls — Vertex AI Harmony dialect:
+  // <|channel|>commentary to=TOOL_NAME <|constrain|>json<|message|>JSON_ARGS<|call|>
+  // This dialect is emitted by gpt-oss-120b-maas on Vertex AI MaaS when it uses
+  // its native Harmony format. The tool name follows "to=" and args follow <|message|>.
+  //
+  // Vertex AI prefixes tool names with "functions." (e.g., "functions.tavily-mcp__tavily_search").
+  // Strip this prefix so the name matches the registered MCP tool name.
+  const vertexChannelRegex = /<\|channel\|>\w+\s+to=([\w.-]+(?:__[\w.-]+)?)\s+<\|constrain\|>json<\|message\|>([\s\S]*?)<\|call\|>/g;
+  let vertexMatch;
+
+  while ((vertexMatch = vertexChannelRegex.exec(response)) !== null) {
+    // Strip "functions." namespace prefix if present
+    const rawToolName = vertexMatch[1].trim();
+    const toolName = rawToolName.startsWith('functions.') ? rawToolName.slice('functions.'.length) : rawToolName;
+    const argsJson = vertexMatch[2].trim();
+    try {
+      const parsedArgs = JSON.parse(argsJson);
+      result.toolCalls.push({
+        id: `call_${callId++}`,
+        type: 'function',
+        function: {
+          name: toolName,
+          arguments: JSON.stringify(parsedArgs),
+        },
+      });
+      logger.debug(`[Harmony] Parsed Vertex AI dialect tool call: ${toolName}`);
+    } catch (e) {
+      logger.warn(`[Harmony] Failed to parse Vertex AI dialect args for ${toolName}: ${argsJson}`);
+    }
+  }
+
   // If no channels found, treat entire response as final
   if (!result.analysis && !result.commentary && !result.final && result.toolCalls.length === 0) {
     result.final = response.trim();
@@ -289,10 +321,15 @@ export function parseHarmonyResponse(response: string): ParsedHarmonyResponse {
 export function extractAssistantMessage(response: string): string {
   // Remove channel markers and tool calls to get clean message
   let cleaned = response
-    .replace(/<\|channel\|>\w+/g, '')
+    // Krutrim pipe-format tool calls: <|call|>fn(args)<|return|>
     .replace(/<\|call\|>[\s\S]*?<\|return\|>/g, '')
-    .replace(/<\|start\|>/g, '')
+    // Vertex AI dialect tool calls: <|channel|>commentary to=fn <|constrain|>json<|message|>{args}<|call|>
+    .replace(/<\|channel\|>\w+\s+to=[\w.-]+(?:__[\w.-]+)?\s+<\|constrain\|>json<\|message\|>[\s\S]*?<\|call\|>/g, '')
+    // Remaining Harmony control tokens
+    .replace(/<\|channel\|>\w+/g, '')
+    .replace(/<\|start\|>\w*/g, '')
     .replace(/<\|end\|>/g, '')
+    .replace(/<\|constrain\|>\w*/g, '')
     .replace(/<\|message\|>/g, '')
     .trim();
 

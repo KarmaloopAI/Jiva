@@ -2,31 +2,51 @@
  * OpenAI-Compatible Model Client
  *
  * Generic client for any OpenAI-compatible chat completion API.
- * Supports: Krutrim, Groq, Sarvam, OpenAI, and any other provider
- * that exposes a /v1/chat/completions endpoint.
+ * Supports: Krutrim, Groq, Sarvam, OpenAI, Vertex AI MaaS, and any other
+ * provider that exposes a /v1/chat/completions endpoint.
  *
  * Provider-specific behaviour is controlled entirely through config flags:
  *   - useHarmonyFormat    → Krutrim gpt-oss-120b (Harmony tool format)
  *   - reasoningEffortStrategy → how reasoning effort is communicated
  *   - defaultMaxTokens   → required for reasoning models (e.g. Sarvam-105B)
+ *   - useGoogleADC       → Vertex AI MaaS: fetch short-lived GCP OAuth2 tokens
+ *                          instead of using a static apiKey
  */
 
 import { IModel, ChatCompletionOptions, ModelResponse, Message } from './base.js';
 import {
   formatMessagesForHarmony,
   parseHarmonyResponse,
+  extractAssistantMessage,
   HarmonyToolDefinition,
   HarmonyMessage
 } from './harmony.js';
 import { ModelError } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
+import { getGoogleADCToken } from './google-adc.js';
 
 export interface ModelClientConfig {
   endpoint: string;
+  /** Static API key. Not required when useGoogleADC is true. */
   apiKey: string;
   model: string;
   defaultModel?: string; // Alias used in config store; model takes precedence
   type: 'reasoning' | 'multimodal' | 'tool-calling';
+
+  /**
+   * Use Google Application Default Credentials (ADC) for authentication.
+   *
+   * When true, a short-lived GCP OAuth2 bearer token is fetched automatically
+   * before each request (cached and refreshed every ~55 minutes). Use this for
+   * Vertex AI MaaS endpoints (aiplatform.googleapis.com) where no static API
+   * key exists — auth is handled by the Cloud Run service account.
+   *
+   * Token source: GCP metadata server IP 169.254.169.254 (Cloud Run/GCE),
+   * with fallback to google-auth-library for local development.
+   *
+   * Default: false
+   */
+  useGoogleADC?: boolean;
 
   /**
    * Use Harmony format for tool calling.
@@ -258,11 +278,16 @@ export class ModelClient implements IModel {
       logger.debug('Request size:', JSON.stringify(requestBody).length, 'bytes');
       logger.debug('Message count:', requestBody.messages.length);
 
+      // Resolve auth token — static key or dynamic GCP OAuth2 token
+      const authToken = this.config.useGoogleADC
+        ? await getGoogleADCToken()
+        : this.config.apiKey;
+
       const response = await fetch(this.config.endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.config.apiKey}`,
+          'Authorization': `Bearer ${authToken}`,
           'User-Agent': 'Jiva/0.1.0',
           'Accept': 'application/json',
         },
@@ -319,11 +344,26 @@ export class ModelClient implements IModel {
       // when no tools were requested — the model may still emit tool-call tokens
       // (e.g. <|call|>…<|return|> or <tool_call>…</tool_call>) regardless.
       if (useHarmony && isReasoningModel) {
-        // Parse Harmony format response (Krutrim gpt-oss-120b only)
+        // Parse Harmony format response (Krutrim gpt-oss-120b / Vertex AI MaaS)
         const parsed = parseHarmonyResponse(messageContent);
 
+        // Determine the clean display content.
+        // Prefer the model's explicit channel outputs (final > commentary > analysis), then
+        // fall back to extractAssistantMessage() which strips all Harmony control tokens.
+        // Always run extractAssistantMessage() to clean residual Harmony tokens from
+        // channel content (e.g. <|message|> tokens that appear as channel body).
+        // Never expose raw messageContent — it would leak Harmony tokens to the user.
+        const channelContent = parsed.final || parsed.commentary || parsed.analysis || '';
+        const cleanContent = extractAssistantMessage(channelContent || messageContent);
+
         return {
-          content: parsed.final || parsed.commentary || messageContent,
+          // Cleaned display content (no Harmony tokens) — shown to the user
+          content: cleanContent,
+          // Raw Harmony response — must be stored in conversation history as the
+          // assistant message content so the model can continue the tool-call
+          // sequence on the next turn. Harmony providers (Vertex AI, Krutrim) need
+          // to see their own token markers in history.
+          rawHarmonyContent: messageContent,
           toolCalls: parsed.toolCalls.length > 0 ? parsed.toolCalls : undefined,
           usage: data.usage ? {
             promptTokens: data.usage.prompt_tokens || 0,
@@ -339,23 +379,36 @@ export class ModelClient implements IModel {
         // Standard OpenAI format response
         const nativeToolCalls = choice.message?.tool_calls;
 
-        // Some models (e.g. sarvam-105b) emit tool calls as XML in message.content
-        // instead of using the native tool_calls field. Parse and extract them.
+        // Some models emit tool calls in message.content instead of (or in addition to)
+        // the native tool_calls field. Two known content-embedded formats:
+        //   1. XML: <tool_call>name<arg_key>k</arg_key><arg_value>v</arg_value></tool_call>
+        //   2. Harmony tokens: <|call|>fn(args)<|return|>  or  <|channel|>commentary to=fn ...
+        //      gpt-oss-120b-maas on Vertex AI leaks Harmony tokens even in standard mode.
         let contentText = messageContent;
-        let xmlToolCalls = undefined;
-        if (messageContent && messageContent.includes('<tool_call>')) {
+        let embeddedToolCalls: any[] | undefined;
+
+        const hasHarmonyTokens = messageContent && (
+          messageContent.includes('<|call|>') ||
+          messageContent.includes('<|channel|>') ||
+          messageContent.includes('<tool_call>')
+        );
+
+        if (hasHarmonyTokens) {
           const parsed = parseHarmonyResponse(messageContent);
           if (parsed.toolCalls.length > 0) {
-            xmlToolCalls = parsed.toolCalls;
-            // Strip the parsed tool call XML from the visible content
-            contentText = messageContent.replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '').trim();
+            embeddedToolCalls = parsed.toolCalls;
+            // Clean Harmony/XML tokens from the visible content
+            contentText = extractAssistantMessage(messageContent);
+          } else {
+            // Tokens present but no tool calls parsed — still clean them from content
+            contentText = extractAssistantMessage(messageContent);
           }
         }
 
-        const allToolCalls = [
-          ...(nativeToolCalls && nativeToolCalls.length > 0 ? nativeToolCalls : []),
-          ...(xmlToolCalls ?? []),
-        ];
+        // Prefer native tool_calls (standard format); fall back to content-embedded calls
+        const allToolCalls = nativeToolCalls && nativeToolCalls.length > 0
+          ? nativeToolCalls
+          : (embeddedToolCalls ?? []);
 
         return {
           content: contentText,

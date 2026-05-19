@@ -185,7 +185,7 @@ export class AgentSpawner {
         conversationManager: this.conversationManager || undefined,
         personaManager: subPersonaManager,
         maxSubtasks: 20,
-        maxIterations: request.maxIterations || 10,
+        maxIterations: request.maxIterations || 20,
         maxAgentDepth: this.maxDepth, // Inherit parent's max depth limit
         autoSave: false, // Sub-agents don't auto-save
       };
