@@ -26,6 +26,14 @@ export interface MessageContent {
 
 export interface ModelResponse {
   content: string;
+  /**
+   * Raw Harmony-format response string (set only when useHarmonyFormat is true).
+   * When present, this must be used as the assistant message content in conversation
+   * history instead of the cleaned `content`, because Harmony providers (Vertex AI,
+   * Krutrim) expect the raw Harmony tokens in history to continue tool-call sequences.
+   * When rawHarmonyContent is present, do NOT add tool_calls to the history message.
+   */
+  rawHarmonyContent?: string;
   toolCalls?: ToolCall[];
   usage?: {
     promptTokens: number;

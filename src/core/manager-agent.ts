@@ -380,26 +380,44 @@ IMPORTANT: Be honest about what was and was not accomplished. Do NOT claim resul
 
 ${completedSection}${failedSection}
 
-Create a clear, honest response that accurately reflects what was accomplished. If any work failed, explain briefly what happened.`;
+RESPONSE FORMAT: Write PLAIN TEXT markdown — do NOT return JSON, code blocks, or any structured data format.
+Do not include fields like "reasoning", "subtasks", or JSON syntax.
+Write naturally as if directly addressing the user.`;
 
-    this.conversationHistory.push({
-      role: 'user',
-      content: synthesisPrompt,
-    });
+    // Use a fresh context for synthesis — do NOT include prior planning rounds.
+    // The planning conversation history contains a "Respond ONLY with valid JSON"
+    // instruction that bleeds into the synthesis if included, causing the model
+    // to format the final response as JSON instead of plain text.
+    const synthesisMessages = [
+      ...this.getSystemMessages(agentContext),
+      { role: 'user' as const, content: synthesisPrompt },
+    ];
 
     const response = await this.orchestrator.chat({
-      messages: [...this.getSystemMessages(agentContext), ...this.conversationHistory.slice(1)],
+      messages: synthesisMessages,
       temperature: 0.1, // Low temperature for deterministic synthesis
     });
 
-    this.conversationHistory.push({
-      role: 'assistant',
-      content: response.content,
-    });
+    // Append to history so future turns have context
+    this.conversationHistory.push({ role: 'user', content: synthesisPrompt });
+    this.conversationHistory.push({ role: 'assistant', content: response.content });
 
     logger.info('[Manager] Final response created');
 
-    return response.content;
+    // If the model still returned JSON despite instructions, extract the text
+    const responseText = response.content.trim();
+    if (responseText.startsWith('{') || responseText.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(responseText);
+        // Extract a human-readable value
+        const text = parsed.response || parsed.final || parsed.content || parsed.reasoning || responseText;
+        return typeof text === 'string' ? text : responseText;
+      } catch {
+        // Not valid JSON — return as-is
+      }
+    }
+
+    return responseText;
   }
 
   /**
