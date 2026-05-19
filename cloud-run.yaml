@@ -76,18 +76,15 @@ spec:
         - name: AUTH_DISABLED
           value: "true"  # Set to false for production
         
-        # Model configuration (from Secret Manager)
+        # Model configuration — Sarvam-105B default (per-tenant GCS config takes precedence)
         - name: JIVA_MODEL_PROVIDER
-          value: "krutrim"
+          value: "sarvam"
         - name: JIVA_MODEL_API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: jiva-model-api-key
-              key: latest
+          value: "sk_g0x97orc_q0WOxx3fwg20uZyBpkb3yjYS"
         - name: JIVA_MODEL_BASE_URL
-          value: "https://cloud.olakrutrim.com/v1/chat/completions"
+          value: "https://api.sarvam.ai/v1/chat/completions"
         - name: JIVA_MODEL_NAME
-          value: "gpt-oss-120b"
+          value: "sarvam-105b"
         
         # MCP Server Configuration
         - name: ENABLE_MCP_SERVERS
