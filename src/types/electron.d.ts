@@ -41,6 +41,7 @@ export interface MCPServerConfig {
 }
 
 interface ElectronAPI {
+  platform: string
   jiva: {
     startServer: () => Promise<{ success: boolean; status?: string; error?: string }>
     stopServer: () => Promise<{ success: boolean }>
@@ -133,7 +134,7 @@ interface ElectronAPI {
   }
   updater: {
     check: () => Promise<void>
-    install: () => Promise<void>
+    quitAndInstall: () => Promise<void>
     onAvailable: (cb: (info: { version: string; releaseNotes: string | null }) => void) => void
     onProgress: (cb: (percent: number) => void) => void
     onReady: (cb: () => void) => void

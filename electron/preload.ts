@@ -92,9 +92,10 @@ contextBridge.exposeInMainWorld('electron', {
   setup: {
     check: () => ipcRenderer.invoke('setup:check'),
   },
+  platform: process.platform,
   updater: {
     check: () => ipcRenderer.invoke('updater:check'),
-    install: () => ipcRenderer.invoke('updater:install'),
+    quitAndInstall: () => ipcRenderer.invoke('updater:quit-and-install'),
     onAvailable: (cb: (info: { version: string; releaseNotes: string | null }) => void) => {
       ipcRenderer.on('updater:available', (_event, info) => cb(info))
     },

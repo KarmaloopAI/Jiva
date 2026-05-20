@@ -3,12 +3,14 @@ import type { BrowserWindow } from 'electron'
 import { ipcMain } from 'electron'
 
 let _win: BrowserWindow | null = null
-let _downloadOnReady = false
 
 export function initAutoUpdater(win: BrowserWindow): void {
   _win = win
 
-  autoUpdater.autoDownload = false
+  // Download starts automatically as soon as an update is found.
+  // autoInstallOnAppQuit means if the user never clicks "Restart & Install",
+  // the update is applied silently the next time they quit the app.
+  autoUpdater.autoDownload = true
   autoUpdater.autoInstallOnAppQuit = true
 
   autoUpdater.on('update-available', (info) => {
@@ -28,9 +30,6 @@ export function initAutoUpdater(win: BrowserWindow): void {
 
   autoUpdater.on('update-downloaded', () => {
     _win?.webContents.send('updater:ready')
-    if (_downloadOnReady) {
-      autoUpdater.quitAndInstall(false, true)
-    }
   })
 
   autoUpdater.on('error', (err) => {
@@ -38,7 +37,7 @@ export function initAutoUpdater(win: BrowserWindow): void {
     _win?.webContents.send('updater:error', err.message)
   })
 
-  // IPC handlers
+  // Manual check (exposed to renderer for future use)
   ipcMain.handle('updater:check', async () => {
     try {
       await autoUpdater.checkForUpdates()
@@ -47,13 +46,9 @@ export function initAutoUpdater(win: BrowserWindow): void {
     }
   })
 
-  ipcMain.handle('updater:install', async () => {
-    _downloadOnReady = true
-    try {
-      await autoUpdater.downloadUpdate()
-    } catch (e) {
-      console.error('[updater] downloadUpdate failed:', e)
-    }
+  // Called only when the user explicitly clicks "Restart & Install"
+  ipcMain.handle('updater:quit-and-install', () => {
+    autoUpdater.quitAndInstall(false, true)
   })
 }
 
