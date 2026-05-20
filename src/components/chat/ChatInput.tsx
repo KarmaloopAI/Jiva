@@ -1,17 +1,27 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Send, StopCircle, MessageSquare, Search, Code2, Layers, FlaskConical, BarChart3, Bot, SlidersHorizontal, Zap, type LucideIcon } from 'lucide-react'
+import {
+  Send, StopCircle, MessageSquare, Search, Code2, Layers, FlaskConical,
+  BarChart3, Bot, SlidersHorizontal, Zap, Paperclip, X, FileText, Image,
+  type LucideIcon,
+} from 'lucide-react'
 
 const PERSONA_ICONS: Record<string, LucideIcon> = {
   MessageSquare, Search, Code2, Layers, FlaskConical, BarChart3, Bot,
 }
+
 import { useChatStore } from '../../store/chat.store'
-import { useJivaStore } from '../../store/jiva.store'
+import { useJivaStore, type ProcessedAttachment } from '../../store/jiva.store'
 import { usePersonaStore } from '../../store/persona.store'
 import { useConversationStore } from '../../store/conversation.store'
+import type { AttachedFile } from '../../types/chat'
 
 export function ChatInput() {
   const [value, setValue] = useState('')
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([])
+  const [processedAttachments, setProcessedAttachments] = useState<ProcessedAttachment[]>([])
+  const [isProcessingFiles, setIsProcessingFiles] = useState(false)
+  const [isMultimodalEnabled, setIsMultimodalEnabled] = useState(false)
   const settingsRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const {
@@ -25,6 +35,14 @@ export function ChatInput() {
   const { activePersonaName, personas } = usePersonaStore()
 
   const isConnected = connectionStatus === 'connected'
+
+  // Check multimodal capability on mount
+  useEffect(() => {
+    window.electron.config.read().then((config) => {
+      const cfg = config as { models?: { multimodal?: unknown } } | null
+      setIsMultimodalEnabled(!!cfg?.models?.multimodal)
+    }).catch(() => {})
+  }, [])
 
   // Auto-resize textarea
   useEffect(() => {
@@ -50,17 +68,73 @@ export function ChatInput() {
     window.electron.jiva.stopMessage()
   }, [])
 
+  const handleAttach = useCallback(async () => {
+    if (isProcessingFiles) return
+
+    let paths: string[] = []
+    try {
+      paths = await window.electron.files.pick(true)
+    } catch { return }
+    if (!paths.length) return
+
+    setIsProcessingFiles(true)
+    const newAttachedFiles: AttachedFile[] = []
+    const newProcessed: ProcessedAttachment[] = []
+
+    for (const filePath of paths) {
+      let converted: Awaited<ReturnType<typeof window.electron.files.convert>>
+      try {
+        converted = await window.electron.files.convert(filePath)
+      } catch { continue }
+
+      if (converted.error || converted.category === 'unsupported') continue
+
+      const category = converted.category as 'text' | 'pdf' | 'docx' | 'image'
+      newAttachedFiles.push({ name: converted.name, category })
+
+      if (converted.category === 'image') {
+        // Always reference by path; enrich with description when multimodal is configured
+        let markdown = `[Image file: ${converted.markdown}]`
+        if (isMultimodalEnabled) {
+          try {
+            const result = await window.electron.files.describeImage(converted.markdown)
+            if (result.success && result.description) {
+              markdown = `[Image file: ${converted.markdown}]\n${result.description}`
+            }
+          } catch { /* path-only fallback already set */ }
+        }
+        newProcessed.push({ name: converted.name, markdown })
+      } else {
+        newProcessed.push({ name: converted.name, markdown: converted.markdown })
+      }
+    }
+
+    setAttachedFiles(prev => [...prev, ...newAttachedFiles])
+    setProcessedAttachments(prev => [...prev, ...newProcessed])
+    setIsProcessingFiles(false)
+  }, [isProcessingFiles, isMultimodalEnabled])
+
+  const removeAttachment = useCallback((index: number) => {
+    setAttachedFiles(prev => prev.filter((_, i) => i !== index))
+    setProcessedAttachments(prev => prev.filter((_, i) => i !== index))
+  }, [])
+
   const handleSend = useCallback(async () => {
     const text = value.trim()
-    if (!text || !isConnected || isThinking) return
+    if ((!text && processedAttachments.length === 0) || !isConnected || isThinking) return
 
     const sendTime = Date.now()
+    const currentAttachments = [...attachedFiles]
+    const currentProcessed = [...processedAttachments]
+
     setValue('')
-    addUserMessage(text)
+    setAttachedFiles([])
+    setProcessedAttachments([])
+    addUserMessage(text, currentAttachments.length ? currentAttachments : undefined)
     setThinking(true)
 
     try {
-      const response = await sendMessage(text, activePersonaName ?? undefined)
+      const response = await sendMessage(text, activePersonaName ?? undefined, currentProcessed.length ? currentProcessed : undefined)
       const durationMs = Date.now() - sendTime
       addAgentResponse(
         response.content,
@@ -72,13 +146,12 @@ export function ChatInput() {
         },
         durationMs
       )
-      // Always refresh the sidebar so new conversations appear immediately
       useConversationStore.getState().loadConversationList()
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to get response from Jivam'
       addErrorMessage(msg)
     }
-  }, [value, isConnected, isThinking, activePersonaName, addUserMessage, setThinking, sendMessage, addAgentResponse, addErrorMessage])
+  }, [value, processedAttachments, attachedFiles, isConnected, isThinking, activePersonaName, addUserMessage, setThinking, sendMessage, addAgentResponse, addErrorMessage])
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -88,6 +161,8 @@ export function ChatInput() {
   }
 
   const activePersona = personas.find((p) => p.name === activePersonaName)
+
+  const canSend = (value.trim() || processedAttachments.length > 0) && isConnected && !isThinking
 
   return (
     <div
@@ -119,6 +194,36 @@ export function ChatInput() {
         </div>
       )}
 
+      {/* Attached file chips */}
+      {attachedFiles.length > 0 && (
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          {attachedFiles.map((file, i) => (
+            <span
+              key={`${file.name}-${i}`}
+              className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-lg"
+              style={{
+                background: 'rgba(139,92,246,0.08)',
+                color: 'var(--text-subtle)',
+                border: '1px solid rgba(139,92,246,0.2)',
+              }}
+            >
+              {file.category === 'image'
+                ? <Image size={11} className="flex-shrink-0" style={{ color: 'var(--accent)' }} />
+                : <FileText size={11} className="flex-shrink-0" style={{ color: 'var(--accent)' }} />
+              }
+              <span className="max-w-[140px] truncate">{file.name}</span>
+              <button
+                onClick={() => removeAttachment(i)}
+                className="ml-0.5 rounded-full flex-shrink-0 hover:opacity-70 transition-opacity"
+                style={{ color: 'var(--text-subtle)' }}
+              >
+                <X size={10} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
       {/* Input row */}
       <div
         className="flex items-end gap-3 rounded-2xl px-4 py-3 transition-all"
@@ -128,6 +233,20 @@ export function ChatInput() {
           boxShadow: '0 2px 12px rgba(139,92,246,0.08)',
         }}
       >
+        {/* Attach button */}
+        <button
+          onClick={handleAttach}
+          disabled={!isConnected || isThinking || isProcessingFiles}
+          title="Attach file"
+          className="flex-shrink-0 self-end mb-0.5 w-7 h-7 rounded-full flex items-center justify-center transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+          style={{
+            color: isProcessingFiles ? 'var(--accent)' : 'var(--text-subtle)',
+            background: isProcessingFiles ? 'rgba(139,92,246,0.1)' : 'transparent',
+          }}
+        >
+          <Paperclip size={14} />
+        </button>
+
         <textarea
           ref={textareaRef}
           value={value}
@@ -217,12 +336,12 @@ export function ChatInput() {
 
         <button
           onClick={isThinking ? handleStop : handleSend}
-          disabled={isThinking ? false : (!value.trim() || !isConnected)}
+          disabled={isThinking ? false : !canSend}
           className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-all disabled:opacity-30 disabled:cursor-not-allowed"
           style={{
             background: isThinking
               ? 'var(--bg-secondary)'
-              : value.trim() && isConnected
+              : canSend
                 ? 'linear-gradient(135deg, #8B5CF6, #3B82F6)'
                 : 'var(--bg-secondary)',
           }}
@@ -232,7 +351,7 @@ export function ChatInput() {
           ) : (
             <Send
               size={14}
-              className={value.trim() && isConnected ? 'text-white' : 'text-[var(--text-subtle)]'}
+              className={canSend ? 'text-white' : 'text-[var(--text-subtle)]'}
             />
           )}
         </button>

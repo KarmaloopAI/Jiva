@@ -4,6 +4,11 @@ import type { CodeLogEvent } from '../types/electron'
 import { useChatStore } from './chat.store'
 import type { CodeEvent } from './code.store'
 
+export interface ProcessedAttachment {
+  name: string
+  markdown: string
+}
+
 function jivaLogToAction(msg: string): string | null {
   // MCP tool calls use "serverName__toolName" format
   const toolMatch = /^Tool:\s+(.+)$/.exec(msg)
@@ -71,7 +76,7 @@ interface JivaStore {
   stopServer: () => Promise<void>
   restartServer: () => Promise<{ success: boolean; error?: string }>
 
-  sendMessage: (content: string, persona?: string) => Promise<JivaRunResult>
+  sendMessage: (content: string, persona?: string, attachments?: ProcessedAttachment[]) => Promise<JivaRunResult>
 
   initPhaseListener: () => void
   initJivaLogListener: () => void
@@ -152,11 +157,20 @@ export const useJivaStore = create<JivaStore>((set) => ({
     return result
   },
 
-  sendMessage: async (content, persona) => {
+  sendMessage: async (content, persona, attachments) => {
     set({ currentPhase: 'planning', lastPlan: null, currentAction: null, liveEvents: [] })
 
     const { deepRun } = useJivaStore.getState()
-    const response = await window.electron.jiva.sendMessage(content, persona, { deepRun })
+
+    let prompt = content
+    if (attachments && attachments.length > 0) {
+      const fileBlocks = attachments
+        .map(a => `### ${a.name}\n${a.markdown}`)
+        .join('\n\n')
+      prompt = `<attached-files>\n${fileBlocks}\n</attached-files>\n\n${content}`
+    }
+
+    const response = await window.electron.jiva.sendMessage(prompt, persona, { deepRun })
 
     set({ currentPhase: null, currentAction: null, liveEvents: [] })
 

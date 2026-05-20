@@ -676,6 +676,38 @@ export class JivaRunner extends EventEmitter {
   }
 
   /**
+   * Describe an image using the configured multimodal model.
+   * Returns a text description suitable for injection into a text prompt.
+   * Throws if no multimodal model is configured or runner is not initialized.
+   */
+  async describeImage(base64DataUri: string): Promise<string> {
+    if (!this.orchestrator) {
+      throw new Error('JivaRunner not initialized. Call initialize() first.')
+    }
+
+    const config = readConfig()
+    if (!config?.models?.multimodal) {
+      throw new Error('No multimodal (vision) model is configured. Enable it in Settings → Models.')
+    }
+
+    const orchestrator = this.orchestrator as {
+      chat(options: unknown): Promise<{ content: string }>
+    }
+
+    const response = await orchestrator.chat({
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image_url', image_url: { url: base64DataUri } },
+          { type: 'text', text: 'Describe this image in detail, including all visible content, text, charts, diagrams, and any notable elements.' },
+        ],
+      }],
+    })
+
+    return response.content
+  }
+
+  /**
    * Clean up all resources (MCP servers, agent).
    */
   async cleanup(): Promise<void> {

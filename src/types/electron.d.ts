@@ -145,6 +145,17 @@ interface ElectronAPI {
     signOut: () => Promise<void>
     init: (userId: string, sessionId: string) => Promise<{ success: boolean; error?: string }>
   }
+  files: {
+    pick: (includeImages: boolean) => Promise<string[]>
+    convert: (filePath: string) => Promise<{
+      name: string
+      category: 'text' | 'pdf' | 'docx' | 'image' | 'unsupported'
+      markdown: string
+      mimeType?: string
+      error?: string
+    }>
+    describeImage: (dataUri: string) => Promise<{ success: boolean; description?: string; error?: string }>
+  }
 }
 
 declare global {

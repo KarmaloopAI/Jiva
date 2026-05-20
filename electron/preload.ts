@@ -51,6 +51,11 @@ contextBridge.exposeInMainWorld('electron', {
     readFile: (filePath: string) => ipcRenderer.invoke('workspace:read-file', filePath),
     openExternal: (filePath: string) => ipcRenderer.invoke('workspace:open-external', filePath),
   },
+  files: {
+    pick: (includeImages: boolean) => ipcRenderer.invoke('file:pick-attachments', includeImages),
+    convert: (filePath: string) => ipcRenderer.invoke('file:convert-attachment', filePath),
+    describeImage: (dataUri: string) => ipcRenderer.invoke('file:describe-image', dataUri),
+  },
   window: {
     minimize: () => ipcRenderer.invoke('window:minimize'),
     maximize: () => ipcRenderer.invoke('window:maximize'),

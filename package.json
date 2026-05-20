@@ -1,6 +1,6 @@
 {
   "name": "jivam",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Jivam - Desktop UI for the Jiva autonomous AI agent",
   "main": "dist-electron/main.js",
   "scripts": {

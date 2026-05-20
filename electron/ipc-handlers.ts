@@ -7,6 +7,7 @@ import { writeDirective } from './directive-manager'
 import { listPersonas, activatePersona, getActivePersona } from './persona-manager'
 import { cloudSignIn, cloudSignUp, cloudSignOut, initCloudSession } from './cloud-auth'
 import { CloudRunner } from './cloud-runner'
+import { convertFile } from './file-converter'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
@@ -551,6 +552,96 @@ export function setupIpcHandlers(
 
   ipcMain.handle('workspace:open-external', (_event, filePath: string) => {
     shell.showItemInFolder(filePath)
+  })
+
+  // --- File Attachment Handlers ---
+
+  ipcMain.handle('file:pick-attachments', async (_event, includeImages: boolean) => {
+    const win = getWindow()
+    const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp']
+    const docExts = ['pdf', 'docx']
+    const textExts = [
+      'txt', 'md', 'markdown', 'rst', 'log',
+      'js', 'jsx', 'ts', 'tsx', 'mjs', 'cjs',
+      'py', 'rb', 'go', 'rs', 'java', 'kt', 'swift',
+      'c', 'cpp', 'cc', 'h', 'hpp', 'cs',
+      'css', 'scss', 'sass', 'less',
+      'html', 'htm', 'xml', 'svg',
+      'json', 'jsonc', 'yaml', 'yml', 'toml', 'ini', 'cfg', 'conf',
+      'sh', 'bash', 'zsh', 'ps1', 'bat',
+      'sql', 'graphql', 'proto',
+      'env', 'dockerfile', 'makefile',
+      'vue', 'svelte', 'astro', 'r', 'lua', 'scala',
+    ]
+
+    // Put a combined filter FIRST — on macOS the dialog defaults to the first entry,
+    // so without this only the first category's extensions are visible.
+    const allSupportedExts = includeImages
+      ? [...imageExts, ...docExts, ...textExts]
+      : [...docExts, ...textExts]
+
+    const filters: Electron.FileFilter[] = [
+      { name: 'All Supported Files', extensions: allSupportedExts },
+      { name: 'Documents', extensions: docExts },
+      { name: 'Text & Code', extensions: textExts },
+    ]
+    if (includeImages) {
+      filters.push({ name: 'Images', extensions: imageExts })
+    }
+
+    const result = await dialog.showOpenDialog(win!, {
+      title: 'Attach Files',
+      properties: ['openFile', 'multiSelections'],
+      filters,
+    })
+
+    if (result.canceled || result.filePaths.length === 0) return []
+    return result.filePaths
+  })
+
+  ipcMain.handle('file:convert-attachment', (_event, filePath: string) => {
+    // Security: must be within home dir
+    const homeDir = os.homedir()
+    const resolved = path.resolve(filePath)
+    if (!resolved.startsWith(path.resolve(homeDir))) {
+      return { name: path.basename(filePath), category: 'unsupported', markdown: '', error: 'Access denied: file is outside home directory' }
+    }
+
+    const result = convertFile(filePath)
+
+    if (result.category === 'image' && !result.error) {
+      // Copy image into <workspaceDir>/.jiva/uploads/ so the agent can reference it by path
+      try {
+        const config = readConfig()
+        const workspaceDir = config?.workspaceDir ?? homeDir
+        const uploadsDir = path.join(workspaceDir, '.jiva', 'uploads')
+        fs.mkdirSync(uploadsDir, { recursive: true })
+        const destPath = path.join(uploadsDir, path.basename(filePath))
+        fs.copyFileSync(filePath, destPath)
+        result.markdown = destPath
+      } catch (err) {
+        result.error = `Failed to save image to workspace: ${err instanceof Error ? err.message : String(err)}`
+      }
+    }
+
+    return result
+  })
+
+  ipcMain.handle('file:describe-image', async (_event, filePath: string) => {
+    try {
+      const ext = path.extname(filePath).toLowerCase().replace(/^\./, '')
+      const mimeMap: Record<string, string> = {
+        png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+        gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp',
+      }
+      const mimeType = mimeMap[ext] ?? 'image/png'
+      const base64 = fs.readFileSync(filePath).toString('base64')
+      const dataUri = `data:${mimeType};base64,${base64}`
+      const description = await jivaRunner.describeImage(dataUri)
+      return { success: true, description }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
   })
 
   // --- Window Controls ---

@@ -48,10 +48,17 @@ win:
       arch: x64
 
 nsis:
+  artifactName: ${productName}-Setup-${version}.exe
   oneClick: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
+
+portable:
+  artifactName: ${productName}-${version}-portable.exe
+
+appImage:
+  artifactName: ${productName}-${version}-${arch}.AppImage
 
 linux:
   icon: assets/icon.png

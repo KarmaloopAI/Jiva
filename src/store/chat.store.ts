@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { ChatMessage } from '../types/chat'
+import type { ChatMessage, AttachedFile } from '../types/chat'
 import type { AgentWork } from '../types/jiva'
 
 function generateId(): string {
@@ -13,7 +13,7 @@ interface ChatStore {
   activePersonaName: string | null
   conversationId: string | null
 
-  addUserMessage: (content: string) => string
+  addUserMessage: (content: string, attachments?: AttachedFile[]) => string
   setThinking: (thinking: boolean) => void
   addAgentResponse: (content: string, agentWork: AgentWork, durationMs?: number) => void
   addErrorMessage: (errorMsg: string) => void
@@ -31,7 +31,7 @@ export const useChatStore = create<ChatStore>((set) => ({
   activePersonaName: 'chat',
   conversationId: null,
 
-  addUserMessage: (content) => {
+  addUserMessage: (content, attachments) => {
     const id = generateId()
     const msg: ChatMessage = {
       id,
@@ -39,6 +39,7 @@ export const useChatStore = create<ChatStore>((set) => ({
       content,
       timestamp: new Date(),
       status: 'complete',
+      attachments: attachments?.length ? attachments : undefined,
     }
     set((s) => ({ messages: [...s.messages, msg] }))
     return id
