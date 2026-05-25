@@ -70,15 +70,24 @@ function extractExcerpt(body) {
 }
 
 function buildFrontMatter(fm) {
-  const title   = fm.title   || 'New Post';
-  const date    = fm.date    || todayJekyll();
-  const author  = fm.author  || AUTHOR;
-  const excerpt = fm.excerpt || '';
-  const image   = fm.featured_image || '';
+  const title       = fm.title       || 'New Post';
+  const date        = fm.date        || todayJekyll();
+  const author      = fm.author      || AUTHOR;
+  const excerpt     = fm.excerpt     || '';
+  const image       = fm.featured_image || '';
+  // SEO fields — agent should populate these; fall back to excerpt/title if absent
+  const description = fm.description || fm.excerpt || '';
+  const keywords    = fm.keywords    || '';
+  const tags        = fm.tags        || '';
+  const categories  = fm.categories  || 'AI Technology';
 
   let b = `---\nlayout: post\ntitle: "${title.replace(/"/g, '\\"')}"\ndate: ${date}\nauthor: "${author}"\n`;
-  if (excerpt)  b += `excerpt: "${excerpt.replace(/"/g, '\\"')}"\n`;
-  if (image)    b += `featured_image: "${image}"\n`;
+  b += `categories: "${categories}"\n`;
+  if (tags)        b += `tags: "${tags}"\n`;
+  if (excerpt)     b += `excerpt: "${excerpt.replace(/"/g, '\\"')}"\n`;
+  if (description) b += `description: "${description.replace(/"/g, '\\"')}"\n`;
+  if (keywords)    b += `keywords: "${keywords}"\n`;
+  if (image)       b += `featured_image: "${image}"\n`;
   return b + '---\n';
 }
 
@@ -164,6 +173,8 @@ async function main() {
 
   if (!fm.title)   fm.title   = extractTitle(body);
   if (!fm.excerpt) fm.excerpt = extractExcerpt(body);
+  // Always stamp with actual publish time so Jekyll never treats it as a future post
+  fm.date = todayJekyll();
 
   const datePrefix = todayISO();
   const slug       = slugify(fm.title);
@@ -200,7 +211,7 @@ async function main() {
     ...(existingSha ? { sha: existingSha } : {}),
   });
 
-  const postUrl = `https://gritsa.github.io/${datePrefix.replace(/-/g, '/')}/${slug}.html`;
+  const postUrl = `https://www.gritsa.com/blog/${datePrefix.replace(/-/g, '/')}/${slug}/`;
   console.log(`\n✅ Published successfully!`);
   console.log(`   GitHub : ${result.content.html_url}`);
   console.log(`   Blog   : ${postUrl}`);
