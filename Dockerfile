@@ -22,8 +22,8 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Install dumb-init and bash (bash required by zx in @mkusaka/mcp-shell-server)
-RUN apk add --no-cache dumb-init bash
+# Install dumb-init, bash (required by mcp-shell-server), and curl (for ad-hoc agent use)
+RUN apk add --no-cache dumb-init bash curl
 
 # Copy package files
 COPY package*.json ./
@@ -39,7 +39,7 @@ COPY --from=builder /app/dist ./dist
 
 # Copy agent scripts and pre-install their dependencies
 COPY scripts ./scripts
-RUN cd scripts && npm install @google/genai mime --no-save --silent && npm cache clean --force
+RUN cd scripts && npm install @google/genai mime jimp@0.16 --no-save --silent && npm cache clean --force
 
 # Create workspace directory and set permissions
 RUN mkdir -p /workspace && \
