@@ -36,11 +36,20 @@ function slugify(text) {
     .replace(/^-+|-+$/g, '');
 }
 
-function todayISO() {
-  return new Date().toISOString().split('T')[0];
+// Use IST (UTC+5:30) consistently for post and image filenames so the
+// "already posted today" check in get-past-posts.js (which also uses IST)
+// matches the filename prefix.  Previously todayISO() used UTC, causing a
+// mismatch: posts published between 18:30–23:59 UTC got a UTC filename that
+// was one day behind the IST "today" the deduplication check compared against,
+// letting the agent publish multiple posts for the same IST calendar day.
+function todayIST() {
+  const now = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+  return now.toISOString().split('T')[0]; // YYYY-MM-DD in IST
 }
 
 function todayJekyll() {
+  // Record actual UTC time with +0000 in front-matter (informational only).
+  // Jekyll uses the *filename* date for URLs, so this doesn't affect deduplication.
   const now = new Date();
   const pad = n => String(n).padStart(2, '0');
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ` +
@@ -136,7 +145,7 @@ async function uploadImage(imagePath, slug) {
   if (!imagePath || !fs.existsSync(imagePath)) return null;
 
   const ext      = path.extname(imagePath).toLowerCase() || '.png';
-  const imgName  = `${todayISO()}-${slug}${ext}`;
+  const imgName  = `${todayIST()}-${slug}${ext}`;
   const apiPath  = `/repos/${REPO_OWNER}/${REPO_NAME}/contents/${IMAGES_DIR}/${imgName}`;
   const imgBytes = fs.readFileSync(imagePath);
   const b64      = imgBytes.toString('base64');
@@ -176,7 +185,7 @@ async function main() {
   // Always stamp with actual publish time so Jekyll never treats it as a future post
   fm.date = todayJekyll();
 
-  const datePrefix = todayISO();
+  const datePrefix = todayIST();
   const slug       = slugify(fm.title);
   const filename   = `${datePrefix}-${slug}.md`;
   const postPath   = `/repos/${REPO_OWNER}/${REPO_NAME}/contents/${POSTS_DIR}/${filename}`;

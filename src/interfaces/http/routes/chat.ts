@@ -7,6 +7,56 @@ import { SessionManager } from '../session-manager.js';
 import { logger } from '../../../utils/logger.js';
 import { getDefaultFilesystemAllowedPath } from '../../../utils/platform.js';
 
+// ── Auto-blogger daily gate helpers ───────────────────────────────────────────
+
+/**
+ * Check GitHub _posts directory to see if a post has already been published today (IST).
+ * Returns true if already posted — deterministic, no LLM involvement.
+ * Fails open (returns false) on any network/API error so the agent can still run.
+ */
+async function isAlreadyPostedToday(): Promise<boolean> {
+  const githubPat = process.env.GITHUB_PAT || process.env.GRITSA_GITHUB_PAT || '';
+  if (!githubPat) return false;
+  try {
+    const res = await fetch(
+      'https://api.github.com/repos/gritsa/www-gritsa.github.io/contents/_posts',
+      {
+        headers: {
+          'Authorization': `token ${githubPat}`,
+          'User-Agent': 'jiva-autoblogger-gate/1.0',
+          'Accept': 'application/vnd.github.v3+json',
+        },
+      }
+    );
+    if (!res.ok) {
+      logger.warn(`[AutoBloggerGate] GitHub API returned ${res.status}, failing open`);
+      return false;
+    }
+    const files = await res.json() as Array<{ name: string }>;
+    // Today's date in IST (UTC+5:30)
+    const now = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+    const today = now.toISOString().split('T')[0]; // YYYY-MM-DD
+    const alreadyPosted = files.some(f => f.name.startsWith(today));
+    if (alreadyPosted) {
+      logger.info(`[AutoBloggerGate] Post already exists for ${today} — blocking session`);
+    }
+    return alreadyPosted;
+  } catch (err) {
+    logger.warn(`[AutoBloggerGate] Check failed, failing open:`, err);
+    return false;
+  }
+}
+
+/** Returns today's date+time string in IST for injection into the agent message. */
+function todayISTString(): string {
+  const now = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+  const date = now.toISOString().split('T')[0];
+  const time = now.toISOString().split('T')[1].substring(0, 5);
+  return `${date} ${time} IST`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export function setupChatRoutes(app: Express, sessionManager: SessionManager): void {
   /**
    * Send a message (non-streaming)
@@ -15,11 +65,23 @@ export function setupChatRoutes(app: Express, sessionManager: SessionManager): v
   app.post('/api/chat', async (req: Request, res: Response) => {
     try {
       const { tenantId, sessionId } = req.auth!;
-      const { message } = req.body;
+      const { message: rawMessage } = req.body;
 
-      if (!message || typeof message !== 'string') {
+      if (!rawMessage || typeof rawMessage !== 'string') {
         res.status(400).json({ error: 'Message is required and must be a string' });
         return;
+      }
+
+      // Auto-blogger daily gate — runs before the session is created, no LLM involved
+      let message = rawMessage;
+      if (sessionId.startsWith('auto-blogger')) {
+        const alreadyPosted = await isAlreadyPostedToday();
+        if (alreadyPosted) {
+          res.status(200).json({ success: true, response: 'Skipped — already posted today', skipped: true });
+          return;
+        }
+        // Inject today's date/time so the agent can anchor its research temporally
+        message = `[Today is ${todayISTString()}. Only research and cover news published within the past 7 days from this date.]\n\n${rawMessage}`;
       }
 
       // Get or create session
@@ -55,11 +117,22 @@ export function setupChatRoutes(app: Express, sessionManager: SessionManager): v
   app.post('/api/chat/stream', async (req: Request, res: Response) => {
     try {
       const { tenantId, sessionId } = req.auth!;
-      const { message } = req.body;
+      const { message: rawMessage } = req.body;
 
-      if (!message || typeof message !== 'string') {
+      if (!rawMessage || typeof rawMessage !== 'string') {
         res.status(400).json({ error: 'Message is required and must be a string' });
         return;
+      }
+
+      // Auto-blogger daily gate — runs before the session is created, no LLM involved
+      let message = rawMessage;
+      if (sessionId.startsWith('auto-blogger')) {
+        const alreadyPosted = await isAlreadyPostedToday();
+        if (alreadyPosted) {
+          res.status(200).json({ success: true, response: 'Skipped — already posted today', skipped: true });
+          return;
+        }
+        message = `[Today is ${todayISTString()}. Only research and cover news published within the past 7 days from this date.]\n\n${rawMessage}`;
       }
 
       // Setup SSE
