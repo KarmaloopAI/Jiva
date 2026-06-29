@@ -17,9 +17,14 @@ Jiva is an autonomous AI agent for the terminal and cloud. It works with any Ope
 ```bash
 npm install -g jiva-core
 jiva setup
+
+# Verify your model + config can do code mode well:
+jiva benchmark
 ```
 
 The setup wizard opens with a provider selection menu. Choose your provider and Jiva auto-fills the endpoint, model name, and tool format — you only supply your API key. Supported providers: **Krutrim**, **Groq**, **Sarvam**, **OpenAI**, and any **OpenAI-compatible** endpoint.
+
+After setup, run **`jiva benchmark`** to confirm your chosen model and configuration work optimally in code mode. It runs the **baseline (taskstore) suite** — a deterministic set of coding tasks — against your config; a healthy setup passes all of them. See [Benchmarking](#benchmarking) for tuning and capability comparison.
 
 ### Development install
 
@@ -204,11 +209,12 @@ Configuration is stored at `~/.config/jiva-nodejs/config.json` (Linux/macOS) or 
       "model": "sarvam-105b",
       "type": "reasoning",
       "reasoningEffortStrategy": "api_param",
-      "defaultMaxTokens": 8192
+      "defaultMaxTokens": 4096
     }
   }
 }
 ```
+> Sarvam's API caps completion output at 4096 tokens. Tasks needing larger single outputs (e.g. writing a big file in one shot) will be limited by this — the [benchmark](#benchmarking) flags such failures as `[output-limited]`.
 
 **Ollama (local)**
 ```json
@@ -239,6 +245,30 @@ Any other OpenAI-compatible endpoint works the same way — set `endpoint`, `api
 ```
 
 Full configuration reference: [Configuration Guide](docs/guides/CONFIGURATION.md)
+
+---
+
+## Benchmarking
+
+Jiva ships a built-in benchmark to measure how well your **model + configuration** performs in code mode. Tasks run in isolated throwaway workspaces and are scored deterministically with Node's built-in test runner — no LLM judge, no network.
+
+```bash
+jiva benchmark                 # baseline (taskstore) suite — verify your setup works
+jiva benchmark --list          # list available suites and tasks
+jiva benchmark --suite microcrm --max-iterations 60   # capability suite (Node 22.5+)
+jiva benchmark --output report.json                   # save a JSON report to compare configs
+```
+
+Two suites, two purposes:
+
+| Suite | Scoring | Use it to… |
+|-------|---------|-----------|
+| **`taskstore`** (baseline) | pass/fail, 8 tiers that build on each other | Confirm a model + config can do code mode at all. A healthy setup passes everything. |
+| **`microcrm`** (capability) | % of spec tests | Differentiate models and tune configuration. The agent builds a Node + SQLite REST API and adds harder features (atomic bulk, advanced queries, analytics, idempotency). |
+
+The report shows per-task iterations, tokens, and wall-time, lists exactly which spec tests were missed, and flags failures caused by a model's **output-token limit** as `[output-limited]` (distinct from logic failures). Run it after `jiva setup`, and re-run it as you tune `defaultMaxTokens`, `maxIterations`, or switch models — the config with the best score-per-token is your optimal setup.
+
+Full guide: [Benchmark Suite](docs/guides/benchmark-suite.md)
 
 ---
 

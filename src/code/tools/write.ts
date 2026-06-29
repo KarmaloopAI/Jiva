@@ -21,18 +21,28 @@ Returns a summary of changes and LSP diagnostics (if any errors).`,
     properties: {
       file_path: {
         type: 'string',
-        description: 'Absolute path to the file to write',
+        description: 'Absolute path to the file to write (preferred). The alias "path" is also accepted.',
+      },
+      path: {
+        type: 'string',
+        description: 'Alias for file_path. Prefer file_path; either is accepted.',
       },
       content: {
         type: 'string',
         description: 'The full content to write to the file',
       },
     },
-    required: ['file_path', 'content'],
+    // Only `content` is hard-required at the schema level so that models which emit
+    // the common `path` alias instead of `file_path` are not rejected by provider-side
+    // tool-call validation (Groq/Sarvam). The path is validated in execute() below.
+    required: ['content'],
   },
 
   async execute(args, ctx: CodeToolContext): Promise<string> {
-    const rawPath = args.file_path as string;
+    const rawPath = (args.file_path ?? args.path) as string | undefined;
+    if (typeof rawPath !== 'string' || rawPath.trim() === '') {
+      return 'Error: file_path is required — provide the absolute path to the file to write.';
+    }
     const filePath = path.isAbsolute(rawPath) ? rawPath : path.resolve(ctx.workspaceDir, rawPath);
     const content = args.content as string;
 

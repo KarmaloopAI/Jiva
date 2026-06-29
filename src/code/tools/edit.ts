@@ -43,7 +43,11 @@ Returns a diff of the changes made, plus any LSP errors detected.`,
     properties: {
       file_path: {
         type: 'string',
-        description: 'Absolute path to the file to edit',
+        description: 'Absolute path to the file to edit (preferred). The alias "path" is also accepted.',
+      },
+      path: {
+        type: 'string',
+        description: 'Alias for file_path. Prefer file_path; either is accepted.',
       },
       old_string: {
         type: 'string',
@@ -58,11 +62,16 @@ Returns a diff of the changes made, plus any LSP errors detected.`,
         description: 'Replace all occurrences of old_string (default: false)',
       },
     },
-    required: ['file_path', 'old_string', 'new_string'],
+    // file_path is intentionally not in `required` so the `path` alias is accepted by
+    // provider-side validation; it is validated in execute() below.
+    required: ['old_string', 'new_string'],
   },
 
   async execute(args, ctx: CodeToolContext): Promise<string> {
-    const rawPath = args.file_path as string;
+    const rawPath = (args.file_path ?? args.path) as string | undefined;
+    if (typeof rawPath !== 'string' || rawPath.trim() === '') {
+      return 'Error: file_path is required — provide the absolute path to the file to edit.';
+    }
     const filePath = path.isAbsolute(rawPath) ? rawPath : path.resolve(ctx.workspaceDir, rawPath);
     const oldString = args.old_string as string;
     const newString = args.new_string as string;

@@ -351,29 +351,57 @@ export async function startREPL(options: REPLOptions): Promise<void> {
         console.log('');
       } else {
         // ── Standard mode ────────────────────────────────────────────────
-        const response = await agent.chat(messageToSend);
+        // The agent may hit its step limit before finishing. When it does we let
+        // the user decide whether to keep going, resuming with the same history.
+        let turnMessage = messageToSend;
+        while (true) {
+          const response = await agent.chat(turnMessage);
 
-        spinner.stop();
+          spinner.stop();
 
-        console.log(chalk.bold.green('\nJiva:'));
+          console.log(chalk.bold.green('\nJiva:'));
 
-        // Render markdown for prettier output
-        const formattedContent = formatForCLI(response.content);
-        console.log(formattedContent);
+          // Render markdown for prettier output
+          const formattedContent = formatForCLI(response.content);
+          console.log(formattedContent);
 
-        if (response.toolsUsed.length > 0) {
-          console.log(chalk.gray(`\n[Used tools: ${response.toolsUsed.join(', ')}]`));
+          if (response.toolsUsed.length > 0) {
+            console.log(chalk.gray(`\n[Used tools: ${response.toolsUsed.join(', ')}]`));
+          }
+
+          console.log(chalk.gray(`[Iterations: ${response.iterations}]`));
+
+          if (response.tokenUsage) {
+            const k = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+            const tu = response.tokenUsage;
+            console.log(chalk.gray(`[Tokens: ${k(tu.promptTokens)}p + ${k(tu.completionTokens)}c = ${k(tu.totalTokens)} total (this turn: ${k(tu.lastPromptTokens)}p prompt)]`));
+          }
+
+          console.log('');
+
+          // Ran out of steps before finishing — offer to continue.
+          if (response.stopReason !== 'max-iterations') break;
+
+          rl.pause();
+          const { choice } = await inquirer.prompt([{
+            type: 'list',
+            name: 'choice',
+            message: chalk.yellow('Jiva reached its step limit before finishing this task.'),
+            choices: [
+              { name: 'Continue working…', value: 'continue' },
+              { name: 'Stop for now', value: 'stop' },
+            ],
+            default: 'continue',
+            prefix: '',
+          }]);
+          rl.resume();
+
+          if (choice !== 'continue') break;
+
+          turnMessage =
+            'Continue working on the task. Resume exactly where you left off and complete the remaining steps.';
+          spinner.start(chalk.gray('Continuing…'));
         }
-
-        console.log(chalk.gray(`[Iterations: ${response.iterations}]`));
-
-        if (response.tokenUsage) {
-          const k = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
-          const tu = response.tokenUsage;
-          console.log(chalk.gray(`[Tokens: ${k(tu.promptTokens)}p + ${k(tu.completionTokens)}c = ${k(tu.totalTokens)} total (this turn: ${k(tu.lastPromptTokens)}p prompt)]`));
-        }
-
-        console.log('');
       }
     } catch (error) {
       spinner.stop();

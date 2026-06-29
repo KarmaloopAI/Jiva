@@ -19,6 +19,7 @@ import { createStorageProvider } from '../../storage/factory.js';
 import { setupHealthRoutes } from './routes/health.js';
 import { setupSessionRoutes } from './routes/session.js';
 import { setupChatRoutes } from './routes/chat.js';
+import { setupBenchmarkRoutes } from './routes/benchmark.js';
 import { setupWebSocketHandler } from './websocket-handler.js';
 import { authMiddleware } from './middleware/auth.js';
 
@@ -75,6 +76,7 @@ async function bootstrap(): Promise<{ app: Express; server: HttpServer; wss: Web
   app.use('/api', authMiddleware);
   setupSessionRoutes(app, sessionManager);
   setupChatRoutes(app, sessionManager);
+  setupBenchmarkRoutes(app);
 
   // WebSocket upgrade handler
   server.on('upgrade', (request, socket, head) => {
