@@ -33,6 +33,19 @@ export interface AgentResponse {
   toolsUsed: string[];
   iterations: number;
   tokenUsage?: import('../models/token-tracker.js').TokenUsageSnapshot;
+  /**
+   * Number of times the model hit its output-token limit mid tool-call this turn
+   * (a write/edit was cut off and had to be re-attempted in stages). A non-zero
+   * count on a failed task indicates an output-length limitation, not a logic gap.
+   */
+  truncationEvents?: number;
+  /**
+   * How the turn ended:
+   *   'completed'      — the model produced a final response on its own.
+   *   'max-iterations' — the step limit was hit before finishing (caller may offer to continue).
+   *   'stopped'        — the user cooperatively stopped the run.
+   */
+  stopReason?: 'completed' | 'max-iterations' | 'stopped';
 }
 
 /**
@@ -58,6 +71,12 @@ function repairFailedToolCall(
     const rawName: string = failed.name || '';
     const args: Record<string, unknown> =
       typeof failed.arguments === 'object' ? failed.arguments : {};
+
+    // Normalize the common `path` alias to `file_path` so a repaired write_file/edit_file
+    // call actually executes (the tools accept either, but downstream consumers expect file_path).
+    if (args && typeof args === 'object' && 'path' in args && !('file_path' in args)) {
+      args.file_path = args.path;
+    }
 
     // Strategy 1: strip all <|...|> tokens from the tool name and try exact match
     const stripped = rawName
@@ -448,6 +467,10 @@ ${directive ? `\n${directive}` : ''}`;
 
     let iterations = 0;
     let finalContent = '';
+    // Count output-token-limit truncations this turn (surfaced in the response so
+    // benchmarks can flag output-length limitations vs genuine logic failures).
+    let truncationEvents = 0;
+    let stopReason: AgentResponse['stopReason'] = 'completed';
 
     // Iteration limit management — two phases (ported from opencode):
     // Phase 1 (0–84%): normal operation, all tools available.
@@ -468,6 +491,7 @@ ${directive ? `\n${directive}` : ''}`;
       if (this._stopped) {
         logger.info('[CodeAgent] Stop requested — exiting after current step');
         finalContent = '[Task stopped by user]';
+        stopReason = 'stopped';
         break;
       }
       iterations = i + 1;
@@ -584,14 +608,66 @@ ${directive ? `\n${directive}` : ''}`;
             continue;
           }
 
+          // Distinguish genuine output-token truncation from schema/argument errors.
+          // Groq codes BOTH as tool_use_failed, so we inspect failed_generation directly:
+          // a complete, parseable failed_generation means the JSON was NOT cut off (a schema
+          // error); an unparseable one means it was truncated mid-content.
+          const failedGenIsTruncated = (() => {
+            try {
+              const m = msg.match(/API error \(\d+\): (.+)/s);
+              if (!m) return null;
+              const body = JSON.parse(m[1]);
+              const fg: string | undefined = body?.error?.failed_generation;
+              if (typeof fg !== 'string') return null;
+              try { JSON.parse(fg); return false; } // complete JSON → schema error, not truncation
+              catch { return true; }                // cut-off JSON → truncated
+            } catch { return null; }
+          })();
+
+          const mentionsFileTool = msg.includes('write_file') || msg.includes('edit_file');
+
+          // --- Specific correction: schema / argument-name error (well-formed JSON, wrong args) ---
+          // The tool call parsed fine but violated the schema (e.g. an unexpected or misspelled
+          // argument name). Name the offending tool's exact parameters rather than mistaking it
+          // for truncation or falling through to a generic strategy reset.
+          const isSchemaArgError =
+            failedGenIsTruncated === false &&
+            (msg.includes('did not match schema') || msg.includes('missing propert'));
+
+          if (isSchemaArgError) {
+            let failedToolName = '';
+            try {
+              const m = msg.match(/API error \(\d+\): (.+)/s);
+              if (m) {
+                const body = JSON.parse(m[1]);
+                const fg: string | undefined = body?.error?.failed_generation;
+                if (fg) { const parsed = JSON.parse(fg); if (parsed?.name) failedToolName = parsed.name; }
+              }
+            } catch { /* ignore extraction errors */ }
+            const tool = this.tools.find((t) => t.name === failedToolName);
+            const expected = tool
+              ? `${tool.name} accepts: ${Object.keys((tool.parameters.properties as Record<string, unknown>) ?? {}).join(', ')}` +
+                ` (required: ${(tool.parameters.required ?? []).join(', ') || 'none'}).`
+              : `Check the tool's required parameters and use their exact names.`;
+            logger.warn(`[CodeAgent] schema/argument error for ${failedToolName || 'tool'} — injecting parameter correction`);
+            messages.push({
+              role: 'user',
+              content:
+                `Your ${failedToolName || 'tool'} call failed schema validation (wrong or missing arguments).\n\n` +
+                `${expected}\n\n` +
+                `Call it again using those exact parameter names.`,
+            });
+            consecutiveToolCallErrors = 0;
+            emptyResponseCount = 0;
+            continue;
+          }
+
           // --- Specific correction: tool content too large (output token limit hit) ---
-          // When the model generates a very large write_file or edit_file call, the API cuts off
-          // the JSON mid-content because the response exceeds the output token limit. The resulting
-          // JSON is unparseable. Detect by tool name appearing in the failed_generation field.
-          // Note: failed_generation is a JSON-encoded string so quotes are escaped (\"tool_name\").
+          // Only genuine truncation routes here: the provider explicitly failed to parse the call,
+          // or failed_generation is present but cut off mid-content (unparseable JSON).
           const isContentTooLarge =
-            (msg.includes('write_file') || msg.includes('edit_file')) &&
-            (msg.includes('Failed to parse tool call') || msg.includes('tool_use_failed'));
+            mentionsFileTool &&
+            (msg.includes('Failed to parse tool call') || failedGenIsTruncated === true);
 
           if (isContentTooLarge) {
             // Parse the actual tool name from failed_generation to distinguish write_file vs edit_file
@@ -612,6 +688,7 @@ ${directive ? `\n${directive}` : ''}`;
             } catch { /* ignore extraction errors */ }
             const isEditFile = failedToolName === 'edit_file';
 
+            truncationEvents++;
             logger.warn(`[CodeAgent] ${isEditFile ? 'edit_file' : 'write_file'}${targetFile} content truncated (exceeded output token limit) — asking model to write in stages`);
             const correctionContent = isEditFile
               ? `Your edit_file call${targetFile} failed: new_string was too large and the response was cut off mid-JSON.\n\n` +
@@ -771,6 +848,7 @@ ${directive ? `\n${directive}` : ''}`;
           const isEditFile = response.content!.includes('edit_file') && !response.content!.includes('write_file');
           const fpMatch = response.content!.match(/<arg_key>file_path<\/arg_key>\s*<arg_value>([^<]+)<\/arg_value>/);
           const targetFile = fpMatch ? ` for \`${fpMatch[1]}\`` : '';
+          truncationEvents++;
           logger.warn(`[CodeAgent] Truncated XML tool call${targetFile} — injecting staged-writing correction`);
 
           const correctionContent = isEditFile
@@ -941,6 +1019,7 @@ ${directive ? `\n${directive}` : ''}`;
 
     if (!finalContent) {
       finalContent = '[Max iterations reached without a final response]';
+      stopReason = 'max-iterations';
     }
 
     // Update conversation history (trim system prompt from what we store)
@@ -959,7 +1038,7 @@ ${directive ? `\n${directive}` : ''}`;
       );
     }
 
-    return { content: finalContent, toolsUsed, iterations, tokenUsage: this.orchestrator.getTokenUsage() };
+    return { content: finalContent, toolsUsed, iterations, tokenUsage: this.orchestrator.getTokenUsage(), truncationEvents, stopReason };
   }
 
   /**

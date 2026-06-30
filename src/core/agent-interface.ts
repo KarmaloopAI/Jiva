@@ -24,6 +24,11 @@ export interface AgentChatResponse {
   };
   /** Token usage accumulated by the agent's orchestrator during this chat() call. */
   tokenUsage?: TokenUsageSnapshot;
+  /**
+   * How the turn ended. Code mode sets 'max-iterations' when the step limit was hit
+   * before finishing, so the CLI can offer the user the option to continue.
+   */
+  stopReason?: 'completed' | 'max-iterations' | 'stopped';
 }
 
 export interface IAgent {

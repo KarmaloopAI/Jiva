@@ -923,6 +923,140 @@ program
     }
   });
 
+// Benchmark command — measure code-mode capability of the configured model
+program
+  .command('benchmark')
+  .description('Run a code-mode benchmark suite (taskstore baseline, microcrm capability, …)')
+  .option('-c, --config <path>', 'Path to configuration JSON file')
+  .option('--suite <id>', 'Suite to run (taskstore | microcrm). Default: taskstore')
+  .option('--list', 'List available suites and their tasks, then exit')
+  .option('--max-tier <number>', 'Run only tiers 1..N within the suite', parseInt)
+  .option('--tasks <ids>', 'Comma-separated task ids to run (overrides --max-tier)')
+  .option('--max-iterations <number>', 'Override the per-task iteration cap', parseInt)
+  .option('--timeout <ms>', 'Override the per-task wall-clock timeout (ms)', parseInt)
+  .option('--lsp', 'Enable LSP during the benchmark (default: off)')
+  .option('--continuous', "Carry the agent's own output forward between tiers")
+  .option('--output <path>', 'Write the full JSON report to a file')
+  .option('--json', 'Print JSON only (machine-readable, suppresses progress)')
+  .option('--keep-workspaces', 'Keep temp workspaces on disk for debugging')
+  .action(async (options) => {
+    try {
+      // --list: print the suite/task catalogue and exit (no model needed).
+      if (options.list) {
+        const { BENCHMARK_SUITES, listTaskMetadata } = await import('../../code/benchmark/index.js');
+        for (const s of BENCHMARK_SUITES) {
+          console.log(chalk.bold(`\n${s.id}`) + chalk.gray(`  [${s.level} · ${s.scoring}]  ${s.name}`));
+          console.log(chalk.gray(`  ${s.description}`));
+          for (const t of listTaskMetadata(s.tasks)) {
+            console.log(`    ${chalk.cyan(t.id)} ${chalk.gray(`(tier ${t.tier}, ${t.kind})`)} — ${t.title}`);
+          }
+        }
+        console.log('');
+        process.exit(0);
+      }
+
+      // Resolve model configuration (from a config file or the stored config).
+      let modelConfig: any;
+      if (options.config) {
+        const configFile = await import('fs/promises').then((fs) => fs.readFile(options.config, 'utf-8'));
+        modelConfig = JSON.parse(configFile).models;
+      } else {
+        if (!configManager.isConfigured()) {
+          console.log(chalk.red('✗ Jiva is not configured. Please run: jiva setup\n'));
+          process.exit(1);
+        }
+        configManager.validateConfig();
+        modelConfig = {
+          reasoning: configManager.getReasoningModel(),
+          multimodal: configManager.getMultimodalModel(),
+          toolCalling: configManager.getToolCallingModel(),
+        };
+      }
+      if (!modelConfig?.reasoning) {
+        throw new Error('A reasoning model configuration is required');
+      }
+
+      const jsonOnly = !!options.json;
+      const log = (m: string) => {
+        if (!jsonOnly) console.log(chalk.gray('  ' + m));
+      };
+
+      const { createOrchestrator, selectTasks, runBenchmark, formatReportForCLI, toReportJSON, getSuite, DEFAULT_SUITE_ID, BENCHMARK_SUITES } =
+        await import('../../code/benchmark/index.js');
+
+      const suiteId = options.suite || DEFAULT_SUITE_ID;
+      const benchSuite = getSuite(suiteId);
+      if (!benchSuite) {
+        console.log(chalk.red(`Unknown suite "${suiteId}". Available: ${BENCHMARK_SUITES.map((s) => s.id).join(', ')}`));
+        process.exit(1);
+      }
+
+      if (!jsonOnly) console.log(chalk.gray('Testing model connectivity...'));
+      const { orchestrator, modelLabel } = await createOrchestrator({
+        reasoning: modelConfig.reasoning,
+        multimodal: modelConfig.multimodal,
+        toolCalling: modelConfig.toolCalling,
+        testConnectivity: true,
+        log,
+      });
+
+      const taskIds = options.tasks
+        ? options.tasks.split(',').map((s: string) => s.trim()).filter(Boolean)
+        : undefined;
+      const tasks = selectTasks(benchSuite.tasks, { maxTier: options.maxTier, taskIds });
+      if (tasks.length === 0) {
+        console.log(chalk.red('No benchmark tasks match the given filters.'));
+        process.exit(1);
+      }
+
+      if (!jsonOnly) {
+        console.log(chalk.cyan(`\nRunning suite "${benchSuite.id}" — ${tasks.length} task(s) with ${modelLabel}...\n`));
+      }
+
+      const suite = await runBenchmark(
+        orchestrator,
+        tasks,
+        {
+          maxIterations: options.maxIterations,
+          timeoutMs: options.timeout,
+          lspEnabled: !!options.lsp,
+          continuous: !!options.continuous,
+          keepWorkspaces: !!options.keepWorkspaces,
+          model: modelLabel,
+          suiteId: benchSuite.id,
+          suiteName: benchSuite.name,
+          scoring: benchSuite.scoring,
+        },
+        {
+          onTaskStart: (task, i, total) => {
+            if (!jsonOnly) process.stdout.write(chalk.gray(`  [${i + 1}/${total}] tier ${task.tier} · ${task.id} ... `));
+          },
+          onTaskDone: (r) => {
+            if (!jsonOnly) console.log(r.passed ? chalk.green('PASS') : chalk.red(`FAIL (${r.reason ?? 'fail'})`));
+          },
+        },
+      );
+
+      if (options.output) {
+        await import('fs/promises').then((fs) => fs.writeFile(options.output, toReportJSON(suite), 'utf-8'));
+        if (!jsonOnly) console.log(chalk.gray(`\nReport written to ${options.output}`));
+      }
+
+      if (jsonOnly) console.log(toReportJSON(suite));
+      else console.log(formatReportForCLI(suite));
+
+      // Gating suites: non-zero exit on any failure (CI gate). Scored suites are a
+      // measurement — exit 0 unless an infra/agent error prevented tests from running.
+      const exitCode = benchSuite.scoring === 'scored'
+        ? (suite.tasks.some((t) => t.reason === 'agent-error' || t.reason === 'runner-error') ? 1 : 0)
+        : (suite.failed > 0 ? 1 : 0);
+      process.exit(exitCode);
+    } catch (error) {
+      logger.error('Benchmark failed', error);
+      process.exit(1);
+    }
+  });
+
 // Default command (interactive chat)
 program.action(async (options) => {
   // If no command specified, run chat with the same options

@@ -1,6 +1,6 @@
 {
   "name": "jiva-core",
-  "version": "0.3.47",
+  "version": "0.3.48",
   "description": "Versatile autonomous AI agent with three-agent architecture (Manager, Worker, Client) powered by gpt-oss-120b. Adaptive validation, full MCP support, and intelligent quality control.",
   "main": "dist/index.js",
   "bin": {
@@ -9,7 +9,7 @@
   "type": "module",
   "scripts": {
     "test:web": "playwright test",
-    "build": "tsc",
+    "build": "tsc && node scripts/copy-benchmark-assets.mjs",
     "dev": "tsx src/interfaces/cli/index.ts",
     "dev:http": "tsx src/interfaces/http/index.ts",
     "start": "node --loader ts-node/esm src/interfaces/cli/index.ts",

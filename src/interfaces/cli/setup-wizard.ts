@@ -39,7 +39,8 @@ const PROVIDERS: Record<ProviderKey, ProviderPreset> = {
     toolCallingModel: 'sarvam-105b',
     useHarmonyFormat: false,
     reasoningEffortStrategy: 'api_param',
-    defaultMaxTokens: 8192,
+    // Sarvam's API caps completion output at 4096 tokens; requesting more is rejected.
+    defaultMaxTokens: 4096,
     hasMultimodal: false,
     note: 'Sarvam does not offer a multimodal model. You will need to pick a separate provider for multimodal.',
   },

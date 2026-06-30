@@ -97,7 +97,8 @@ export interface ModelClientConfig {
    * on their thinking chain before producing output. Without a sufficient budget
    * the model exhausts the default limit (~2048) reasoning and returns empty content.
    *
-   * Recommended: 8192 for Sarvam-105B, unset for Groq/Krutrim.
+   * Sarvam-105B caps completion output at 4096 tokens (requesting more is rejected),
+   * so use 4096 there. Leave unset for Groq/Krutrim.
    */
   defaultMaxTokens?: number;
 }
