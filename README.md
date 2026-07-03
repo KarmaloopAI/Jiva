@@ -29,7 +29,7 @@ After installation, click the **Jivam** icon to launch. The server starts automa
 If you prefer to install manually:
 
 ```bash
-npm install -g jivam jiva-core
+npm install -g jivam-app jiva-core
 
 # Create the native app launcher + add to Dock/Desktop
 jivam --install

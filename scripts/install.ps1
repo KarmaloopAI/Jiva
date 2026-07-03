@@ -108,7 +108,7 @@ if ($chromeInstalled) {
 # ── 3. Install jivam + jiva-core ─────────────────────────────────────────────
 Header "Step 3 of 4 - Installing Jivam"
 Log "Installing jivam and jiva-core globally..."
-npm install -g jivam jiva-core
+npm install -g jivam-app jiva-core
 Ok "jivam installed"
 Ok "jiva-core installed"
 
