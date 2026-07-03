@@ -150,7 +150,7 @@ if [ "$should_update" = true ]; then
   (
     echo "$(date): checking for updates..." >> "$LOG"
     touch "$UPDATE_STAMP"
-    ${y} install -g jivam jiva-core >> "$LOG" 2>&1
+    ${y} install -g jivamai jiva-core >> "$LOG" 2>&1
     echo "$(date): update check complete" >> "$LOG"
   ) &
 fi
@@ -234,7 +234,7 @@ if not exist "%UPDATE_STAMP%" (
 if "%DO_UPDATE%"=="1" (
   echo %date% %time%: checking for updates >> "%LOG%"
   echo. > "%UPDATE_STAMP%"
-  start /B "" cmd /C "${d.existsSync(y)?`"${y}"`:"npm"} install -g jivam jiva-core >> "%LOG%" 2>&1"
+  start /B "" cmd /C "${d.existsSync(y)?`"${y}"`:"npm"} install -g jivamai jiva-core >> "%LOG%" 2>&1"
 )
 
 :: ── Start server if not already running
