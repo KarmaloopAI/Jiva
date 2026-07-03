@@ -1,5 +1,6 @@
-import { useEffect, useRef } from 'react'
-import { Search, Code2, FileText, BarChart3 } from 'lucide-react'
+import { useEffect, useRef, useState, useCallback } from 'react'
+import { Search, Code2, FileText, BarChart3, ChevronDown } from 'lucide-react'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import { UserMessage } from './UserMessage'
 import { AgentMessage } from './AgentMessage'
 import { TypingIndicator } from './TypingIndicator'
@@ -10,12 +11,46 @@ import { logoUrl } from '../../lib/logo'
 export function MessageList() {
   const { messages, isThinking, thinkingStartTime } = useChatStore()
   const { connectionStatus, serverStatus } = useJivaStore()
-  const bottomRef = useRef<HTMLDivElement>(null)
+  const parentRef = useRef<HTMLDivElement>(null)
 
-  // Auto-scroll to bottom on new messages
+  // Whether the user is scrolled near the bottom (auto-scroll enabled)
+  const autoScroll = useRef(true)
+  const [showScrollBtn, setShowScrollBtn] = useState(false)
+
+  // Combine messages + optional "thinking" sentinel into one flat list
+  const items = isThinking
+    ? ([...messages, 'thinking'] as const)
+    : (messages as readonly (typeof messages[number] | 'thinking')[])
+
+  const virtualizer = useVirtualizer({
+    count: items.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 160,
+    overscan: 4,
+  })
+
+  const scrollToBottom = useCallback(() => {
+    const el = parentRef.current
+    if (!el) return
+    el.scrollTo({ top: el.scrollHeight })
+    autoScroll.current = true
+    setShowScrollBtn(false)
+  }, [])
+
+  const handleScroll = useCallback(() => {
+    const el = parentRef.current
+    if (!el) return
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120
+    autoScroll.current = nearBottom
+    setShowScrollBtn(!nearBottom && items.length > 0)
+  }, [items.length])
+
+  // Auto-scroll when new messages arrive (only if already at bottom)
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, isThinking])
+    if (autoScroll.current) {
+      scrollToBottom()
+    }
+  }, [items.length, scrollToBottom])
 
   const isConnected = connectionStatus === 'connected'
   const isStarting = serverStatus === 'starting' || connectionStatus === 'connecting'
@@ -72,19 +107,66 @@ export function MessageList() {
     )
   }
 
+  const totalSize = virtualizer.getTotalSize()
+
   return (
-    <div className="flex-1 overflow-y-auto px-4 py-6 space-y-6">
-      {messages.map((msg) =>
-        msg.role === 'user' ? (
-          <UserMessage key={msg.id} message={msg} />
-        ) : (
-          <AgentMessage key={msg.id} message={msg} />
-        )
+    <div className="flex-1 relative overflow-hidden">
+      <div
+        ref={parentRef}
+        className="h-full overflow-y-auto px-4"
+        onScroll={handleScroll}
+      >
+        {/* Spacer at top */}
+        <div style={{ height: 24 }} />
+
+        {/* Virtual scroll content */}
+        <div style={{ height: totalSize, position: 'relative' }}>
+          {virtualizer.getVirtualItems().map((vItem) => {
+            const item = items[vItem.index]
+            return (
+              <div
+                key={vItem.key}
+                data-index={vItem.index}
+                ref={virtualizer.measureElement}
+                style={{
+                  position: 'absolute',
+                  top: vItem.start,
+                  left: 0,
+                  width: '100%',
+                  paddingBottom: 24,
+                }}
+              >
+                {item === 'thinking' ? (
+                  <TypingIndicator startTime={thinkingStartTime} />
+                ) : item.role === 'user' ? (
+                  <UserMessage key={item.id} message={item} />
+                ) : (
+                  <AgentMessage key={item.id} message={item} />
+                )}
+              </div>
+            )
+          })}
+        </div>
+
+        {/* Spacer at bottom */}
+        <div style={{ height: 24 }} />
+      </div>
+
+      {/* Scroll to bottom FAB */}
+      {showScrollBtn && (
+        <button
+          onClick={scrollToBottom}
+          className="absolute bottom-4 right-4 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium shadow-lg transition-all"
+          style={{
+            background: 'var(--accent)',
+            color: '#fff',
+            opacity: 0.92,
+          }}
+        >
+          <ChevronDown size={13} />
+          Latest
+        </button>
       )}
-
-      {isThinking && <TypingIndicator startTime={thinkingStartTime} />}
-
-      <div ref={bottomRef} />
     </div>
   )
 }

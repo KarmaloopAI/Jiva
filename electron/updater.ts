@@ -1,15 +1,13 @@
 import { autoUpdater } from 'electron-updater'
 import type { BrowserWindow } from 'electron'
-import { ipcMain } from 'electron'
+import { ipcMain, shell } from 'electron'
 
 let _win: BrowserWindow | null = null
+let _downloadedFilePath: string | undefined
 
 export function initAutoUpdater(win: BrowserWindow): void {
   _win = win
 
-  // Download starts automatically as soon as an update is found.
-  // autoInstallOnAppQuit means if the user never clicks "Restart & Install",
-  // the update is applied silently the next time they quit the app.
   autoUpdater.autoDownload = true
   autoUpdater.autoInstallOnAppQuit = true
 
@@ -21,14 +19,15 @@ export function initAutoUpdater(win: BrowserWindow): void {
   })
 
   autoUpdater.on('update-not-available', () => {
-    // nothing — silent
+    _win?.webContents.send('updater:not-available')
   })
 
   autoUpdater.on('download-progress', (progress) => {
     _win?.webContents.send('updater:progress', Math.round(progress.percent))
   })
 
-  autoUpdater.on('update-downloaded', () => {
+  autoUpdater.on('update-downloaded', (info) => {
+    _downloadedFilePath = info.downloadedFile
     _win?.webContents.send('updater:ready')
   })
 
@@ -37,7 +36,6 @@ export function initAutoUpdater(win: BrowserWindow): void {
     _win?.webContents.send('updater:error', err.message)
   })
 
-  // Manual check (exposed to renderer for future use)
   ipcMain.handle('updater:check', async () => {
     try {
       await autoUpdater.checkForUpdates()
@@ -46,9 +44,21 @@ export function initAutoUpdater(win: BrowserWindow): void {
     }
   })
 
-  // Called only when the user explicitly clicks "Restart & Install"
   ipcMain.handle('updater:quit-and-install', () => {
-    autoUpdater.quitAndInstall(false, true)
+    if (process.platform === 'darwin') {
+      // Squirrel.Mac silently refuses to install unsigned/unnotarized builds.
+      // Reveal the downloaded zip in Finder so the user can install manually,
+      // then still attempt quitAndInstall (works correctly once the app is signed).
+      if (_downloadedFilePath) {
+        shell.showItemInFolder(_downloadedFilePath)
+      }
+      autoUpdater.quitAndInstall(false, true)
+    } else {
+      // Windows: silent NSIS install (/S flag) avoids the UAC elevation prompt
+      // that blocked Windows 11. With perMachine:false in electron-builder.yml the
+      // installer writes to %LocalAppData% which needs no elevation at all.
+      autoUpdater.quitAndInstall(true, true)
+    }
   })
 }
 

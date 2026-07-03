@@ -3,6 +3,9 @@ import { contextBridge, ipcRenderer } from 'electron'
 // Expose protected methods that allow the renderer process to use
 // the ipcRenderer without exposing the entire object
 contextBridge.exposeInMainWorld('electron', {
+  app: {
+    getVersion: () => ipcRenderer.invoke('app:get-version'),
+  },
   jiva: {
     startServer: () => ipcRenderer.invoke('jiva:server:start'),
     stopServer: () => ipcRenderer.invoke('jiva:server:stop'),
@@ -11,7 +14,7 @@ contextBridge.exposeInMainWorld('electron', {
     onStatusChange: (callback: (status: string, data?: unknown) => void) => {
       ipcRenderer.on('jiva:server:status-changed', (_event, status, data) => callback(status, data))
     },
-    sendMessage: (prompt: string, persona?: string, opts?: { deepRun?: boolean }) =>
+    sendMessage: (prompt: string, persona?: string, opts?: { deepRun?: boolean; maxIterations?: number; conversationHistory?: string }) =>
       ipcRenderer.invoke('jiva:send-message', prompt, persona, opts),
     stopMessage: () => ipcRenderer.invoke('jiva:stop-message'),
     onPhaseUpdate: (callback: (phase: string) => void) => {
@@ -26,6 +29,13 @@ contextBridge.exposeInMainWorld('electron', {
   config: {
     read: () => ipcRenderer.invoke('config:read'),
     write: (config: unknown) => ipcRenderer.invoke('config:write', config),
+    getPath: () => ipcRenderer.invoke('config:get-path'),
+    setupProvider: (args: {
+      provider: 'sarvam' | 'krutrim' | 'groq' | 'openai-compatible'
+      apiKey: string
+      customEndpoint?: string
+      customModel?: string
+    }) => ipcRenderer.invoke('config:setup-provider', args),
   },
   personas: {
     list: () => ipcRenderer.invoke('personas:list'),
@@ -63,7 +73,7 @@ contextBridge.exposeInMainWorld('electron', {
     isMaximized: () => ipcRenderer.invoke('window:isMaximized'),
   },
   code: {
-    sendMessage: (prompt: string, opts?: { deepRun?: boolean }) => ipcRenderer.invoke('code:send-message', prompt, opts),
+    sendMessage: (prompt: string, opts?: { deepRun?: boolean; maxIterations?: number; conversationHistory?: string }) => ipcRenderer.invoke('code:send-message', prompt, opts),
     stopMessage: () => ipcRenderer.invoke('code:stop-message'),
     resetSession: () => ipcRenderer.invoke('code:reset-session'),
     init: (dir: string, mcpServers?: string[], opts?: { deepRun?: boolean; maxIterations?: number }) => ipcRenderer.invoke('code:init', dir, mcpServers, opts),
@@ -104,6 +114,9 @@ contextBridge.exposeInMainWorld('electron', {
     },
     onReady: (cb: () => void) => {
       ipcRenderer.on('updater:ready', () => cb())
+    },
+    onNotAvailable: (cb: () => void) => {
+      ipcRenderer.on('updater:not-available', () => cb())
     },
   },
   cloud: {

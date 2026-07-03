@@ -1,6 +1,6 @@
 {
   "name": "jivam",
-  "version": "0.1.2",
+  "version": "0.1.4",
   "description": "Jivam - Desktop UI for the Jiva autonomous AI agent",
   "main": "dist-server/index.js",
   "bin": {
@@ -20,6 +20,7 @@
   "license": "MIT",
   "jivaCompatibleVersion": "0.3.44",
   "dependencies": {
+    "@tanstack/react-virtual": "^3.14.5",
     "clsx": "^2.1.1",
     "electron-updater": "^6.3.9",
     "express": "^5.2.1",

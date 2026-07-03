@@ -3,7 +3,7 @@ import { execSync } from 'child_process'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { getJivaConfigPath } from '../config-manager'
+import { getJivamConfigPath } from '../config-manager'
 
 const router = Router()
 
@@ -48,7 +48,7 @@ router.get('/check', (_req, res) => {
 
   // Config
   const configCandidates = [
-    getJivaConfigPath(),
+    getJivamConfigPath(),
     path.join(os.homedir(), '.jiva', 'config.json'),
   ]
   let configOk = false

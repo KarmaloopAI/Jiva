@@ -21,6 +21,7 @@ export interface JivaRunResult {
   } | null
   durationMs: number
   conversationId?: string
+  brainCommentary?: string[]   // brain thought messages collected during Deep Run
 }
 
 export interface JivaServerStatus {

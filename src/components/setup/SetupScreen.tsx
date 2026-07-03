@@ -7,6 +7,7 @@ import {
 import { Button } from '../ui/Button'
 import { logoUrl } from '../../lib/logo'
 import { SettingsPage } from '../settings/SettingsPage'
+import { ModelSetupStep } from './ModelSetupStep'
 
 interface SetupChecks {
   nodejs:   { ok: boolean; version?: string }
@@ -305,23 +306,10 @@ export function SetupScreen({ checks, onContinue }: Props) {
               badge={configStatus === 'ok' ? 'configured' : undefined}
               instruction={
                 configStatus === 'fail' ? (
-                  <div>
-                    <p className="text-xs text-[var(--text-muted)] mb-2">
-                      No API credentials found. Configure your AI model to get started:
-                    </p>
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      className="w-full"
-                      onClick={() => setShowSettings(true)}
-                    >
-                      <Settings size={13} />
-                      Configure Models
-                    </Button>
-                    <p className="text-xs text-[var(--text-subtle)] mt-2 text-center">
-                      After saving, this check will update automatically.
-                    </p>
-                  </div>
+                  <ModelSetupStep
+                    onConfigured={runCheck}
+                    onSkip={() => setShowSettings(true)}
+                  />
                 ) : undefined
               }
             />

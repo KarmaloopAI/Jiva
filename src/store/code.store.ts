@@ -20,20 +20,23 @@ function logToAction(message: string): string | null {
 // Determine if a log event should surface as a visible event card
 function isImportantEvent(event: CodeLogEvent): boolean {
   if (event.level === 'warn' || event.level === 'error') return true
-  if (event.message.startsWith('Tool: edit_file')) return true
-  if (event.message.startsWith('Tool: write_file')) return true
-  if (event.message.startsWith('Tool: bash')) return true
+  if (event.message.startsWith('Tool:')) return true
   return false
 }
 
 function eventLabel(event: CodeLogEvent): string {
   const msg = event.message
-  if (msg.startsWith('Tool: edit_file'))  return 'Edited file'
-  if (msg.startsWith('Tool: write_file')) return 'Created file'
-  if (msg.startsWith('Tool: bash'))       return 'Ran command'
-  if (msg.includes('Doom loop'))          return `Doom loop: ${msg.split('tool: ')[1] ?? 'tool'}`
-  if (msg.includes('Nearing iteration'))  return 'Nearing iteration limit'
-  if (msg.includes('Final phase'))        return 'Final phase — wrapping up'
+  if (msg.startsWith('Tool: edit_file'))   return 'Edited file'
+  if (msg.startsWith('Tool: write_file'))  return 'Created file'
+  if (msg.startsWith('Tool: bash'))        return 'Ran command'
+  if (msg.startsWith('Tool: read_file'))   return 'Read file'
+  if (msg.startsWith('Tool: glob'))        return 'Listed files'
+  if (msg.startsWith('Tool: grep'))        return 'Searched files'
+  if (msg.startsWith('Tool: spawn_code_agent')) return 'Delegated to sub-agent'
+  if (msg.startsWith('Tool:'))             return `Tool: ${msg.slice(6).trim().split('(')[0].trim()}`
+  if (msg.includes('Doom loop'))           return `Doom loop: ${msg.split('tool: ')[1] ?? 'tool'}`
+  if (msg.includes('Nearing iteration'))   return 'Nearing iteration limit'
+  if (msg.includes('Final phase'))         return 'Final phase — wrapping up'
   // Truncate long error messages
   const clean = msg.replace(/^Model error:\s+/, '').replace(/^API Error Response.*?:\s+/, '')
   return clean.length > 80 ? clean.slice(0, 77) + '...' : clean
@@ -41,7 +44,7 @@ function eventLabel(event: CodeLogEvent): string {
 
 export interface CodeEvent {
   id: string
-  type: 'tool' | 'warn' | 'error'
+  type: 'tool' | 'warn' | 'error' | 'brain'
   detail: string
   timestamp: string
 }
@@ -51,7 +54,9 @@ export interface CodeMessage {
   role: 'user' | 'agent'
   content: string
   timestamp: Date
-  events?: CodeEvent[]
+  events?: CodeEvent[]          // tool / warn / error events
+  brainCommentary?: string[]    // brain thought narration (Deep Run)
+  workExpanded?: boolean
 }
 
 interface CodeStore {
@@ -75,6 +80,7 @@ interface CodeStore {
   loadConversation: (id: string) => Promise<void>
 
   sendMessage: (content: string) => Promise<void>
+  toggleWorkPanel: (id: string) => void
   initLogListener: () => void
   clearSession: () => Promise<void>
 }
@@ -92,17 +98,39 @@ export const useCodeStore = create<CodeStore>((set, get) => ({
   isSessionStarted: false,
   codeWorkspaceDir: null,
   activeMcpServers: [],
-  deepRun: false,
+  deepRun: true,
   maxIterations: 50,
 
   setDeepRun: (value) => set({ deepRun: value }),
   setMaxIterations: (value) => set({ maxIterations: value }),
+
+  toggleWorkPanel: (id) => set(state => ({
+    messages: state.messages.map(m =>
+      m.id === id ? { ...m, workExpanded: !m.workExpanded } : m
+    ),
+  })),
 
   initLogListener: () => {
     if (logListenerRegistered || !window.electron?.code?.onCodeLog) return
     logListenerRegistered = true
 
     window.electron.code.onCodeLog((event: CodeLogEvent) => {
+      // Brain commentary — handle before importance filter
+      if (event.tag === 'brain') {
+        set({ currentAction: event.message })
+        const entry: CodeEvent = {
+          id: `${Date.now()}-${Math.random()}`,
+          type: 'brain',
+          detail: event.message,
+          timestamp: event.timestamp,
+        }
+        set(state => ({
+          pendingEvents: [...state.pendingEvents, entry],
+          liveEvents: [...state.liveEvents, entry],
+        }))
+        return
+      }
+
       // Always update the rotating action label
       const action = logToAction(event.message)
       if (action) {
@@ -153,10 +181,23 @@ export const useCodeStore = create<CodeStore>((set, get) => ({
     }))
 
     try {
-      const { deepRun } = get()
-      const response = await window.electron.code.sendMessage(content, { deepRun })
+      const { deepRun, maxIterations } = get()
+
+      // Build full conversation history for the brain — exclude the current user message
+      // (it's already passed as the prompt argument)
+      const allMessages = get().messages
+      const historyMessages = allMessages.slice(0, -1)
+      const conversationHistory = historyMessages.length > 0
+        ? historyMessages
+            .map(m => `[${m.role === 'user' ? 'User' : 'Assistant'}]: ${m.content}`)
+            .join('\n\n')
+        : undefined
+
+      const response = await window.electron.code.sendMessage(content, { deepRun, maxIterations, conversationHistory })
 
       const turnEvents = get().pendingEvents
+      const brainEvents = turnEvents.filter(e => e.type === 'brain')
+      const toolEvents  = turnEvents.filter(e => e.type !== 'brain')
 
       const agentMsg: CodeMessage = {
         id: `agent-${Date.now()}`,
@@ -165,7 +206,8 @@ export const useCodeStore = create<CodeStore>((set, get) => ({
           ? response.content
           : response.error ?? 'An error occurred.',
         timestamp: new Date(),
-        events: turnEvents.length > 0 ? turnEvents : undefined,
+        events: toolEvents.length > 0 ? toolEvents : undefined,
+        brainCommentary: brainEvents.length > 0 ? brainEvents.map(e => e.detail) : undefined,
       }
 
       set(state => ({
@@ -189,12 +231,14 @@ export const useCodeStore = create<CodeStore>((set, get) => ({
         } catch { /* non-critical */ }
       }
     } catch (err) {
+      const errEvents = get().pendingEvents
       const agentMsg: CodeMessage = {
         id: `agent-${Date.now()}`,
         role: 'agent',
         content: err instanceof Error ? err.message : 'An error occurred.',
         timestamp: new Date(),
-        events: get().pendingEvents,
+        events: errEvents.filter(e => e.type !== 'brain'),
+        brainCommentary: errEvents.filter(e => e.type === 'brain').map(e => e.detail),
       }
 
       set(state => ({

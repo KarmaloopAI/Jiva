@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import { ChevronDown, ChevronUp, AlertCircle } from 'lucide-react'
 import { MarkdownRenderer } from '../markdown/MarkdownRenderer'
 import { AgentWorkPanel } from './AgentWorkPanel'
@@ -9,12 +10,12 @@ interface AgentMessageProps {
   message: ChatMessage
 }
 
-export function AgentMessage({ message }: AgentMessageProps) {
+export const AgentMessage = memo(function AgentMessage({ message }: AgentMessageProps) {
   const { toggleWorkPanel } = useChatStore()
-  const hasWork = message.agentWork && (
+  const hasWork = (message.agentWork && (
     (message.agentWork.plan?.subtasks?.length ?? 0) > 0 ||
     (message.agentWork.toolsUsed?.length ?? 0) > 0
-  )
+  )) || (message.brainCommentary && message.brainCommentary.length > 0)
 
   return (
     <div className="flex items-start gap-3 animate-slide-up">
@@ -60,6 +61,7 @@ export function AgentMessage({ message }: AgentMessageProps) {
               <AgentWorkPanel
                 work={message.agentWork}
                 isExpanded={message.workExpanded ?? false}
+                brainCommentary={message.brainCommentary}
               />
             )}
           </div>
@@ -67,4 +69,4 @@ export function AgentMessage({ message }: AgentMessageProps) {
       </div>
     </div>
   )
-}
+})

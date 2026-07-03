@@ -92,6 +92,7 @@ export class JivaRunner extends EventEmitter {
   private jivaLogger: unknown = null     // jiva-core logger singleton (for direct hook)
   private currentPersona: string | null = null
   private currentConversationId: string | null = null
+  private maxIterations = 50             // user-configured; synced from chat() opts each call
 
   getStatus(): RunnerStatus {
     return this.status
@@ -120,7 +121,6 @@ export class JivaRunner extends EventEmitter {
       const jiva = await import(pathToFileURL(jivaCoreEntry).href)
 
       const {
-        configManager,
         MCPServerManager,
         WorkspaceManager,
         ConversationManager,
@@ -130,47 +130,44 @@ export class JivaRunner extends EventEmitter {
         LogLevel,
         logger,
         createLocalProvider,
-      } = jiva as Record<string, unknown> & {
-        configManager: {
-          isConfigured(): boolean
-          validateConfig(): void
-          getReasoningModel(): unknown
-          getMultimodalModel(): unknown
-          getMCPServers(): Record<string, unknown>
-          getActivePersona(): string | null
-        }
+      } = jiva as Record<string, unknown>
+
+      // --- 1. Load config from Jivam's own config file (not jiva-core's global singleton) ---
+      const jivaConfig = readConfig()
+      if (!jivaConfig?.models?.reasoning?.apiKey) {
+        throw new Error('Jivam is not configured. Add your API key in Settings → Models.')
       }
 
-      // --- 1. Load config ---
-      if (!(configManager as typeof configManager).isConfigured()) {
-        throw new Error('Jiva is not configured. Please run: jiva setup')
+      const reasoningConfig = jivaConfig.models.reasoning as {
+        endpoint?: string; apiKey?: string; defaultModel?: string; model?: string
+        useHarmonyFormat?: boolean; reasoningEffortStrategy?: string; defaultMaxTokens?: number
       }
-      ;(configManager as typeof configManager).validateConfig()
-
-      const reasoningConfig = (configManager as typeof configManager).getReasoningModel() as {
-        endpoint: string; apiKey: string; defaultModel: string; useHarmonyFormat?: boolean
-      }
-      const multimodalConfig = (configManager as typeof configManager).getMultimodalModel() as {
-        endpoint: string; apiKey: string; defaultModel: string
-      } | undefined
+      const multimodalConfig = jivaConfig.models.multimodal as {
+        endpoint?: string; apiKey?: string; defaultModel?: string
+      } | null | undefined
 
       // --- 2. Create models ---
       const createModel = createKrutrimModel as (config: unknown) => unknown
+      // defaultModel is the canonical field; fall back to model for legacy configs
+      const resolvedReasoningModel = reasoningConfig.defaultModel ?? reasoningConfig.model ?? ''
       const reasoningModel = createModel({
         endpoint: reasoningConfig.endpoint,
         apiKey: reasoningConfig.apiKey,
-        model: reasoningConfig.defaultModel,
+        model: resolvedReasoningModel,
         type: 'reasoning',
         useHarmonyFormat: reasoningConfig.useHarmonyFormat,
+        ...(reasoningConfig.reasoningEffortStrategy ? { reasoningEffortStrategy: reasoningConfig.reasoningEffortStrategy } : {}),
+        ...(reasoningConfig.defaultMaxTokens ? { defaultMaxTokens: reasoningConfig.defaultMaxTokens } : {}),
       })
 
       let multimodalModel: unknown
-      if (multimodalConfig) {
+      if (multimodalConfig?.apiKey) {
         try {
+          const resolvedMmModel = multimodalConfig.defaultModel ?? ''
           multimodalModel = createModel({
             endpoint: multimodalConfig.endpoint,
             apiKey: multimodalConfig.apiKey,
-            model: multimodalConfig.defaultModel,
+            model: resolvedMmModel,
             type: 'multimodal',
           })
         } catch {
@@ -183,7 +180,7 @@ export class JivaRunner extends EventEmitter {
       this.orchestrator = new OrchestratorClass({ reasoningModel, multimodalModel })
 
       // --- 4. Initialize MCP servers ---
-      const mcpServers = (configManager as typeof configManager).getMCPServers()
+      const mcpServers = (jivaConfig.mcpServers ?? {}) as Record<string, unknown>
       const allowedPath = os.platform() === 'win32' ? 'C:\\Users' : '/Users'
 
       // Ensure filesystem MCP server always exists
@@ -208,9 +205,7 @@ export class JivaRunner extends EventEmitter {
       // --- 5. Write date-aware directive + Initialize workspace ---
       // The directive injects current date/time + recent activity so the LLM always
       // knows the correct date without relying on its training data.
-      const { path: directivePath } = writeDirective(
-        (readConfig() as unknown as Record<string, unknown>)?.userDirective as string | undefined
-      )
+      const { path: directivePath } = writeDirective(jivaConfig.userDirective)
 
       const workspaceDir = process.cwd()
       const WsClass = WorkspaceManager as new (config: unknown) => { initialize(): Promise<void> }
@@ -237,7 +232,7 @@ export class JivaRunner extends EventEmitter {
       }}
       this.personaManager = new PersonaManager()
       await (this.personaManager as { initialize(p?: string): Promise<void> }).initialize(
-        persona ?? (configManager as typeof configManager).getActivePersona() ?? undefined
+        persona ?? undefined
       )
 
       // Merge persona-specific MCP servers
@@ -277,7 +272,7 @@ export class JivaRunner extends EventEmitter {
         conversationManager: this.conversationManager,
         personaManager: this.personaManager,
         maxSubtasks: 20,
-        maxIterations: 10,
+        maxIterations: this.maxIterations,
         autoSave: true,
         condensingThreshold: 30,
       })
@@ -300,20 +295,24 @@ export class JivaRunner extends EventEmitter {
   private makeCompleter(): Completer {
     const orch = this.orchestrator as Record<string, unknown>
     return async (systemPrompt: string, userPrompt: string): Promise<string | null> => {
-      for (const method of ['complete', 'generateResponse', 'generate', 'chat', 'invoke']) {
-        if (typeof orch[method] !== 'function') continue
-        try {
-          const fn = (orch[method] as (msgs: Array<{ role: string; content: string }>) => Promise<{ content: string }>).bind(orch)
-          const result = await fn([
+      if (typeof orch['chat'] !== 'function') return null
+      try {
+        const chatFn = (orch['chat'] as (opts: {
+          messages: Array<{ role: string; content: string }>
+          reasoningEffort?: string
+        }) => Promise<{ content: string }>).bind(orch)
+        const result = await chatFn({
+          messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userPrompt },
-          ])
-          return result.content ?? null
-        } catch {
-          // try next method
-        }
+          ],
+          reasoningEffort: 'low',
+        })
+        return result?.content ?? null
+      } catch (err) {
+        console.warn('[JivaRunner] makeCompleter: chat() failed:', err)
+        return null
       }
-      return null
     }
   }
 
@@ -482,7 +481,7 @@ export class JivaRunner extends EventEmitter {
   async chat(
     prompt: string,
     onPhase: (phase: PhaseUpdate) => void,
-    opts?: { deepRun?: boolean },
+    opts?: { deepRun?: boolean; maxIterations?: number; conversationHistory?: string },
     onLog?: (event: CodeLogEvent) => void
   ): Promise<JivaRunResult> {
     if (!this.agent) {
@@ -492,18 +491,43 @@ export class JivaRunner extends EventEmitter {
       throw new Error('Agent is already processing a request.')
     }
 
+    // Sync maxIterations from caller and propagate to agent instance lazily
+    if (opts?.maxIterations !== undefined && opts.maxIterations !== this.maxIterations) {
+      this.maxIterations = opts.maxIterations
+      try { (this.agent as Record<string, unknown>).maxIterations = this.maxIterations } catch {}
+    }
+
     this.setStatus('busy')
     const startTime = Date.now()
 
     onPhase('planning')
-    const executingTimer = setTimeout(() => onPhase('executing'), 5000)
-    const synthesizingTimer = setTimeout(() => onPhase('synthesizing'), 20000)
+    const executingTimer = setTimeout(() => onPhase('executing'), 2000)
+    const synthesizingTimer = setTimeout(() => onPhase('synthesizing'), 30000)
 
     try {
       let result: JivaRunResult
 
-      if (opts?.deepRun) {
-        result = await harness.run(prompt, this.makeCompleter(), p => this.runChat(p, startTime, onLog))
+      if (opts?.deepRun !== false) {
+        // Collect names of currently configured MCP servers so the brain can recommend
+        // additional ones the user hasn't set up yet.
+        const mcpServerNames = Object.keys(readConfig()?.mcpServers ?? {})
+
+        result = await harness.run(
+          prompt,
+          this.makeCompleter(),
+          (p, execOpts) => {
+            // Apply per-subtask iteration limit from the brain's complexity hint
+            if (execOpts?.maxIterations !== undefined && execOpts.maxIterations !== this.maxIterations) {
+              this.maxIterations = execOpts.maxIterations
+              try { (this.agent as Record<string, unknown>).maxIterations = this.maxIterations } catch {}
+            }
+            return this.runChat(p, startTime, onLog)
+          },
+          (brainEvent) => onLog?.(brainEvent),
+          this.maxIterations,
+          opts?.conversationHistory || undefined,
+          mcpServerNames
+        )
       } else {
         result = await this.runChat(prompt, startTime, onLog)
       }
@@ -512,6 +536,7 @@ export class JivaRunner extends EventEmitter {
       clearTimeout(synthesizingTimer)
       onPhase('done')
       this.setStatus('ready')
+
       return result
     } catch (err) {
       clearTimeout(executingTimer)

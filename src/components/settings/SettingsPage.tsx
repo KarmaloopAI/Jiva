@@ -1,14 +1,15 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { ArrowLeft, Cpu, Server, Users, Sun, Moon, FolderOpen, HardDrive, FileText } from 'lucide-react'
+import { ArrowLeft, Cpu, Server, Users, Sun, Moon, FolderOpen, HardDrive, FileText, Info } from 'lucide-react'
 import { ModelsTab } from './tabs/ModelsTab'
 import { MCPTab } from './tabs/MCPTab'
 import { PersonasTab } from './tabs/PersonasTab'
 import { WorkspaceTab } from './tabs/WorkspaceTab'
 import { DirectiveTab } from './tabs/DirectiveTab'
+import { AboutTab } from './tabs/AboutTab'
 import { useSettingsStore } from '../../store/settings.store'
 
-type SettingsTab = 'models' | 'mcp' | 'personas' | 'workspace' | 'directive'
+type SettingsTab = 'models' | 'mcp' | 'personas' | 'workspace' | 'directive' | 'about'
 
 interface SettingsPageProps {
   onClose: () => void
@@ -25,11 +26,24 @@ const TABS: Array<{
   { id: 'workspace', label: 'Workspace', icon: <HardDrive size={14} /> },
   { id: 'directive', label: 'Directive', icon: <FileText size={14} /> },
   { id: 'personas', label: 'Personas / Plugins', icon: <Users size={14} />, comingSoon: true },
+  { id: 'about', label: 'About', icon: <Info size={14} /> },
 ]
 
 export function SettingsPage({ onClose }: SettingsPageProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>('models')
   const { theme, toggleTheme } = useSettingsStore()
+  const [configPath, setConfigPath] = useState('~/.jivam/config.json')
+
+  useEffect(() => {
+    window.electron?.config?.getPath?.().then(p => {
+      if (p) {
+        // Show ~ for home directory to keep it readable
+        const home = window.navigator.platform.toLowerCase().includes('win') ? '' : '~'
+        const display = p.replace(/^\/Users\/[^/]+/, '~').replace(/^\/home\/[^/]+/, '~')
+        setConfigPath(display)
+      }
+    }).catch(() => {})
+  }, [])
 
   return (
     <motion.div
@@ -118,6 +132,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         {activeTab === 'workspace' && <WorkspaceTab />}
         {activeTab === 'directive' && <DirectiveTab />}
         {activeTab === 'personas' && <PersonasTab />}
+        {activeTab === 'about' && <AboutTab />}
       </div>
 
       {/* Config path footer */}
@@ -126,7 +141,7 @@ export function SettingsPage({ onClose }: SettingsPageProps) {
         style={{ borderColor: 'var(--card-border)', color: 'var(--text-subtle)' }}
       >
         <FolderOpen size={11} />
-        <span>Config: ~/.jiva/config.json</span>
+        <span>Config: {configPath}</span>
       </div>
     </motion.div>
   )

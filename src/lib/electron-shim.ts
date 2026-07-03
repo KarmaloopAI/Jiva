@@ -103,7 +103,7 @@ const electronShim = {
     onStatusChange: (cb: (status: string, data?: unknown) => void) => {
       on('jiva:server:status-changed', (msg: unknown) => { const { status, data } = msg as Record<string, unknown>; cb(status as string, data) })
     },
-    sendMessage: (prompt: string, _persona?: string, opts?: { deepRun?: boolean }) =>
+    sendMessage: (prompt: string, _persona?: string, opts?: { deepRun?: boolean; maxIterations?: number; conversationHistory?: string }) =>
       post('/jiva/send-message', { prompt, opts }),
     stopMessage: () => post('/jiva/stop-message'),
     onPhaseUpdate: (cb: (phase: string) => void) => {
@@ -119,6 +119,13 @@ const electronShim = {
   config: {
     read: () => get('/config'),
     write: (config: unknown) => post('/config', config),
+    getPath: () => get<string>('/config/path'),
+    setupProvider: (args: { provider: 'sarvam' | 'krutrim' | 'groq' | 'openai-compatible'; apiKey: string; customEndpoint?: string; customModel?: string }) =>
+      post<{ success: boolean; error?: string }>('/config/setup-provider', args),
+  },
+
+  app: {
+    getVersion: () => get<string>('/version'),
   },
 
   personas: {

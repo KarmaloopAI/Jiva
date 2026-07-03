@@ -1,8 +1,8 @@
-import { ipcMain, BrowserWindow, dialog, shell } from 'electron'
+import { ipcMain, BrowserWindow, dialog, shell, app } from 'electron'
 import { execSync, execFileSync } from 'child_process'
 import { JivaRunner } from './jiva-runner'
 import type { CodeRunner } from './code-runner'
-import { readConfig, writeConfig, getJivaConfigPath } from './config-manager'
+import { readConfig, writeConfig, getJivamConfigPath, migrateFromJivaCoreIfNeeded } from './config-manager'
 import { writeDirective } from './directive-manager'
 import { listPersonas, activatePersona, getActivePersona } from './persona-manager'
 import { cloudSignIn, cloudSignUp, cloudSignOut, initCloudSession } from './cloud-auth'
@@ -22,6 +22,9 @@ export function setupIpcHandlers(
 ) {
   // --- Pre-flight setup check (fast, no agent needed) ---
   ipcMain.handle('setup:check', () => {
+    // Migrate jiva-core config to Jivam's own path on first run
+    migrateFromJivaCoreIfNeeded()
+
     // 1. Node.js — verify npm exists for the ok flag; separately get node version for display
     let nodejsOk = false
     let nodejsVersion: string | undefined
@@ -77,24 +80,18 @@ export function setupIpcHandlers(
       }
     }
 
-    // 3. Configuration — check correct platform path first, fall back to legacy ~/.jiva
-    const configCandidates = [
-      getJivaConfigPath(),                                      // correct OS-specific path
-      path.join(os.homedir(), '.jiva', 'config.json'),         // legacy fallback
-    ]
-
+    // 3. Configuration — check Jivam's own config path
+    const jivamConfigPath = getJivamConfigPath()
     let configOk = false
     let foundConfigPath = ''
-    for (const candidate of configCandidates) {
-      if (!fs.existsSync(candidate)) continue
+    if (fs.existsSync(jivamConfigPath)) {
       try {
-        const cfg = JSON.parse(fs.readFileSync(candidate, 'utf-8')) as Record<string, unknown>
+        const cfg = JSON.parse(fs.readFileSync(jivamConfigPath, 'utf-8')) as Record<string, unknown>
         const reasoning = ((cfg?.models as Record<string, unknown>)?.reasoning ?? {}) as Record<string, unknown>
         const apiKey = ((reasoning?.apiKey ?? cfg?.apiKey) ?? '') as string
         if (apiKey.length > 0) {
           configOk = true
-          foundConfigPath = candidate
-          break
+          foundConfigPath = jivamConfigPath
         }
       } catch {}
     }
@@ -120,7 +117,7 @@ export function setupIpcHandlers(
     return {
       nodejs:   { ok: nodejsOk,   version: nodejsVersion },
       jivaCore: { ok: jivaCoreOk, version: jivaCoreVersion },
-      config:   { ok: configOk,   path: foundConfigPath || configCandidates[0] },
+      config:   { ok: configOk,   path: foundConfigPath || jivamConfigPath },
       platform: process.platform,
       jivaVersionMismatch,
       requiredJivaVersion,
@@ -180,7 +177,7 @@ export function setupIpcHandlers(
   // NOTE: Persona switching is intentionally NOT done here on every message.
   // The `persona` parameter is accepted but ignored to avoid destroying conversation history.
   // Persona switches happen only via the explicit `personas:activate` IPC call.
-  ipcMain.handle('jiva:send-message', async (event, prompt: string, _persona?: string, opts?: { deepRun?: boolean }) => {
+  ipcMain.handle('jiva:send-message', async (event, prompt: string, _persona?: string, opts?: { deepRun?: boolean; maxIterations?: number; conversationHistory?: string }) => {
     // Send phase and log events back to whichever window invoked this handler
     // (works for both the main local window and the separate cloud window)
     const sender = event.sender
@@ -252,6 +249,117 @@ export function setupIpcHandlers(
 
   ipcMain.handle('config:write', (_event, config: unknown) => {
     return writeConfig(config as Parameters<typeof writeConfig>[0])
+  })
+
+  ipcMain.handle('config:get-path', () => {
+    return getJivamConfigPath()
+  })
+
+  // --- Provider Quick Setup ---
+  type ProviderKey = 'sarvam' | 'krutrim' | 'groq' | 'openai-compatible'
+
+  const PROVIDER_PRESETS: Record<ProviderKey, {
+    endpoint: string
+    defaultModel: string
+    useHarmonyFormat: boolean
+    reasoningEffortStrategy: string
+    defaultMaxTokens?: number
+    multimodal: { defaultModel: string } | null
+  }> = {
+    sarvam: {
+      endpoint: 'https://api.sarvam.ai/v1/chat/completions',
+      defaultModel: 'sarvam-105b',
+      useHarmonyFormat: false,
+      reasoningEffortStrategy: 'api_param',
+      defaultMaxTokens: 8192,
+      multimodal: null,
+    },
+    krutrim: {
+      endpoint: 'https://cloud.olakrutrim.com/v1/chat/completions',
+      defaultModel: 'gpt-oss-120b',
+      useHarmonyFormat: true,
+      reasoningEffortStrategy: 'system_prompt',
+      multimodal: { defaultModel: 'Llama-4-Maverick-17B-128E-Instruct' },
+    },
+    groq: {
+      endpoint: 'https://api.groq.com/openai/v1/chat/completions',
+      defaultModel: 'openai/gpt-oss-120b',
+      useHarmonyFormat: false,
+      reasoningEffortStrategy: 'api_param',
+      multimodal: { defaultModel: 'meta-llama/llama-4-maverick-17b-128e-instruct' },
+    },
+    'openai-compatible': {
+      endpoint: '',
+      defaultModel: '',
+      useHarmonyFormat: false,
+      reasoningEffortStrategy: 'both',
+      multimodal: null,
+    },
+  }
+
+  ipcMain.handle('config:setup-provider', (_event, args: {
+    provider: ProviderKey
+    apiKey: string
+    customEndpoint?: string
+    customModel?: string
+  }) => {
+    try {
+      const { provider, apiKey, customEndpoint, customModel } = args
+      const preset = PROVIDER_PRESETS[provider]
+      if (!preset) return { success: false, error: `Unknown provider: ${provider}` }
+
+      const endpoint = provider === 'openai-compatible' ? (customEndpoint ?? '') : preset.endpoint
+      const defaultModel = provider === 'openai-compatible' ? (customModel ?? '') : preset.defaultModel
+
+      const existing = readConfig()
+      const config = existing ?? { models: { reasoning: null } }
+
+      config.models = {
+        ...config.models,
+        reasoning: {
+          name: 'reasoning',
+          type: 'reasoning',
+          provider,
+          endpoint,
+          apiKey,
+          defaultModel,
+          useHarmonyFormat: preset.useHarmonyFormat,
+          reasoningEffortStrategy: preset.reasoningEffortStrategy,
+          ...(preset.defaultMaxTokens ? { defaultMaxTokens: preset.defaultMaxTokens } : {}),
+        },
+        multimodal: preset.multimodal
+          ? {
+              name: 'multimodal',
+              type: 'multimodal',
+              endpoint,
+              apiKey,
+              defaultModel: preset.multimodal.defaultModel,
+            }
+          : undefined,
+      }
+
+      // Ensure default MCP servers are configured
+      if (!config.mcpServers) {
+        const allowedPath = process.platform === 'win32' ? 'C:\\Users' : '/Users'
+        config.mcpServers = {
+          filesystem: {
+            command: 'npx',
+            args: ['-y', '@modelcontextprotocol/server-filesystem', allowedPath],
+            enabled: true,
+          },
+          'mcp-shell-server': {
+            command: 'npx',
+            args: ['-y', '@mkusaka/mcp-shell-server'],
+            enabled: true,
+          },
+        }
+      }
+
+      const ok = writeConfig(config)
+      return { success: ok, error: ok ? undefined : 'Failed to write config' }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
+    }
   })
 
   // --- Personas ---
@@ -644,6 +752,9 @@ export function setupIpcHandlers(
     }
   })
 
+  // --- App Info ---
+  ipcMain.handle('app:get-version', () => app.getVersion())
+
   // --- Window Controls ---
   ipcMain.handle('window:minimize', () => {
     getWindow()?.minimize()
@@ -667,7 +778,7 @@ export function setupIpcHandlers(
   })
 
   // --- Code Mode: send message via CodeAgent ---
-  ipcMain.handle('code:send-message', async (_event, prompt: string, opts?: { deepRun?: boolean }) => {
+  ipcMain.handle('code:send-message', async (_event, prompt: string, opts?: { deepRun?: boolean; maxIterations?: number; conversationHistory?: string }) => {
     const win = getWindow()
     try {
       if (!codeRunner.isReady()) {

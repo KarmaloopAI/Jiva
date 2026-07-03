@@ -144,7 +144,8 @@ export function ChatInput() {
           iterations: response.iterations ?? 1,
           durationMs,
         },
-        durationMs
+        durationMs,
+        response.brainCommentary
       )
       useConversationStore.getState().loadConversationList()
     } catch (err) {
@@ -328,7 +329,7 @@ export function ChatInput() {
                 </button>
               </div>
               <p className="text-[10px] text-[var(--text-subtle)] mt-1.5 leading-relaxed">
-                Jivam evaluates results and re-runs if needed
+                Brain plans and coordinates workers for complex requests
               </p>
             </div>
           )}

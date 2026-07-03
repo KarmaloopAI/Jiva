@@ -42,6 +42,9 @@ export interface MCPServerConfig {
 
 interface ElectronAPI {
   platform: string
+  app: {
+    getVersion: () => Promise<string>
+  }
   jiva: {
     startServer: () => Promise<{ success: boolean; status?: string; error?: string }>
     stopServer: () => Promise<{ success: boolean }>
@@ -51,7 +54,7 @@ interface ElectronAPI {
     sendMessage: (
       prompt: string,
       persona?: string,
-      opts?: { deepRun?: boolean }
+      opts?: { deepRun?: boolean; maxIterations?: number; conversationHistory?: string }
     ) => Promise<{ success: boolean; result?: JivaRunResult; conversationId?: string; error?: string }>
     stopMessage: () => Promise<{ success: boolean }>
     onPhaseUpdate: (callback: (phase: string) => void) => void
@@ -62,6 +65,13 @@ interface ElectronAPI {
   config: {
     read: () => Promise<unknown>
     write: (config: unknown) => Promise<boolean>
+    getPath: () => Promise<string>
+    setupProvider: (args: {
+      provider: 'sarvam' | 'krutrim' | 'groq' | 'openai-compatible'
+      apiKey: string
+      customEndpoint?: string
+      customModel?: string
+    }) => Promise<{ success: boolean; error?: string }>
   }
   personas: {
     list: () => Promise<PersonaInfo[]>
@@ -100,7 +110,7 @@ interface ElectronAPI {
     isMaximized: () => Promise<boolean>
   }
   code: {
-    sendMessage: (prompt: string, opts?: { deepRun?: boolean }) => Promise<{ success: boolean; content?: string; toolsUsed?: string[]; iterations?: number; error?: string }>
+    sendMessage: (prompt: string, opts?: { deepRun?: boolean; maxIterations?: number; conversationHistory?: string }) => Promise<{ success: boolean; content?: string; toolsUsed?: string[]; iterations?: number; error?: string }>
     stopMessage: () => Promise<{ success: boolean }>
     resetSession: () => Promise<{ success: boolean; error?: string }>
     init: (dir: string, mcpServers?: string[], opts?: { deepRun?: boolean; maxIterations?: number }) => Promise<{ success: boolean; error?: string }>
@@ -138,6 +148,7 @@ interface ElectronAPI {
     onAvailable: (cb: (info: { version: string; releaseNotes: string | null }) => void) => void
     onProgress: (cb: (percent: number) => void) => void
     onReady: (cb: () => void) => void
+    onNotAvailable: (cb: () => void) => void
   }
   cloud: {
     openWindow: () => Promise<void>

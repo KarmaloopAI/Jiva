@@ -23,9 +23,9 @@ mac:
     - target: zip
       arch: universal
   darkModeSupport: true
-  # Code signing — certificate is read from CSC_LINK / CSC_KEY_PASSWORD env vars
-  notarize:
-    teamId: ${APPLE_TEAM_ID}
+  # Code signing — uncomment and set env vars when Apple Developer certificate is ready:
+  # notarize:
+  #   teamId: ${APPLE_TEAM_ID}
 
 dmg:
   title: "Jivam ${version}"
@@ -49,15 +49,16 @@ win:
         - arm64
     - target: portable
       arch: x64
-  # Azure Trusted Signing — credentials read from env vars below
-  azureSignOptions:
-    endpoint: ${AZURE_SIGNING_ENDPOINT}
-    certificateProfileName: ${AZURE_CERT_PROFILE_NAME}
-    codeSigningAccountName: ${AZURE_SIGNING_ACCOUNT_NAME}
+  # Azure Trusted Signing — uncomment and set env vars when certificate is ready:
+  # azureSignOptions:
+  #   endpoint: ${AZURE_SIGNING_ENDPOINT}
+  #   certificateProfileName: ${AZURE_CERT_PROFILE_NAME}
+  #   codeSigningAccountName: ${AZURE_SIGNING_ACCOUNT_NAME}
 
 nsis:
   artifactName: ${productName}-Setup-${version}.exe
   oneClick: false
+  perMachine: false                    # install to %LocalAppData% — no UAC elevation needed
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true

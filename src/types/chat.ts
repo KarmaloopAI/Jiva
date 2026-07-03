@@ -18,4 +18,5 @@ export interface ChatMessage {
   workExpanded?: boolean
   errorMessage?: string
   attachments?: AttachedFile[]
+  brainCommentary?: string[]   // brain event messages collected during Deep Run
 }

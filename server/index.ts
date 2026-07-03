@@ -50,8 +50,14 @@ app.use('/api/code', createCodeRouter(codeRunner))
 app.use('/api/files', createFilesRouter(jivaRunner))
 app.use('/api/cloud', createCloudRouter(cloudRunner))
 
-// Platform endpoint for the frontend shim
+// Platform + version endpoints for the frontend shim
 app.get('/api/platform', (_req, res) => res.json(process.platform))
+app.get('/api/version', (_req, res) => {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname_cjs, '..', 'package.json'), 'utf-8')) as { version: string }
+    res.json(pkg.version)
+  } catch { res.json('0.0.0') }
+})
 
 // Serve built frontend in production
 if (!IS_DEV) {

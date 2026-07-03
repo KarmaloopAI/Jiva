@@ -110,7 +110,9 @@ function UpdateBanner() {
         <div className="flex items-center gap-2 text-[var(--text-muted)] min-w-0">
           <Download size={13} className="text-[var(--accent)] shrink-0" />
           {updateReady ? (
-            <span>v{updateInfo?.version} ready — restart to install</span>
+            isMac
+              ? <span>v{updateInfo?.version} ready — click to install</span>
+              : <span>v{updateInfo?.version} ready — restart to install</span>
           ) : isDownloading ? (
             <span>Downloading v{updateInfo?.version}… {progress}%</span>
           ) : (
@@ -124,7 +126,7 @@ function UpdateBanner() {
               onClick={() => window.electron.updater.quitAndInstall()}
               className="text-xs font-medium px-3 py-1 rounded-md bg-[var(--accent)] text-white hover:opacity-90 transition-opacity"
             >
-              Restart & Install
+              {isMac ? 'Open in Finder' : 'Restart & Install'}
             </button>
           )}
           {!updateReady && isDownloading && (

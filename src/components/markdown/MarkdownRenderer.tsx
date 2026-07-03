@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { CodeBlock } from './CodeBlock'
@@ -7,7 +8,7 @@ interface MarkdownRendererProps {
   className?: string
 }
 
-export function MarkdownRenderer({ content, className }: MarkdownRendererProps) {
+export const MarkdownRenderer = memo(function MarkdownRenderer({ content, className }: MarkdownRendererProps) {
   return (
     <div className={`markdown-body ${className ?? ''}`}>
       <ReactMarkdown
@@ -64,4 +65,4 @@ export function MarkdownRenderer({ content, className }: MarkdownRendererProps) 
       </ReactMarkdown>
     </div>
   )
-}
+})
