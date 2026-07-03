@@ -107,7 +107,7 @@ fi
 # ── 4. Install jivam + jiva-core ─────────────────────────────────────────────
 header "Step 3 of 4 — Installing Jivam"
 log "Installing jivam and jiva-core globally (this may take a minute)..."
-npm install -g jivam jiva-core
+npm install -g jivamai jiva-core
 ok "jivam $(jivam --version 2>/dev/null || node -e "const p=require('$(npm root -g)/jivam/package.json');console.log(p.version)" 2>/dev/null || echo '') installed"
 ok "jiva-core installed"
 
