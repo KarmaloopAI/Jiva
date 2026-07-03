@@ -1,4 +1,4 @@
-import { Settings, AlertTriangle, XCircle } from 'lucide-react'
+import { Settings, AlertTriangle, XCircle, Brain } from 'lucide-react'
 import type { CodeEvent } from '../../store/code.store'
 
 interface CodeEventCardProps {
@@ -28,6 +28,12 @@ const CONFIG: Record<CodeEvent['type'], {
     color: '#EF4444',
     bg: 'rgba(239,68,68,0.07)',
     border: 'rgba(239,68,68,0.2)',
+  },
+  brain: {
+    icon: Brain,
+    color: 'var(--accent)',
+    bg: 'rgba(139,92,246,0.06)',
+    border: 'rgba(139,92,246,0.18)',
   },
 }
 

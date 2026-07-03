@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { useJivaStore } from '../../store/jiva.store'
 import { logoUrl } from '../../lib/logo'
 import { CodeEventCard } from '../code/CodeEventCard'
+import type { CodeEvent } from '../../store/code.store'
 
 const PHASE_LABELS: Record<string, string> = {
   planning:     'Planning your request...',
@@ -16,8 +17,8 @@ interface TypingIndicatorProps {
 
 export function TypingIndicator({ startTime }: TypingIndicatorProps) {
   const [elapsed, setElapsed] = useState(0)
-  const { currentPhase, currentAction, liveEvents, lastPlan } = useJivaStore()
-  const logRef = useRef<HTMLDivElement>(null)
+  const { currentPhase, currentAction, liveEvents } = useJivaStore()
+  const toolLogRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!startTime) return
@@ -25,14 +26,18 @@ export function TypingIndicator({ startTime }: TypingIndicatorProps) {
     return () => clearInterval(interval)
   }, [startTime])
 
-  // Auto-scroll event log to bottom on new events
+  // Auto-scroll tool log to bottom on new events
   useEffect(() => {
-    if (logRef.current) {
-      logRef.current.scrollTop = logRef.current.scrollHeight
+    if (toolLogRef.current) {
+      toolLogRef.current.scrollTop = toolLogRef.current.scrollHeight
     }
   }, [liveEvents.length])
 
   const seconds = Math.floor(elapsed / 1000)
+
+  // Split brain thoughts from tool/warn/error events
+  const brainEvents: CodeEvent[] = liveEvents.filter((e: CodeEvent) => e.type === 'brain')
+  const toolEvents: CodeEvent[]  = liveEvents.filter((e: CodeEvent) => e.type !== 'brain')
 
   // Phase fallback when no live action text is available
   const phaseLabel = currentPhase
@@ -41,8 +46,10 @@ export function TypingIndicator({ startTime }: TypingIndicatorProps) {
     : elapsed < 15000 ? 'Planning your request...'
     : 'Working on it...'
 
-  // Primary status: live tool activity trumps the generic phase text
-  const primaryLabel = currentAction ?? phaseLabel
+  // Primary status line: use tool activity; hide if brain commentary is showing
+  const primaryLabel = currentAction && !currentAction.match(/^(Thinking|All done|Here'?s|My plan|Working on step|Still at it)/)
+    ? currentAction
+    : brainEvents.length === 0 ? phaseLabel : null
 
   return (
     <div className="flex items-start gap-3 animate-fade-in">
@@ -60,9 +67,27 @@ export function TypingIndicator({ startTime }: TypingIndicatorProps) {
       {/* Bubble */}
       <div
         className="glass-card rounded-2xl rounded-tl-sm px-4 py-3"
-        style={{ minWidth: '180px', maxWidth: '420px' }}
+        style={{ minWidth: '200px', maxWidth: '480px' }}
       >
-        {/* Primary row: dots + live label */}
+        {/* Brain commentary — warm conversational text stream */}
+        {brainEvents.length > 0 && (
+          <div className="space-y-1.5 mb-2">
+            {brainEvents.slice(-4).map((event: CodeEvent, i: number) => (
+              <motion.p
+                key={event.id}
+                initial={{ opacity: 0, y: 5 }}
+                animate={{ opacity: i === brainEvents.slice(-4).length - 1 ? 1 : 0.45, y: 0 }}
+                transition={{ duration: 0.25, ease: 'easeOut' }}
+                className="text-sm leading-snug"
+                style={{ color: 'var(--accent)', fontStyle: 'italic' }}
+              >
+                {event.detail}
+              </motion.p>
+            ))}
+          </div>
+        )}
+
+        {/* Dots + tool activity label (when brain isn't dominant) */}
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1 flex-shrink-0">
             <span className="typing-dot" />
@@ -71,16 +96,18 @@ export function TypingIndicator({ startTime }: TypingIndicatorProps) {
           </div>
           <div className="flex-1 overflow-hidden min-w-0">
             <AnimatePresence mode="wait">
-              <motion.span
-                key={primaryLabel}
-                initial={{ opacity: 0, y: 4 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -4 }}
-                transition={{ duration: 0.15 }}
-                className="text-sm text-[var(--text-muted)] block truncate"
-              >
-                {primaryLabel}
-              </motion.span>
+              {primaryLabel && (
+                <motion.span
+                  key={primaryLabel}
+                  initial={{ opacity: 0, y: 4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -4 }}
+                  transition={{ duration: 0.15 }}
+                  className="text-sm text-[var(--text-subtle)] block truncate"
+                >
+                  {primaryLabel}
+                </motion.span>
+              )}
             </AnimatePresence>
           </div>
           {seconds > 15 && (
@@ -90,33 +117,19 @@ export function TypingIndicator({ startTime }: TypingIndicatorProps) {
           )}
         </div>
 
-        {/* Live event log — scrollable, max ~4 cards */}
-        {liveEvents.length > 0 && (
+        {/* Tool event log — only non-brain events */}
+        {toolEvents.length > 0 && (
           <div
-            ref={logRef}
+            ref={toolLogRef}
             className="mt-2 pt-2 space-y-1 overflow-y-auto"
             style={{
               maxHeight: '112px',
-              borderTop: '1px solid rgba(139,92,246,0.12)',
+              borderTop: '1px solid rgba(139,92,246,0.10)',
             }}
           >
-            {liveEvents.map((event) => (
+            {toolEvents.map((event: CodeEvent) => (
               <CodeEventCard key={event.id} event={event} />
             ))}
-          </div>
-        )}
-
-        {/* Plan details if available */}
-        {lastPlan && (
-          <div className="mt-2 pl-7 text-xs text-[var(--text-subtle)]">
-            {lastPlan.reasoning && (
-              <p className="italic mb-1">{lastPlan.reasoning}</p>
-            )}
-            <ul className="list-disc list-inside space-y-0.5">
-              {lastPlan.subtasks.map((t, i) => (
-                <li key={i}>{t}</li>
-              ))}
-            </ul>
           </div>
         )}
       </div>

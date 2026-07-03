@@ -1,14 +1,15 @@
 import { motion, AnimatePresence } from 'framer-motion'
-import { CheckCircle, Wrench, ListOrdered, Repeat } from 'lucide-react'
+import { CheckCircle, Wrench, ListOrdered, Repeat, Brain } from 'lucide-react'
 import { Badge } from '../ui/Badge'
 import type { AgentWork } from '../../types/jiva'
 
 interface AgentWorkPanelProps {
   work: AgentWork
   isExpanded: boolean
+  brainCommentary?: string[]
 }
 
-export function AgentWorkPanel({ work, isExpanded }: AgentWorkPanelProps) {
+export function AgentWorkPanel({ work, isExpanded, brainCommentary }: AgentWorkPanelProps) {
   const { plan, toolsUsed, iterations, durationMs } = work
   const uniqueTools = [...new Set(toolsUsed ?? [])]
 
@@ -87,6 +88,27 @@ export function AgentWorkPanel({ work, isExpanded }: AgentWorkPanelProps) {
                     </Badge>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {/* Brain commentary */}
+            {brainCommentary && brainCommentary.length > 0 && (
+              <div>
+                <div className="flex items-center gap-1.5 mb-2 text-xs font-medium text-[var(--text-muted)]">
+                  <Brain size={13} style={{ color: 'var(--accent)' }} />
+                  <span style={{ color: 'var(--accent)' }}>Deep Run process</span>
+                </div>
+                <ol className="space-y-1">
+                  {brainCommentary.map((thought, i) => (
+                    <li key={i} className="flex items-start gap-2 text-xs">
+                      <span
+                        className="flex-shrink-0 w-1 h-1 rounded-full mt-1.5"
+                        style={{ background: 'var(--accent)', opacity: 0.5 }}
+                      />
+                      <span className="text-[var(--text-subtle)] italic leading-relaxed">{thought}</span>
+                    </li>
+                  ))}
+                </ol>
               </div>
             )}
 

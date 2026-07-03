@@ -4,6 +4,7 @@ import { Terminal } from 'lucide-react'
 import { useCodeStore } from '../../store/code.store'
 import { logoUrl } from '../../lib/logo'
 import { CodeEventCard } from './CodeEventCard'
+import type { CodeEvent } from '../../store/code.store'
 
 export function CodeActivityIndicator() {
   const { isThinking, currentAction, thinkingStartTime, liveEvents } = useCodeStore()
@@ -27,6 +28,14 @@ export function CodeActivityIndicator() {
 
   const seconds = Math.floor(elapsed / 1000)
 
+  // Split brain thoughts from tool events
+  const brainEvents = liveEvents.filter((e: CodeEvent) => e.type === 'brain')
+  const toolEvents  = liveEvents.filter((e: CodeEvent) => e.type !== 'brain')
+
+  // Show tool action label when brain isn't talking
+  const showToolLabel = currentAction &&
+    !currentAction.match(/^(Thinking|All done|Here'?s|My plan|Working on step|Still at it)/)
+
   return (
     <div className="flex items-start gap-3">
       {/* Avatar */}
@@ -45,9 +54,26 @@ export function CodeActivityIndicator() {
         className="glass-card rounded-2xl rounded-tl-sm px-4 py-2.5"
         style={{ minWidth: '200px', maxWidth: '480px' }}
       >
-        {/* Top row: icon + action + elapsed */}
+        {/* Brain commentary — warm conversational text */}
+        {brainEvents.length > 0 && (
+          <div className="space-y-1.5 mb-2">
+            {brainEvents.slice(-4).map((event, i) => (
+              <motion.p
+                key={event.id}
+                initial={{ opacity: 0, y: 5 }}
+                animate={{ opacity: i === brainEvents.slice(-4).length - 1 ? 1 : 0.45, y: 0 }}
+                transition={{ duration: 0.25, ease: 'easeOut' }}
+                className="text-sm leading-snug"
+                style={{ color: 'var(--accent)', fontStyle: 'italic' }}
+              >
+                {event.detail}
+              </motion.p>
+            ))}
+          </div>
+        )}
+
+        {/* Top row: terminal icon + action label */}
         <div className="flex items-center gap-2.5">
-          {/* Code icon pulse */}
           <motion.div
             animate={{ opacity: [0.5, 1, 0.5] }}
             transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}
@@ -55,23 +81,23 @@ export function CodeActivityIndicator() {
             <Terminal size={13} className="text-[var(--accent-blue)] flex-shrink-0" />
           </motion.div>
 
-          {/* Rotating action text */}
           <div className="flex-1 overflow-hidden min-w-0">
             <AnimatePresence mode="wait">
-              <motion.span
-                key={currentAction ?? 'thinking'}
-                initial={{ opacity: 0, y: 5 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -5 }}
-                transition={{ duration: 0.18 }}
-                className="text-sm text-[var(--text-muted)] block truncate"
-              >
-                {currentAction ?? 'Thinking...'}
-              </motion.span>
+              {(showToolLabel || brainEvents.length === 0) && (
+                <motion.span
+                  key={showToolLabel ? currentAction! : 'thinking'}
+                  initial={{ opacity: 0, y: 5 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -5 }}
+                  transition={{ duration: 0.18 }}
+                  className="text-sm text-[var(--text-subtle)] block truncate"
+                >
+                  {showToolLabel ? currentAction : 'Working on it...'}
+                </motion.span>
+              )}
             </AnimatePresence>
           </div>
 
-          {/* Elapsed time after 10s */}
           {seconds >= 10 && (
             <span className="text-xs text-[var(--text-subtle)] flex-shrink-0">
               {seconds}s
@@ -79,8 +105,8 @@ export function CodeActivityIndicator() {
           )}
         </div>
 
-        {/* Live event log */}
-        {liveEvents.length > 0 && (
+        {/* Tool event log — non-brain events only */}
+        {toolEvents.length > 0 && (
           <div
             ref={logRef}
             className="mt-2 pt-2 space-y-1 overflow-y-auto"
@@ -89,7 +115,7 @@ export function CodeActivityIndicator() {
               borderTop: '1px solid rgba(255,255,255,0.06)',
             }}
           >
-            {liveEvents.map((event) => (
+            {toolEvents.map((event) => (
               <CodeEventCard key={event.id} event={event} />
             ))}
           </div>

@@ -1,12 +1,14 @@
-import { useState, useEffect } from 'react'
-import { Cpu, Key, Globe, Save } from 'lucide-react'
+import { useState, useEffect, useCallback } from 'react'
+import { Cpu, Key, Globe, Save, ChevronDown, ChevronUp, Zap } from 'lucide-react'
 import { Button } from '../../ui/Button'
+import { ModelSetupStep } from '../../setup/ModelSetupStep'
 
 interface ModelConfig {
   provider?: string
   apiKey?: string
   endpoint?: string
-  model?: string
+  defaultModel?: string
+  model?: string           // legacy alias — prefer defaultModel
   useHarmonyFormat?: boolean
 }
 
@@ -22,6 +24,7 @@ export function ModelsTab() {
   const [config, setConfig] = useState<JivaConfig | null>(null)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [showProviderPicker, setShowProviderPicker] = useState(false)
 
   // Reasoning model fields
   const [rEndpoint, setREndpoint] = useState('')
@@ -36,14 +39,15 @@ export function ModelsTab() {
   const [mApiKey, setMApiKey] = useState('')
   const [mModel, setMModel] = useState('')
 
-  useEffect(() => {
+  const loadConfig = useCallback(() => {
     window.electron.config.read().then((cfg) => {
       const c = cfg as JivaConfig | null
       setConfig(c)
       if (c?.models?.reasoning) {
         setREndpoint(c.models.reasoning.endpoint ?? '')
         setRApiKey(c.models.reasoning.apiKey ?? '')
-        setRModel(c.models.reasoning.model ?? '')
+        // prefer defaultModel; fall back to legacy model field for older configs
+        setRModel(c.models.reasoning.defaultModel ?? c.models.reasoning.model ?? '')
         setRProvider(c.models.reasoning.provider ?? '')
         setRHarmony(c.models.reasoning.useHarmonyFormat ?? false)
       }
@@ -51,10 +55,12 @@ export function ModelsTab() {
         setMEnabled(true)
         setMEndpoint((c.models.multimodal as ModelConfig).endpoint ?? '')
         setMApiKey((c.models.multimodal as ModelConfig).apiKey ?? '')
-        setMModel((c.models.multimodal as ModelConfig).model ?? '')
+        setMModel((c.models.multimodal as ModelConfig).defaultModel ?? (c.models.multimodal as ModelConfig).model ?? '')
       }
     })
   }, [])
+
+  useEffect(() => { loadConfig() }, [loadConfig])
 
   const handleSave = async () => {
     const base = config ?? { models: { reasoning: null } }
@@ -67,11 +73,11 @@ export function ModelsTab() {
           provider: rProvider,
           endpoint: rEndpoint,
           apiKey: rApiKey,
-          model: rModel,
+          defaultModel: rModel,
           useHarmonyFormat: rHarmony,
         },
         multimodal: mEnabled
-          ? { endpoint: mEndpoint, apiKey: mApiKey, model: mModel }
+          ? { endpoint: mEndpoint, apiKey: mApiKey, defaultModel: mModel }
           : undefined,
       },
     }
@@ -102,6 +108,53 @@ export function ModelsTab() {
 
   return (
     <div className="max-w-xl mx-auto space-y-8">
+      {/* Quick Provider Setup */}
+      <section>
+        <button
+          onClick={() => setShowProviderPicker((v) => !v)}
+          className="w-full flex items-center gap-2 px-4 py-3 rounded-xl border transition-all duration-150 text-left hover:border-[rgba(139,92,246,0.4)] hover:bg-[rgba(139,92,246,0.03)]"
+          style={{ borderColor: 'var(--card-border)', background: 'var(--bg-secondary)' }}
+        >
+          <Zap size={14} className="text-[var(--accent)] flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <span className="text-sm font-medium text-[var(--text)]">Change Provider</span>
+            {rProvider && !showProviderPicker && (
+              <span
+                className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full inline-block"
+                style={{
+                  background: 'rgba(139,92,246,0.1)',
+                  color: 'var(--accent)',
+                  border: '1px solid rgba(139,92,246,0.2)',
+                  verticalAlign: 'middle',
+                }}
+              >
+                {rProvider}
+              </span>
+            )}
+          </div>
+          {showProviderPicker ? (
+            <ChevronUp size={14} className="text-[var(--text-subtle)] flex-shrink-0" />
+          ) : (
+            <ChevronDown size={14} className="text-[var(--text-subtle)] flex-shrink-0" />
+          )}
+        </button>
+
+        {showProviderPicker && (
+          <div
+            className="mt-2 p-4 rounded-xl border"
+            style={{ borderColor: 'var(--card-border)', background: 'var(--bg-secondary)' }}
+          >
+            <ModelSetupStep
+              onConfigured={() => {
+                setShowProviderPicker(false)
+                loadConfig()
+              }}
+              onSkip={() => setShowProviderPicker(false)}
+            />
+          </div>
+        )}
+      </section>
+
       {/* Reasoning Model */}
       <section>
         <div className="flex items-center gap-2 mb-4">

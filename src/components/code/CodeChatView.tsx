@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
-import { Send, StopCircle, Terminal, FolderCode, Bug, Wrench, RotateCcw, SlidersHorizontal, Zap, Monitor } from 'lucide-react'
+import { memo, useEffect, useRef, useState, useCallback } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
+import { Send, StopCircle, Terminal, FolderCode, Bug, Wrench, RotateCcw, SlidersHorizontal, Zap, Monitor, ChevronDown, ChevronUp, Brain } from 'lucide-react'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import { useCodeStore } from '../../store/code.store'
 import { useGitStore } from '../../store/git.store'
 import { useAuthStore } from '../../store/auth.store'
@@ -17,7 +18,7 @@ const EXAMPLE_PROMPTS = [
   { Icon: Terminal, text: 'Write a script to automate this task' },
 ]
 
-function CodeUserMessage({ message }: { message: CodeMessage }) {
+const CodeUserMessage = memo(function CodeUserMessage({ message }: { message: CodeMessage }) {
   return (
     <div className="flex items-end justify-end gap-2">
       <div
@@ -31,9 +32,14 @@ function CodeUserMessage({ message }: { message: CodeMessage }) {
       </div>
     </div>
   )
-}
+})
 
-function CodeAgentMessage({ message }: { message: CodeMessage }) {
+const CodeAgentMessage = memo(function CodeAgentMessage({ message }: { message: CodeMessage }) {
+  const { toggleWorkPanel } = useCodeStore()
+  const hasBrain = (message.brainCommentary?.length ?? 0) > 0
+  const hasTools = (message.events?.length ?? 0) > 0
+  const hasWork = hasBrain || hasTools
+
   return (
     <div className="flex items-start gap-3">
       <div
@@ -47,22 +53,85 @@ function CodeAgentMessage({ message }: { message: CodeMessage }) {
       </div>
 
       <div className="flex-1 min-w-0">
-        {/* Event cards above the response */}
-        {message.events && message.events.length > 0 && (
-          <div className="flex flex-col gap-1 mb-2">
-            {message.events.map((evt) => (
-              <CodeEventCard key={evt.id} event={evt} />
-            ))}
-          </div>
-        )}
-
         <div className="py-1">
           <MarkdownRenderer content={message.content} />
         </div>
+
+        {hasWork && (
+          <div className="mt-1.5 ml-1">
+            <button
+              onClick={() => toggleWorkPanel(message.id)}
+              className="flex items-center gap-1 text-xs text-[var(--text-subtle)] hover:text-[var(--accent)] transition-colors"
+            >
+              {message.workExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+              {message.workExpanded ? 'Hide' : 'Show'} Jivam's work
+            </button>
+
+            <AnimatePresence>
+              {message.workExpanded && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.25, ease: 'easeInOut' }}
+                  className="overflow-hidden"
+                >
+                  <div
+                    className="mt-3 rounded-xl p-4 space-y-4 text-sm"
+                    style={{
+                      background: 'var(--bg-secondary)',
+                      border: '1px solid var(--card-border)',
+                    }}
+                  >
+                    <span className="font-medium text-[var(--text-muted)] text-xs uppercase tracking-wide">
+                      Jivam's Work
+                    </span>
+
+                    {/* Brain commentary */}
+                    {hasBrain && (
+                      <div>
+                        <div className="flex items-center gap-1.5 mb-2 text-xs font-medium" style={{ color: 'var(--accent)' }}>
+                          <Brain size={13} />
+                          <span>Deep Run process</span>
+                        </div>
+                        <ol className="space-y-1">
+                          {message.brainCommentary!.map((thought, i) => (
+                            <li key={i} className="flex items-start gap-2 text-xs">
+                              <span
+                                className="flex-shrink-0 w-1 h-1 rounded-full mt-1.5"
+                                style={{ background: 'var(--accent)', opacity: 0.5 }}
+                              />
+                              <span className="text-[var(--text-subtle)] italic leading-relaxed">{thought}</span>
+                            </li>
+                          ))}
+                        </ol>
+                      </div>
+                    )}
+
+                    {/* Tool events */}
+                    {hasTools && (
+                      <div>
+                        <div className="flex items-center gap-1.5 mb-2 text-xs font-medium text-[var(--text-muted)]">
+                          <Terminal size={13} />
+                          <span>Actions taken</span>
+                        </div>
+                        <div className="flex flex-col gap-1">
+                          {message.events!.map((evt) => (
+                            <CodeEventCard key={evt.id} event={evt} />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        )}
       </div>
     </div>
   )
-}
+})
 
 function EmptyState() {
   return (
@@ -96,17 +165,106 @@ function EmptyState() {
   )
 }
 
+function MessageArea() {
+  const { messages, isThinking, thinkingStartTime: _t } = useCodeStore()
+  const parentRef = useRef<HTMLDivElement>(null)
+  const autoScroll = useRef(true)
+  const [showScrollBtn, setShowScrollBtn] = useState(false)
+
+  const items = isThinking
+    ? ([...messages, 'thinking'] as const)
+    : (messages as readonly (CodeMessage | 'thinking')[])
+
+  const virtualizer = useVirtualizer({
+    count: items.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 160,
+    overscan: 4,
+  })
+
+  const scrollToBottom = useCallback(() => {
+    const el = parentRef.current
+    if (!el) return
+    el.scrollTo({ top: el.scrollHeight })
+    autoScroll.current = true
+    setShowScrollBtn(false)
+  }, [])
+
+  const handleScroll = useCallback(() => {
+    const el = parentRef.current
+    if (!el) return
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120
+    autoScroll.current = nearBottom
+    setShowScrollBtn(!nearBottom && items.length > 0)
+  }, [items.length])
+
+  useEffect(() => {
+    if (autoScroll.current) scrollToBottom()
+  }, [items.length, scrollToBottom])
+
+  if (messages.length === 0 && !isThinking) return <EmptyState />
+
+  return (
+    <div className="flex-1 relative overflow-hidden">
+      <div
+        ref={parentRef}
+        className="h-full overflow-y-auto px-4"
+        onScroll={handleScroll}
+      >
+        <div style={{ height: 24 }} />
+        <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
+          {virtualizer.getVirtualItems().map((vItem) => {
+            const item = items[vItem.index]
+            return (
+              <div
+                key={vItem.key}
+                data-index={vItem.index}
+                ref={virtualizer.measureElement}
+                style={{
+                  position: 'absolute',
+                  top: vItem.start,
+                  left: 0,
+                  width: '100%',
+                  paddingBottom: 24,
+                }}
+              >
+                {item === 'thinking' ? (
+                  <CodeActivityIndicator />
+                ) : item.role === 'user' ? (
+                  <CodeUserMessage message={item} />
+                ) : (
+                  <CodeAgentMessage message={item} />
+                )}
+              </div>
+            )
+          })}
+        </div>
+        <div style={{ height: 24 }} />
+      </div>
+
+      {showScrollBtn && (
+        <button
+          onClick={scrollToBottom}
+          className="absolute bottom-4 right-4 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium shadow-lg"
+          style={{ background: 'var(--accent)', color: '#fff', opacity: 0.92 }}
+        >
+          <ChevronDown size={13} />
+          Latest
+        </button>
+      )}
+    </div>
+  )
+}
+
 export function CodeChatView() {
   const [value, setValue] = useState('')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const settingsRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const bottomRef = useRef<HTMLDivElement>(null)
-  const { messages, isThinking, sendMessage, clearSession, codeWorkspaceDir, deepRun, setDeepRun, maxIterations, setMaxIterations } = useCodeStore()
+  const { isThinking, sendMessage, clearSession, codeWorkspaceDir, deepRun, setDeepRun, maxIterations, setMaxIterations } = useCodeStore()
   const { refresh: refreshGit } = useGitStore()
   const { isCloudMode } = useAuthStore()
 
-  // Cloud mode: show local-only overlay
   if (isCloudMode) {
     return (
       <div className="flex flex-col h-full items-center justify-center gap-5 text-center px-8">
@@ -140,6 +298,7 @@ export function CodeChatView() {
   }
 
   // Auto-resize textarea
+  // eslint-disable-next-line react-hooks/rules-of-hooks
   useEffect(() => {
     const el = textareaRef.current
     if (!el) return
@@ -147,12 +306,8 @@ export function CodeChatView() {
     el.style.height = Math.min(el.scrollHeight, 200) + 'px'
   }, [value])
 
-  // Auto-scroll to bottom
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, isThinking])
-
   // Close settings popover on outside click
+  // eslint-disable-next-line react-hooks/rules-of-hooks
   useEffect(() => {
     if (!settingsOpen) return
     const handler = (e: MouseEvent) => {
@@ -164,21 +319,23 @@ export function CodeChatView() {
     return () => document.removeEventListener('mousedown', handler)
   }, [settingsOpen])
 
+  // eslint-disable-next-line react-hooks/rules-of-hooks
   const handleStop = useCallback(() => {
     window.electron.code.stopMessage()
   }, [])
 
+  // eslint-disable-next-line react-hooks/rules-of-hooks
   const handleNewSession = useCallback(async () => {
     await clearSession()
     useGitStore.getState().setWorkspaceDir('')
   }, [clearSession])
 
+  // eslint-disable-next-line react-hooks/rules-of-hooks
   const handleSend = useCallback(async () => {
     const text = value.trim()
     if (!text || isThinking) return
     setValue('')
     await sendMessage(text)
-    // Refresh git panel after agent completes
     refreshGit()
   }, [value, isThinking, sendMessage, refreshGit])
 
@@ -220,33 +377,8 @@ export function CodeChatView() {
         </button>
       </div>
 
-      {/* Message area */}
-      {messages.length === 0 && !isThinking ? (
-        <EmptyState />
-      ) : (
-        <div className="flex-1 overflow-y-auto px-4 py-6 space-y-6">
-          <AnimatePresence initial={false}>
-            {messages.map((msg) => (
-              <motion.div
-                key={msg.id}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.2 }}
-              >
-                {msg.role === 'user' ? (
-                  <CodeUserMessage message={msg} />
-                ) : (
-                  <CodeAgentMessage message={msg} />
-                )}
-              </motion.div>
-            ))}
-          </AnimatePresence>
-
-          {isThinking && <CodeActivityIndicator />}
-
-          <div ref={bottomRef} />
-        </div>
-      )}
+      {/* Virtual message area */}
+      <MessageArea />
 
       {/* Input */}
       <div
@@ -301,7 +433,6 @@ export function CodeChatView() {
                   backdropFilter: 'blur(12px)',
                 }}
               >
-                {/* Max Iterations */}
                 <p className="text-[10px] font-medium text-[var(--text-subtle)] mb-1.5 uppercase tracking-wide">Max Iterations</p>
                 <div className="flex gap-1.5 mb-3">
                   {([10, 50, 100] as const).map((val) => {
@@ -324,7 +455,6 @@ export function CodeChatView() {
                   })}
                 </div>
 
-                {/* Deep Run */}
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5">
                     <Zap size={12} className="text-[var(--accent)]" />

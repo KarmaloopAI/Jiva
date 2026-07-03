@@ -61,6 +61,7 @@ interface JivaStore {
   currentPhase: string | null
   currentAction: string | null
   liveEvents: CodeEvent[]
+  liveBrainCommentary: string[]   // brain thoughts for the current in-flight turn
   lastError: string | null
   deepRun: boolean
   maxIterations: 10 | 50 | 100
@@ -85,15 +86,16 @@ interface JivaStore {
 let phaseListenerRegistered = false
 let jivaLogListenerRegistered = false
 
-export const useJivaStore = create<JivaStore>((set) => ({
+export const useJivaStore = create<JivaStore>((set, get) => ({
   serverStatus: 'stopped',
   connectionStatus: 'disconnected',
   currentPhase: null,
   currentAction: null,
   liveEvents: [],
+  liveBrainCommentary: [],
   lastError: null,
   lastPlan: null,
-  deepRun: false,
+  deepRun: true,
   maxIterations: 50,
 
   setServerStatus: (status) => set({ serverStatus: status }),
@@ -116,6 +118,22 @@ export const useJivaStore = create<JivaStore>((set) => ({
     if (jivaLogListenerRegistered || !window.electron?.jiva?.onJivaLog) return
     jivaLogListenerRegistered = true
     window.electron.jiva.onJivaLog((event: CodeLogEvent) => {
+      // Brain commentary events — distinct visual treatment
+      if (event.tag === 'brain') {
+        set({ currentAction: event.message })
+        const codeEvent: CodeEvent = {
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          type: 'brain',
+          detail: event.message,
+          timestamp: event.timestamp,
+        }
+        set((state) => ({
+          liveEvents: [...state.liveEvents, codeEvent],
+          liveBrainCommentary: [...state.liveBrainCommentary, event.message],
+        }))
+        return
+      }
+
       const action = jivaLogToAction(event.message)
       if (action) set({ currentAction: action })
       if (jivaIsImportantEvent(event)) {
@@ -158,9 +176,19 @@ export const useJivaStore = create<JivaStore>((set) => ({
   },
 
   sendMessage: async (content, persona, attachments) => {
-    set({ currentPhase: 'planning', lastPlan: null, currentAction: null, liveEvents: [] })
+    set({ currentPhase: 'planning', lastPlan: null, currentAction: null, liveEvents: [], liveBrainCommentary: [] })
 
-    const { deepRun } = useJivaStore.getState()
+    const { deepRun, maxIterations } = get()
+
+    // Build full conversation history for the brain — no truncation per user's explicit request
+    const chatMessages = useChatStore.getState().messages
+    // Exclude the last message (the current user prompt, already passed as `prompt` arg)
+    const historyMessages = chatMessages.slice(0, -1)
+    const conversationHistory = historyMessages.length > 0
+      ? historyMessages
+          .map(m => `[${m.role === 'user' ? 'User' : 'Assistant'}]: ${m.content}`)
+          .join('\n\n')
+      : undefined
 
     let prompt = content
     if (attachments && attachments.length > 0) {
@@ -170,9 +198,12 @@ export const useJivaStore = create<JivaStore>((set) => ({
       prompt = `<attached-files>\n${fileBlocks}\n</attached-files>\n\n${content}`
     }
 
-    const response = await window.electron.jiva.sendMessage(prompt, persona, { deepRun })
+    const response = await window.electron.jiva.sendMessage(prompt, persona, { deepRun, maxIterations, conversationHistory })
 
-    set({ currentPhase: null, currentAction: null, liveEvents: [] })
+    // Capture brain commentary before clearing state
+    const brainCommentary: string[] = get().liveBrainCommentary
+
+    set({ currentPhase: null, currentAction: null, liveEvents: [], liveBrainCommentary: [] })
 
     if (!response.success) {
       throw new Error(response.error ?? 'Failed to get response from Jiva')
@@ -187,6 +218,7 @@ export const useJivaStore = create<JivaStore>((set) => ({
     }
 
     useJivaStore.getState().setLastPlan(response.result.plan ?? null)
-    return response.result as JivaRunResult
+    const result = response.result as JivaRunResult
+    return { ...result, brainCommentary: brainCommentary.length > 0 ? brainCommentary : undefined }
   },
 }))

@@ -15,7 +15,7 @@ interface ChatStore {
 
   addUserMessage: (content: string, attachments?: AttachedFile[]) => string
   setThinking: (thinking: boolean) => void
-  addAgentResponse: (content: string, agentWork: AgentWork, durationMs?: number) => void
+  addAgentResponse: (content: string, agentWork: AgentWork, durationMs?: number, brainCommentary?: string[]) => void
   addErrorMessage: (errorMsg: string) => void
   toggleWorkPanel: (messageId: string) => void
   clearConversation: () => void
@@ -52,7 +52,7 @@ export const useChatStore = create<ChatStore>((set) => ({
     })
   },
 
-  addAgentResponse: (content, agentWork, durationMs) => {
+  addAgentResponse: (content, agentWork, durationMs, brainCommentary) => {
     const msg: ChatMessage = {
       id: generateId(),
       role: 'agent',
@@ -61,6 +61,7 @@ export const useChatStore = create<ChatStore>((set) => ({
       status: 'complete',
       agentWork: { ...agentWork, durationMs },
       workExpanded: false,
+      brainCommentary: brainCommentary && brainCommentary.length > 0 ? brainCommentary : undefined,
     }
     set((s) => ({
       messages: [...s.messages, msg],
