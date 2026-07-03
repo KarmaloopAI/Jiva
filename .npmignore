@@ -1,0 +1,56 @@
+# Source — only ship compiled output
+src/
+server/
+electron/
+*.ts
+!*.d.ts
+
+# Dev config
+.github/
+.vscode/
+.idea/
+tsconfig*.json
+vite*.config.ts
+vite*.config.js
+postcss.config.*
+tailwind.config.*
+.eslintrc*
+.prettierrc*
+.editorconfig
+.gitignore
+.npmignore
+
+# Scripts (install scripts are embedded in the package, not standalone files)
+scripts/
+
+# Tests
+test/
+tests/
+*.test.js
+*.spec.js
+
+# Logs & temp
+*.log
+*.tsbuildinfo
+*.swp
+*.swo
+tmp/
+temp/
+*.tmp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets / local config
+.env
+.env.*
+config.json
+.npmrc
+
+# Dev dependencies artifacts
+node_modules/
+
+# Electron leftovers
+electron/
+release/
