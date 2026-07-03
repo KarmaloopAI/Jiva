@@ -49,11 +49,14 @@ const IS_DEV = process.env.NODE_ENV === 'development'
  * pre-Sonoma, or anything else about this fails, it returns null and the
  * caller falls back to `chrome/edge/brave --app=` or plain Safari.
  */
-function findSafariWebAppBundle(existingBefore: Set<string>): string | null {
+function findSafariWebAppBundle(sinceMs: number): string | null {
   // Safari writes the bundle either into ~/Applications/Safari Apps/ or
-  // directly into ~/Applications/, depending on macOS version. Scan both,
-  // identifying by Info.plist content (CFBundleIdentifier + CFBundleName)
-  // rather than filename, since we can't fully control the exact name.
+  // directly into ~/Applications/, depending on macOS version — and when a
+  // same-named bundle already exists there (e.g. our own fallback wrapper,
+  // or a previous install), it overwrites it IN PLACE rather than picking a
+  // new name. So identify by Info.plist content (not "is this a new
+  // directory entry") and only accept it if its Info.plist was written
+  // after `sinceMs`, so we don't false-positive on an unrelated older bundle.
   const searchDirs = [
     path.join(os.homedir(), 'Applications', 'Safari Apps'),
     path.join(os.homedir(), 'Applications'),
@@ -62,10 +65,11 @@ function findSafariWebAppBundle(existingBefore: Set<string>): string | null {
     if (!fs.existsSync(dir)) continue
     const entries = fs.readdirSync(dir).filter(f => f.endsWith('.app'))
     for (const entry of entries) {
-      if (existingBefore.has(`${dir}::${entry}`)) continue
       const plistPath = path.join(dir, entry, 'Contents', 'Info.plist')
       if (!fs.existsSync(plistPath)) continue
       try {
+        const stat = fs.statSync(plistPath)
+        if (stat.mtimeMs < sinceMs) continue
         const plistContent = fs.readFileSync(plistPath, 'utf-8')
         if (plistContent.includes('com.apple.Safari.WebApp') && plistContent.includes('<string>Jivam</string>')) {
           return path.join(dir, entry)
@@ -74,21 +78,6 @@ function findSafariWebAppBundle(existingBefore: Set<string>): string | null {
     }
   }
   return null
-}
-
-function snapshotExistingApps(): Set<string> {
-  const searchDirs = [
-    path.join(os.homedir(), 'Applications', 'Safari Apps'),
-    path.join(os.homedir(), 'Applications'),
-  ]
-  const existing = new Set<string>()
-  for (const dir of searchDirs) {
-    if (!fs.existsSync(dir)) continue
-    for (const entry of fs.readdirSync(dir).filter(f => f.endsWith('.app'))) {
-      existing.add(`${dir}::${entry}`)
-    }
-  }
-  return existing
 }
 
 /**
@@ -123,7 +112,7 @@ async function installSafariAddToDock(url: string): Promise<string | null> {
       return null
     }
 
-    const existingBefore = snapshotExistingApps()
+    const automationStartMs = Date.now()
 
     const scriptPath = path.join(os.tmpdir(), 'jivam-add-to-dock.applescript')
     // Note: the real menu item name has a trailing ellipsis ("Add to Dock…").
@@ -167,7 +156,7 @@ end run
     console.log('Waiting up to 60s for you to click it...')
     for (let i = 0; i < 60; i++) {
       await new Promise(resolve => setTimeout(resolve, 1000))
-      const found = findSafariWebAppBundle(existingBefore)
+      const found = findSafariWebAppBundle(automationStartMs)
       if (found) return found
     }
 
