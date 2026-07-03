@@ -69,43 +69,93 @@ function SplashScreen({ status }: { status: string }) {
   )
 }
 
-function InstallBanner() {
+function InstallModal() {
   const [dismissed, setDismissed] = useState(() =>
-    !!localStorage.getItem('jivam-pwa-install-dismissed')
+    !!localStorage.getItem('jivam-install-modal-dismissed')
   )
 
-  // Only show when running in a regular browser tab (not already installed as PWA)
+  // Only show in a regular browser tab — not when already running as installed app
   const isStandalone = window.matchMedia('(display-mode: standalone)').matches
-  const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent)
 
-  if (dismissed || isStandalone || !isSafari) return null
+  if (dismissed || isStandalone) return null
 
   const handleDismiss = () => {
-    localStorage.setItem('jivam-pwa-install-dismissed', '1')
+    localStorage.setItem('jivam-install-modal-dismissed', '1')
     setDismissed(true)
   }
 
   return (
     <motion.div
-      initial={{ y: -48, opacity: 0 }}
-      animate={{ y: 0, opacity: 1 }}
-      exit={{ y: -48, opacity: 0 }}
-      className="fixed top-0 left-0 right-0 z-50 text-sm"
-      style={{
-        background: 'linear-gradient(90deg, rgba(139,92,246,0.18), rgba(59,130,246,0.14))',
-        borderBottom: '1px solid rgba(139,92,246,0.25)',
-        backdropFilter: 'blur(12px)',
-      }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-6"
+      style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(6px)' }}
+      onClick={handleDismiss}
     >
-      <div className="flex items-center justify-between gap-3 py-2.5 px-4">
-        <div className="flex items-center gap-2 text-[var(--text-muted)]">
-          <Download size={13} className="text-[var(--accent)] shrink-0" />
-          <span>Install Jivam as an app: <strong>File → Add to Dock…</strong> — then relaunch for a distraction-free window.</span>
-        </div>
-        <button onClick={handleDismiss} className="text-[var(--text-subtle)] hover:text-[var(--text-muted)] transition-colors shrink-0">
-          <X size={13} />
+      <motion.div
+        initial={{ scale: 0.95, opacity: 0, y: 12 }}
+        animate={{ scale: 1, opacity: 1, y: 0 }}
+        exit={{ scale: 0.95, opacity: 0, y: 12 }}
+        transition={{ type: 'spring', stiffness: 300, damping: 28 }}
+        className="relative max-w-md w-full rounded-2xl p-8 text-center shadow-2xl"
+        style={{
+          background: 'var(--bg-card, #1a1a2e)',
+          border: '1px solid rgba(139,92,246,0.25)',
+        }}
+        onClick={e => e.stopPropagation()}
+      >
+        <button
+          onClick={handleDismiss}
+          className="absolute top-4 right-4 text-[var(--text-subtle)] hover:text-[var(--text-muted)] transition-colors"
+        >
+          <X size={16} />
         </button>
-      </div>
+
+        {/* Icon */}
+        <div className="mx-auto mb-5 w-16 h-16 rounded-2xl flex items-center justify-center"
+          style={{ background: 'linear-gradient(135deg, rgba(139,92,246,0.2), rgba(59,130,246,0.15))' }}>
+          <img src={logoUrl} alt="Jivam" className="w-10 h-10 object-contain" />
+        </div>
+
+        <h2 className="text-xl font-semibold gradient-text mb-2">Install Jivam as an App</h2>
+        <p className="text-sm text-[var(--text-muted)] mb-6 leading-relaxed">
+          Get a clean, distraction-free window with a Dock icon — no browser chrome, no address bar.
+        </p>
+
+        {/* Steps */}
+        <div className="text-left space-y-3 mb-7">
+          <div className="flex gap-3 items-start">
+            <span className="mt-0.5 shrink-0 w-5 h-5 rounded-full bg-[var(--accent)] text-white text-xs flex items-center justify-center font-semibold">1</span>
+            <p className="text-sm text-[var(--text-muted)]">
+              Run <code className="px-1.5 py-0.5 rounded text-xs" style={{ background: 'rgba(139,92,246,0.15)', color: 'var(--accent)' }}>jivam --install</code> in your terminal to create the app and add it to your Dock automatically.
+            </p>
+          </div>
+          <div className="flex gap-3 items-start">
+            <span className="mt-0.5 shrink-0 w-5 h-5 rounded-full bg-[var(--accent)] text-white text-xs flex items-center justify-center font-semibold">2</span>
+            <p className="text-sm text-[var(--text-muted)]">
+              Click the <strong className="text-[var(--text)]">Jivam</strong> icon in your Dock — it starts the server and opens automatically.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex gap-3">
+          <button
+            onClick={handleDismiss}
+            className="flex-1 py-2.5 rounded-xl text-sm font-medium transition-all"
+            style={{ background: 'rgba(139,92,246,0.12)', color: 'var(--text-muted)' }}
+          >
+            Later
+          </button>
+          <button
+            onClick={handleDismiss}
+            className="flex-1 py-2.5 rounded-xl text-sm font-medium transition-all text-white"
+            style={{ background: 'var(--accent)' }}
+          >
+            Got it
+          </button>
+        </div>
+      </motion.div>
     </motion.div>
   )
 }
@@ -319,7 +369,7 @@ function App() {
       <div className="aurora-bg" />
 
       <AnimatePresence>
-        <InstallBanner key="install-banner" />
+        <InstallModal key="install-modal" />
         <UpdateBanner key="update-banner" />
       </AnimatePresence>
 
