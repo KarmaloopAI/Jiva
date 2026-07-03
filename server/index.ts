@@ -5,6 +5,7 @@ import express from 'express'
 import http from 'http'
 import path from 'path'
 import fs from 'fs'
+import os from 'os'
 import { initWebSocketServer } from './ws'
 import { JivaRunner } from './jiva-runner'
 import { CodeRunner } from './code-runner'
@@ -78,31 +79,71 @@ if (!IS_DEV) {
 async function openAppWindow(url: string): Promise<void> {
   const { execFile, exec } = await import('child_process')
   const { promisify } = await import('util')
-  const execFileAsync = promisify(execFile)
   const execAsync = promisify(exec)
 
+  // JIVAM_BROWSER=safari|chrome|edge|brave overrides auto-detection
+  const browserOverride = (process.env.JIVAM_BROWSER ?? '').toLowerCase()
+
   if (process.platform === 'darwin') {
-    // Try Chrome, Edge, Brave in that order — all support --app flag
-    const macBrowsers = [
-      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-      '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
-      '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
-    ]
-    for (const browser of macBrowsers) {
+    // If the PWA was previously installed via Safari "Add to Dock",
+    // it lives in ~/Applications/Safari Apps/Jivam.app — launch it directly.
+    if (browserOverride !== 'chrome' && browserOverride !== 'edge' && browserOverride !== 'brave') {
+      const safariAppPaths = [
+        path.join(os.homedir(), 'Applications', 'Safari Apps', 'Jivam.app'),
+        path.join(os.homedir(), 'Applications', 'Jivam.app'),
+        '/Applications/Jivam.app',
+      ]
+      for (const appPath of safariAppPaths) {
+        if (fs.existsSync(appPath)) {
+          try {
+            await execAsync(`open "${appPath}"`)
+            console.log(`Launched Safari PWA: ${appPath}`)
+            return
+          } catch {}
+        }
+      }
+    }
+
+    if (browserOverride === 'safari') {
+      // Safari regular window — user hasn't installed PWA yet
       try {
-        execFile(browser, [`--app=${url}`, '--disable-extensions'])
-        console.log(`Opened in app-mode window: ${browser}`)
+        await execAsync(
+          `osascript -e 'tell application "Safari" to open location "${url}"' -e 'tell application "Safari" to activate'`
+        )
+        console.log('Opened in Safari (tip: File → Add to Dock for app experience)')
+        return
+      } catch (err) {
+        console.error('Failed to open Safari:', err)
+      }
+    }
+
+    if (browserOverride !== 'safari') {
+      // Try Chrome, Edge, Brave — all support --app flag
+      const macBrowsers: Array<[string, string]> = [
+        ['chrome', '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'],
+        ['edge',   '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'],
+        ['brave',  '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser'],
+      ]
+      for (const [key, browserPath] of macBrowsers) {
+        if (browserOverride && browserOverride !== key) continue
+        try {
+          execFile(browserPath, [`--app=${url}`, '--disable-extensions'])
+          console.log(`Opened in app-mode window: ${browserPath}`)
+          return
+        } catch {}
+      }
+    }
+
+    // Safari fallback when no Chromium found and no override
+    if (!browserOverride) {
+      try {
+        await execAsync(
+          `osascript -e 'tell application "Safari" to open location "${url}"' -e 'tell application "Safari" to activate'`
+        )
+        console.log('Opened in Safari (tip: File → Add to Dock for app experience)')
         return
       } catch {}
     }
-    // Safari: open in new window via osascript
-    try {
-      await execAsync(
-        `osascript -e 'tell application "Safari" to open location "${url}"' -e 'tell application "Safari" to activate'`
-      )
-      console.log('Opened in Safari')
-      return
-    } catch {}
   } else if (process.platform === 'win32') {
     const winBrowsers = [
       ['msedge', [`--app=${url}`]],

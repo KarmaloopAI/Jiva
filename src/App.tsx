@@ -69,6 +69,47 @@ function SplashScreen({ status }: { status: string }) {
   )
 }
 
+function InstallBanner() {
+  const [dismissed, setDismissed] = useState(() =>
+    !!localStorage.getItem('jivam-pwa-install-dismissed')
+  )
+
+  // Only show when running in a regular browser tab (not already installed as PWA)
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches
+  const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent)
+
+  if (dismissed || isStandalone || !isSafari) return null
+
+  const handleDismiss = () => {
+    localStorage.setItem('jivam-pwa-install-dismissed', '1')
+    setDismissed(true)
+  }
+
+  return (
+    <motion.div
+      initial={{ y: -48, opacity: 0 }}
+      animate={{ y: 0, opacity: 1 }}
+      exit={{ y: -48, opacity: 0 }}
+      className="fixed top-0 left-0 right-0 z-50 text-sm"
+      style={{
+        background: 'linear-gradient(90deg, rgba(139,92,246,0.18), rgba(59,130,246,0.14))',
+        borderBottom: '1px solid rgba(139,92,246,0.25)',
+        backdropFilter: 'blur(12px)',
+      }}
+    >
+      <div className="flex items-center justify-between gap-3 py-2.5 px-4">
+        <div className="flex items-center gap-2 text-[var(--text-muted)]">
+          <Download size={13} className="text-[var(--accent)] shrink-0" />
+          <span>Install Jivam as an app: <strong>File → Add to Dock…</strong> — then relaunch for a distraction-free window.</span>
+        </div>
+        <button onClick={handleDismiss} className="text-[var(--text-subtle)] hover:text-[var(--text-muted)] transition-colors shrink-0">
+          <X size={13} />
+        </button>
+      </div>
+    </motion.div>
+  )
+}
+
 function UpdateBanner() {
   const [updateInfo, setUpdateInfo] = useState<{ version: string } | null>(null)
   const [progress, setProgress] = useState<number | null>(null)
@@ -278,6 +319,7 @@ function App() {
       <div className="aurora-bg" />
 
       <AnimatePresence>
+        <InstallBanner key="install-banner" />
         <UpdateBanner key="update-banner" />
       </AnimatePresence>
 
