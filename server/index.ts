@@ -70,6 +70,85 @@ if (!IS_DEV) {
   }
 }
 
+/**
+ * Open Jivam in a clean app-mode window (no address bar, no tabs).
+ * Tries Chrome/Edge/Brave --app flag first (best experience), then Safari
+ * app mode on macOS, then falls back to the default browser.
+ */
+async function openAppWindow(url: string): Promise<void> {
+  const { execFile, exec } = await import('child_process')
+  const { promisify } = await import('util')
+  const execFileAsync = promisify(execFile)
+  const execAsync = promisify(exec)
+
+  if (process.platform === 'darwin') {
+    // Try Chrome, Edge, Brave in that order — all support --app flag
+    const macBrowsers = [
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+      '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+      '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
+    ]
+    for (const browser of macBrowsers) {
+      try {
+        execFile(browser, [`--app=${url}`, '--disable-extensions'])
+        console.log(`Opened in app-mode window: ${browser}`)
+        return
+      } catch {}
+    }
+    // Safari: open in new window via osascript
+    try {
+      await execAsync(
+        `osascript -e 'tell application "Safari" to open location "${url}"' -e 'tell application "Safari" to activate'`
+      )
+      console.log('Opened in Safari')
+      return
+    } catch {}
+  } else if (process.platform === 'win32') {
+    const winBrowsers = [
+      ['msedge', [`--app=${url}`]],
+      ['chrome', [`--app=${url}`]],
+      ['brave', [`--app=${url}`]],
+    ] as Array<[string, string[]]>
+    for (const [browser, args] of winBrowsers) {
+      try {
+        execFile(`start ${browser}`, args, { shell: true })
+        return
+      } catch {}
+    }
+    // PowerShell fallback
+    try {
+      await execAsync(`start "" "${url}"`)
+      return
+    } catch {}
+  } else {
+    // Linux
+    const linuxBrowsers = [
+      ['google-chrome', [`--app=${url}`]],
+      ['google-chrome-stable', [`--app=${url}`]],
+      ['chromium-browser', [`--app=${url}`]],
+      ['chromium', [`--app=${url}`]],
+      ['brave-browser', [`--app=${url}`]],
+      ['microsoft-edge', [`--app=${url}`]],
+    ] as Array<[string, string[]]>
+    for (const [browser, args] of linuxBrowsers) {
+      try {
+        execFile(browser, args)
+        return
+      } catch {}
+    }
+  }
+
+  // Universal fallback — open in default browser (will have address bar)
+  try {
+    const { default: open } = await import('open')
+    await open(url)
+    console.log(`Opened in default browser: ${url}`)
+  } catch (err) {
+    console.error('Could not open browser automatically:', err)
+    console.log(`Open manually: ${url}`)
+  }
+}
+
 const server = http.createServer(app)
 initWebSocketServer(server)
 
@@ -78,14 +157,7 @@ server.listen(PORT, '127.0.0.1', async () => {
   console.log(`Jivam server running at ${url}`)
 
   if (!IS_DEV) {
-    // Open browser (dynamic import handles ESM-only 'open' package)
-    try {
-      const { default: open } = await import('open')
-      await open(url)
-    } catch (err) {
-      console.error('Could not open browser automatically:', err)
-      console.log(`Open manually: ${url}`)
-    }
+    await openAppWindow(url)
   }
 })
 
