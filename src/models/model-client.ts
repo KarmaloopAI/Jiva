@@ -101,6 +101,15 @@ export interface ModelClientConfig {
    * so use 4096 there. Leave unset for Groq/Krutrim.
    */
   defaultMaxTokens?: number;
+
+  /**
+   * True when this model instance itself has native vision/multimodal
+   * capability, regardless of `type`. Lets a `reasoning`- (or `tool-calling`-)
+   * typed model accept image content directly (see `supportsVision()`),
+   * without needing a separate dedicated `multimodal` model configured.
+   * Default: false
+   */
+  hasVision?: boolean;
 }
 
 export class ModelClient implements IModel {
@@ -111,7 +120,7 @@ export class ModelClient implements IModel {
   }
 
   supportsVision(): boolean {
-    return this.config.type === 'multimodal';
+    return this.config.type === 'multimodal' || !!this.config.hasVision;
   }
 
   supportsToolCalling(): boolean {

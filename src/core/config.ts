@@ -35,6 +35,13 @@ const ModelConfigSchema = z.object({
   model: z.string().optional(),
   defaultModel: z.string().optional(),
   useHarmonyFormat: z.boolean().optional(),
+  /**
+   * True when this model instance itself has native vision/multimodal
+   * capability, regardless of `type`. Lets a `reasoning`- (or `tool-calling`-)
+   * typed model accept image content directly, without needing a separate
+   * dedicated `multimodal` model configured for image captioning.
+   */
+  hasVision: z.boolean().optional(),
   /** How to send reasoning effort: 'api_param' | 'system_prompt' | 'both' */
   reasoningEffortStrategy: z.enum(['api_param', 'system_prompt', 'both']).optional(),
   /** Default max tokens — required for reasoning models like Sarvam-105B */

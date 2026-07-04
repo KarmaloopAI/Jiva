@@ -47,7 +47,17 @@ export class ModelOrchestrator {
    * Process a chat completion, selecting the model based on `useFallback`.
    *   useFallback=true  → use tool-calling model (primary when configured)
    *   useFallback=false → use reasoning model (primary when no tool-calling model configured)
-   * Images are always pre-processed by the multimodal model prior to routing.
+   *
+   * Image routing priority when the request contains images:
+   *   1. A dedicated `multimodalModel` is configured → caption images via it,
+   *      then forward text-only to the primary/fallback model (unchanged
+   *      legacy behaviour).
+   *   2. No dedicated multimodal model, but the model that would otherwise
+   *      handle this call has native vision (`hasVision` config flag) →
+   *      pass the images straight through to it, no captioning needed.
+   *   3. Neither is available → images are forwarded as-is to a text-only
+   *      model (unchanged legacy behaviour — the model will likely ignore
+   *      or choke on them, same as before this feature existed).
    */
   async chatWithFallback(options: ChatCompletionOptions, useFallback: boolean): Promise<ModelResponse> {
     // Check if request contains images
@@ -58,6 +68,12 @@ export class ModelOrchestrator {
     if (hasImages && this.multimodalModel) {
       // Use multimodal model to process images first, then primary/fallback model
       response = await this.handleMultimodalRequest(options, useFallback);
+    } else if (hasImages && useFallback && this.toolCallingModel?.supportsVision()) {
+      logger.info('  [Orchestrator] Tool-calling model has native vision — passing images directly');
+      response = await this.toolCallingModel.chat(options);
+    } else if (hasImages && this.reasoningModel.supportsVision()) {
+      logger.info('  [Orchestrator] Reasoning model has native vision — passing images directly');
+      response = await this.reasoningModel.chat(options);
     } else if (useFallback && this.toolCallingModel) {
       logger.info('  [Orchestrator] Using tool-calling model');
       response = await this.toolCallingModel.chat(options);
@@ -222,10 +238,15 @@ export class ModelOrchestrator {
   }
 
   /**
-   * Get multimodal model instance if configured
+   * Get a vision-capable model instance if one is available: a dedicated
+   * multimodal model if configured, otherwise the reasoning or tool-calling
+   * model if it has native vision (`hasVision` config flag).
    */
   getMultimodalModel(): ModelClient | undefined {
-    return this.multimodalModel;
+    if (this.multimodalModel) return this.multimodalModel;
+    if (this.reasoningModel.supportsVision()) return this.reasoningModel;
+    if (this.toolCallingModel?.supportsVision()) return this.toolCallingModel;
+    return undefined;
   }
 
   /**
@@ -236,9 +257,10 @@ export class ModelOrchestrator {
   }
 
   /**
-   * Check if multimodal support is available
+   * Check if multimodal support is available — either a dedicated
+   * multimodal model, or a reasoning/tool-calling model with native vision.
    */
   hasMultimodalSupport(): boolean {
-    return !!this.multimodalModel;
+    return !!this.multimodalModel || this.reasoningModel.supportsVision() || !!this.toolCallingModel?.supportsVision();
   }
 }

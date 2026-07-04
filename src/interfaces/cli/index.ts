@@ -180,6 +180,7 @@ program
         model: reasoningModelConfig.defaultModel,
         type: 'reasoning',
         useHarmonyFormat: reasoningModelConfig.useHarmonyFormat,
+        hasVision: reasoningModelConfig.hasVision,
         defaultReasoningEffort: reasoningModelConfig.defaultReasoningEffort ?? undefined,
       });
 
@@ -206,6 +207,7 @@ program
           model: toolCallingModelConfig.defaultModel,
           type: 'tool-calling',
           useHarmonyFormat: toolCallingModelConfig.useHarmonyFormat,
+          hasVision: toolCallingModelConfig.hasVision,
           defaultReasoningEffort: 'medium',
         });
       }
@@ -690,6 +692,7 @@ program
         model: reasoningModelConfig.defaultModel,
         type: 'reasoning',
         useHarmonyFormat: reasoningModelConfig.useHarmonyFormat,
+        hasVision: reasoningModelConfig.hasVision,
         defaultReasoningEffort: reasoningModelConfig.defaultReasoningEffort ?? undefined,
       });
 
@@ -715,6 +718,7 @@ program
           model: toolCallingModelCfg.model || toolCallingModelCfg.defaultModel || '',
           type: 'tool-calling',
           useHarmonyFormat: toolCallingModelCfg.useHarmonyFormat,
+          hasVision: toolCallingModelCfg.hasVision,
           defaultReasoningEffort: 'medium',
         });
       }
