@@ -13,10 +13,16 @@ import { getDefaultFilesystemAllowedPath } from '../../../utils/platform.js';
  * Check GitHub _posts directory to see if a post has already been published today (IST).
  * Returns true if already posted — deterministic, no LLM involvement.
  * Fails open (returns false) on any network/API error so the agent can still run.
+ *
+ * The Cloud Run process itself never has GITHUB_PAT set — it only exists in each
+ * tenant's GCS-stored mcpServers config (the same config mcp-shell-server subprocesses
+ * use) — so the caller must supply it via SessionManager.getGithubPatForTenant().
  */
-async function isAlreadyPostedToday(): Promise<boolean> {
-  const githubPat = process.env.GITHUB_PAT || process.env.GRITSA_GITHUB_PAT || '';
-  if (!githubPat) return false;
+async function isAlreadyPostedToday(githubPat: string): Promise<boolean> {
+  if (!githubPat) {
+    logger.warn('[AutoBloggerGate] No GITHUB_PAT found for tenant, failing open');
+    return false;
+  }
   try {
     const res = await fetch(
       'https://api.github.com/repos/gritsa/www-gritsa.github.io/contents/_posts',
@@ -39,6 +45,8 @@ async function isAlreadyPostedToday(): Promise<boolean> {
     const alreadyPosted = files.some(f => f.name.startsWith(today));
     if (alreadyPosted) {
       logger.info(`[AutoBloggerGate] Post already exists for ${today} — blocking session`);
+    } else {
+      logger.debug(`[AutoBloggerGate] No post found for ${today} — proceeding`);
     }
     return alreadyPosted;
   } catch (err) {
@@ -75,7 +83,8 @@ export function setupChatRoutes(app: Express, sessionManager: SessionManager): v
       // Auto-blogger daily gate — runs before the session is created, no LLM involved
       let message = rawMessage;
       if (sessionId.startsWith('auto-blogger')) {
-        const alreadyPosted = await isAlreadyPostedToday();
+        const githubPat = await sessionManager.getGithubPatForTenant(tenantId);
+        const alreadyPosted = await isAlreadyPostedToday(githubPat);
         if (alreadyPosted) {
           res.status(200).json({ success: true, response: 'Skipped — already posted today', skipped: true });
           return;
@@ -127,7 +136,8 @@ export function setupChatRoutes(app: Express, sessionManager: SessionManager): v
       // Auto-blogger daily gate — runs before the session is created, no LLM involved
       let message = rawMessage;
       if (sessionId.startsWith('auto-blogger')) {
-        const alreadyPosted = await isAlreadyPostedToday();
+        const githubPat = await sessionManager.getGithubPatForTenant(tenantId);
+        const alreadyPosted = await isAlreadyPostedToday(githubPat);
         if (alreadyPosted) {
           res.status(200).json({ success: true, response: 'Skipped — already posted today', skipped: true });
           return;

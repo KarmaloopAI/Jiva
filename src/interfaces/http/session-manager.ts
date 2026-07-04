@@ -70,6 +70,32 @@ export class SessionManager extends EventEmitter {
   }
 
   /**
+   * Read a tenant's GITHUB_PAT from its GCS-stored mcpServers config (the same
+   * config the mcp-shell-server subprocess uses), without creating a session.
+   *
+   * Cloud Run's own process env never has GITHUB_PAT set — it only exists
+   * per-tenant in GCS — so callers needing it before a session exists (e.g. the
+   * auto-blogger daily gate) must go through this instead of process.env.
+   */
+  async getGithubPatForTenant(tenantId: string): Promise<string> {
+    try {
+      const storageProvider = this.config.storageProvider.createSessionScoped({
+        tenantId,
+        sessionId: '__gate_check__',
+      });
+      const mcpConfig = await storageProvider.getConfig<Array<{
+        name: string;
+        env?: Record<string, string>;
+      }>>('mcpServers');
+      const shellServer = mcpConfig?.find(s => s.name === 'mcp-shell-server');
+      return shellServer?.env?.GITHUB_PAT || shellServer?.env?.GRITSA_GITHUB_PAT || '';
+    } catch (err) {
+      logger.warn(`[SessionManager] Failed to read GITHUB_PAT for tenant ${tenantId}:`, err);
+      return '';
+    }
+  }
+
+  /**
    * Get or create a session.
    *
    * Concurrent calls for the same (tenantId, sessionId) are deduplicated:
@@ -337,8 +363,8 @@ export class SessionManager extends EventEmitter {
           workspace,
           conversationManager,
           personaManager,
-          maxSubtasks: 1,
-          maxIterations: 15,
+          maxSubtasks: 2, // allow one Manager-triggered retry if the worker's result is rejected
+          maxIterations: 30,
           autoSave: true,
           orchestrationLogger: orchLogger,
         });
