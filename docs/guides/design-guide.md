@@ -152,7 +152,7 @@ Dots bounce with staggered delays. Color uses `var(--accent)`.
 
 ### `.drag-region` / `.no-drag`
 
-Controls Electron window dragging. Apply `.drag-region` to the title bar area. Apply `.no-drag` to interactive elements within a drag region (buttons, inputs).
+Controls window dragging via `-webkit-app-region`. Still relevant post-Electron-migration: Chrome/Edge/Brave `--app=` windows and installed Safari/Chrome web apps are frameless, and this CSS property is what makes a region of the page draggable like a native title bar in that context (it's a no-op in a normal browser tab). Apply `.drag-region` to the title bar area. Apply `.no-drag` to interactive elements within a drag region (buttons, inputs).
 
 ### `.markdown-body`
 

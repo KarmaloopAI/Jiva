@@ -8,7 +8,7 @@ Jivam includes a specialized code agent mode that allows AI agents to directly m
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  Renderer Process (React)                                   │
+│  Browser (React)                                             │
 │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────┐ │
 │  │  Chat Interface │  │  Code Agent UI  │  │   Git Panel │ │
 │  │                 │  │                 │  │             │ │
@@ -20,12 +20,12 @@ Jivam includes a specialized code agent mode that allows AI agents to directly m
 │           └───────────────────────┼───────────────────────┘
 │                                   │
 │                    ┌──────────────▼──────────────┐
-│                    │   window.electron.code API   │
-│                    │  (Preload Bridge)           │
+│                    │  window.electron.code API    │
+│                    │  (electron-shim.ts → fetch/WS)│
 │                    └──────────────┬──────────────┘
-│                                   │
+│                                   │  HTTP /api/code/*, WS jiva:code-log
 │                    ┌──────────────▼──────────────┐
-│                    │   Main Process              │
+│                    │  Express server (Node)       │
 │                    │  ┌──────────────────────┐  │
 │                    │  │   CodeRunner         │  │
 │                    │  │  ┌─────────────────┐ │  │
@@ -52,14 +52,14 @@ Jivam includes a specialized code agent mode that allows AI agents to directly m
 
 ## Key Components
 
-### CodeRunner (`electron/code-runner.ts`)
+### CodeRunner (`server/code-runner.ts`)
 
 The `CodeRunner` class manages a dedicated code agent instance with the following responsibilities:
 
 - **Log Event Parsing**: Intercepts stdout/stderr from jiva-core and converts structured log lines into `CodeLogEvent` objects
 - **Event Management**: Accumulates important events (file edits, warnings, errors) during code execution
 - **Resource Management**: Proper cleanup of agent instances and temporary resources
-- **Real-time Communication**: Streams progress events to the renderer via IPC
+- **Real-time Communication**: Streams progress events to the browser over the WebSocket (`jiva:code-log`, see `server/ws.ts`)
 
 #### Log Event Format
 
@@ -150,16 +150,23 @@ Events are marked as important and displayed if they:
 
 ---
 
-## IPC Contract
+## API Contract
 
-### Code Mode Channels
+### Code Mode Routes (`server/routes/code.ts`)
 
-| Channel | Direction | Description |
-|---------|-----------|-------------|
-| `code:send-message` | invoke | Send code prompt to agent |
-| `code:stop-message` | invoke | Stop active code agent |
-| `code:reset-session` | invoke | Tear down CodeRunner for fresh start |
-| `code:init` | invoke | Initialize CodeRunner |
+See [api-contract.md](api-contract.md) for the full list, including
+`mcp-for-code`, `conversation-id`, and `mcp-selection`. The core ones:
+
+| Route | Method | Description |
+|-------|--------|-------------|
+| `/api/code/send-message` | POST | Send code prompt to agent |
+| `/api/code/stop-message` | POST | Stop active code agent |
+| `/api/code/reset-session` | POST | Tear down CodeRunner for fresh start |
+| `/api/code/init` | POST | Initialize CodeRunner |
+
+Log events stream over the WebSocket as `jiva:code-log` (see
+`server/ws.ts` / [api-contract.md](api-contract.md)), not as a request/response
+payload.
 
 ---
 
@@ -208,11 +215,11 @@ Integrated Git functionality with:
 ### Code Execution Flow
 
 1. **User Input**: User types code prompt in CodeChatView
-2. **IPC Call**: `window.electron.code.sendMessage(prompt)`
+2. **API Call**: `window.electron.code.sendMessage(prompt)` → `electron-shim.ts` → `POST /api/code/send-message`
 3. **Agent Initialization**: CodeRunner creates/configures CodeAgent instance
 4. **Log Interception**: stdout/stderr captured and parsed into structured events
-5. **Event Processing**: Important events accumulated and sent to renderer
-6. **Response Delivery**: Final code response returned with event history
+5. **Event Processing**: Important events accumulated and broadcast over the WebSocket
+6. **Response Delivery**: Final code response returned as the HTTP response body
 7. **UI Update**: CodeChatView displays response with event cards
 
 ### Event Flow
@@ -228,7 +235,9 @@ isImportantEvent() filter
         ↓
 CodeEvent objects
         ↓
-window.electron.code.onCodeLog callback
+broadcast('jiva:code-log', ...)   (server/ws.ts)
+        ↓
+electron-shim.ts WebSocket client → onCodeLog callback
         ↓
 useCodeStore.pendingEvents update
         ↓
@@ -262,7 +271,7 @@ Code operations are restricted to the user's home directory for security:
 
 ### Common Error Scenarios
 
-- **Agent Not Initialized**: CodeRunner not ready, requires `code:init` first
+- **Agent Not Initialized**: CodeRunner not ready, requires `POST /api/code/init` first
 - **Workspace Not Set**: No workspace directory configured
 - **Permission Denied**: File operations blocked by system permissions
 - **Large Files**: Files >500KB rejected for preview
@@ -270,7 +279,7 @@ Code operations are restricted to the user's home directory for security:
 
 ### Error Recovery
 
-- **Session Reset**: `code:reset-session` clears corrupted state
+- **Session Reset**: `POST /api/code/reset-session` clears corrupted state
 - **Agent Restart**: Automatic re-initialization on errors
 - **Graceful Degradation**: UI continues working even if agent fails
 - **User Notifications**: Clear error messages with actionable guidance
