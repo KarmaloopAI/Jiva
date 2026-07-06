@@ -12,19 +12,12 @@ import { ModelOrchestrator } from '../models/orchestrator.js';
 import { StorageProvider } from '../storage/provider.js';
 import { SavedConversation } from '../storage/types.js';
 
-export interface ConversationMetadata {
-  id: string;
-  title?: string; // Human-readable title
-  created: string;
-  updated: string;
-  messageCount: number;
-  workspace?: string;
-  summary?: string;
-  type?: 'chat' | 'code';
-  totalPromptTokens?: number;
-  totalCompletionTokens?: number;
-  totalTokens?: number;
-}
+// Re-exported for backward compatibility — the canonical definitions now
+// live in storage/types.ts (SavedConversation.metadata is typed against
+// them, so keeping a second, separately-maintained copy here risked exactly
+// the kind of drift that motivated unifying them).
+export type { ConversationMetadata, CodeConversationMeta } from '../storage/types.js';
+import type { ConversationMetadata, CodeConversationMeta } from '../storage/types.js';
 
 export class ConversationManager {
   private storageProvider: StorageProvider;
@@ -53,7 +46,8 @@ export class ConversationManager {
     conversationId?: string,
     orchestrator?: ModelOrchestrator,
     type?: 'chat' | 'code',
-    tokenUsage?: { promptTokens: number; completionTokens: number; totalTokens: number }
+    tokenUsage?: { promptTokens: number; completionTokens: number; totalTokens: number },
+    codeMeta?: CodeConversationMeta
   ): Promise<string> {
     const finalId = conversationId || this.currentConversationId || this.generateConversationId();
 
@@ -100,6 +94,9 @@ export class ConversationManager {
       totalPromptTokens: (existingData?.metadata?.totalPromptTokens ?? 0) + (tokenUsage?.promptTokens ?? 0),
       totalCompletionTokens: (existingData?.metadata?.totalCompletionTokens ?? 0) + (tokenUsage?.completionTokens ?? 0),
       totalTokens: (existingData?.metadata?.totalTokens ?? 0) + (tokenUsage?.totalTokens ?? 0),
+      mcpServers: codeMeta?.mcpServers ?? existingData?.metadata?.mcpServers,
+      maxIterations: codeMeta?.maxIterations ?? existingData?.metadata?.maxIterations,
+      harness: codeMeta?.harness ?? existingData?.metadata?.harness,
     };
 
     const conversation: SavedConversation = {
@@ -429,10 +426,11 @@ Summary:`;
     workspace?: string,
     orchestrator?: ModelOrchestrator,
     type?: 'chat' | 'code',
-    tokenUsage?: { promptTokens: number; completionTokens: number; totalTokens: number }
+    tokenUsage?: { promptTokens: number; completionTokens: number; totalTokens: number },
+    codeMeta?: CodeConversationMeta
   ): Promise<void> {
     try {
-      await this.saveConversation(messages, workspace, this.currentConversationId || undefined, orchestrator, type, tokenUsage);
+      await this.saveConversation(messages, workspace, this.currentConversationId || undefined, orchestrator, type, tokenUsage, codeMeta);
     } catch (error) {
       logger.error('Auto-save failed', error);
     }

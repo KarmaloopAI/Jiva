@@ -15,11 +15,11 @@ const MAX_DIAGNOSTICS = 20;
 
 export const EditFileTool: ICodeTool = {
   name: 'edit_file',
-  description: `Replace an exact string in a file with a new string.
+  description: `Replace an exact string (or, with use_regex, a regex pattern match) in a file with a new string.
 
 REQUIRED PARAMETERS — ALL THREE are mandatory, never omit any:
   • file_path  — absolute path to the file to edit
-  • old_string — the EXACT text to find (must match the file exactly)
+  • old_string — the EXACT text to find (must match the file exactly), or a regex pattern if use_regex is true
   • new_string — the REPLACEMENT text (what replaces old_string)
 
 IMPORTANT: You MUST provide BOTH old_string AND new_string in every call.
@@ -36,6 +36,17 @@ Rules:
 - Prefer small, targeted edits over rewriting large sections.
 - LSP errors (if any) are reported after the edit so you can fix them immediately.
 
+REGEX MODE (use_regex: true):
+- old_string is compiled as a JavaScript regex (dot matches newlines). new_string may
+  reference capture groups with $1, $2, etc.
+- Best used for replacing a whole marked SECTION without needing to reproduce its exact
+  current content — e.g. old_string: "### section-parser[\\s\\S]*?### endsection",
+  new_string containing the new section body wrapped in the same markers.
+  This is the recommended way to fill in a section of a skeleton file written earlier
+  in stages (see write_file's skeleton-first guidance for large files).
+- Fails the same way as normal mode if the pattern matches zero times, or more than
+  once when replace_all is false.
+
 Returns a diff of the changes made, plus any LSP errors detected.`,
 
   parameters: {
@@ -51,15 +62,19 @@ Returns a diff of the changes made, plus any LSP errors detected.`,
       },
       old_string: {
         type: 'string',
-        description: 'The exact text to replace (empty string to create a new file)',
+        description: 'The exact text to replace (empty string to create a new file), or a regex pattern when use_regex is true',
       },
       new_string: {
         type: 'string',
-        description: 'The replacement text',
+        description: 'The replacement text (may reference regex capture groups like $1 when use_regex is true)',
       },
       replace_all: {
         type: 'boolean',
         description: 'Replace all occurrences of old_string (default: false)',
+      },
+      use_regex: {
+        type: 'boolean',
+        description: 'Treat old_string as a regex pattern instead of an exact/fuzzy string match (default: false). Recommended for replacing a whole ### section-name ... ### endsection block.',
       },
     },
     // file_path is intentionally not in `required` so the `path` alias is accepted by
@@ -76,6 +91,7 @@ Returns a diff of the changes made, plus any LSP errors detected.`,
     const oldString = args.old_string as string;
     const newString = args.new_string as string;
     const replaceAll = (args.replace_all as boolean) ?? false;
+    const useRegex = (args.use_regex as boolean) ?? false;
 
     if (oldString === newString) {
       return 'Error: old_string and new_string are identical — no change made.';
@@ -110,7 +126,9 @@ Returns a diff of the changes made, plus any LSP errors detected.`,
 
         let result: string;
         try {
-          result = replace(contentBefore, normalizedOld, normalizedNew, replaceAll);
+          result = useRegex
+            ? regexReplace(contentBefore, oldString, newString, replaceAll)
+            : replace(contentBefore, normalizedOld, normalizedNew, replaceAll);
         } catch (e) {
           return `Error: ${e instanceof Error ? e.message : String(e)}`;
         }
@@ -427,6 +445,42 @@ export function replace(content: string, oldString: string, newString: string, r
     );
   }
   throw new Error('Found multiple matches for old_string. Provide more surrounding context to make it unique.');
+}
+
+/**
+ * Regex-based replacement — used when the model passes use_regex: true.
+ * Primarily intended for replacing a whole marked section (e.g.
+ * `### section-name\n...\n### endsection`) without needing to reproduce its
+ * exact current body, which matters most for models with a small output
+ * token budget filling in a skeleton file written in an earlier turn.
+ */
+function regexReplace(content: string, pattern: string, replacement: string, replaceAll = false): string {
+  let regex: RegExp;
+  try {
+    // 's' (dotAll) so '.' spans newlines — section bodies are multi-line.
+    regex = new RegExp(pattern, replaceAll ? 'gs' : 's');
+  } catch (e) {
+    throw new Error(`Invalid regex pattern: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  if (replaceAll) {
+    const matchCount = (content.match(regex) ?? []).length;
+    if (matchCount === 0) {
+      throw new Error('Regex pattern did not match anything in the file.');
+    }
+    return content.replace(regex, replacement);
+  }
+
+  const matches = content.match(new RegExp(pattern, 'gs'));
+  if (!matches || matches.length === 0) {
+    throw new Error('Regex pattern did not match anything in the file.');
+  }
+  if (matches.length > 1) {
+    throw new Error(
+      `Regex pattern matched ${matches.length} times — make it more specific, or pass replace_all: true to replace every match.`,
+    );
+  }
+  return content.replace(regex, replacement);
 }
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
