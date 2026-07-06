@@ -6,7 +6,7 @@
 
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { configManager } from '../../core/config.js';
+import { configManager, ConfigManager } from '../../core/config.js';
 import { createModelClient } from '../../models/model-client.js';
 import { ModelOrchestrator } from '../../models/orchestrator.js';
 import { MCPServerManager } from '../../mcp/server-manager.js';
@@ -31,6 +31,14 @@ const __dirname = dirname(__filename);
 const packageJson = JSON.parse(
   readFileSync(join(__dirname, '../../../package.json'), 'utf-8')
 );
+
+// Surface a one-time config migration (old ~/Library/Preferences/jiva-nodejs
+// or platform-equivalent config.json → ~/.jiva/config.json), if one just
+// happened. configManager's construction above already ran the migration;
+// this only prints the result.
+if (ConfigManager.lastMigrationMessage) {
+  console.log(chalk.yellow(`\n⚠  ${ConfigManager.lastMigrationMessage}\n`));
+}
 
 const program = new Command();
 program
@@ -73,20 +81,22 @@ program
           console.log(chalk.gray('  Endpoint:'), config.models.reasoning.endpoint);
           console.log(chalk.gray('  Model:'), config.models.reasoning.defaultModel);
           console.log(chalk.gray('  Harmony Format:'), config.models.reasoning.useHarmonyFormat ? 'Yes' : 'No');
+          console.log(chalk.gray('  Vision:'), config.models.reasoning.hasVision ? 'Yes' : 'No');
           console.log();
         }
-        
+
         if (config.models?.multimodal) {
           console.log(chalk.bold('Multimodal Model:'));
           console.log(chalk.gray('  Endpoint:'), config.models.multimodal.endpoint);
           console.log(chalk.gray('  Model:'), config.models.multimodal.defaultModel);
           console.log();
         }
-        
+
         if (config.models?.toolCalling) {
           console.log(chalk.bold('Tool-Calling Model:'), chalk.green('(primary for tool calls)'));
           console.log(chalk.gray('  Endpoint:'), config.models.toolCalling.endpoint);
           console.log(chalk.gray('  Model:'), config.models.toolCalling.defaultModel);
+          console.log(chalk.gray('  Vision:'), config.models.toolCalling.hasVision ? 'Yes' : 'No');
           console.log();
         }
         
