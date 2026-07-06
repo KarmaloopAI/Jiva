@@ -380,6 +380,7 @@ export class ModelClient implements IModel {
             completionTokens: data.usage.completion_tokens || 0,
             totalTokens: data.usage.total_tokens || 0,
           } : undefined,
+          finishReason: choice.finish_reason,
           raw: {
             ...data,
             parsedHarmony: parsed,
@@ -428,6 +429,7 @@ export class ModelClient implements IModel {
             completionTokens: data.usage.completion_tokens || 0,
             totalTokens: data.usage.total_tokens || 0,
           } : undefined,
+          finishReason: choice.finish_reason,
           raw: data,
         };
       }

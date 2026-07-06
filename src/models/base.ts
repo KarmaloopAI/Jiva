@@ -40,6 +40,14 @@ export interface ModelResponse {
     completionTokens: number;
     totalTokens: number;
   };
+  /**
+   * The API's own reason the completion stopped, e.g. 'stop' | 'length' | 'tool_calls'.
+   * 'length' means the completion hit its max_tokens ceiling — if content and toolCalls
+   * are both empty with finishReason 'length', the model ran out of budget while still
+   * "thinking" and never got to emit anything, which looks identical to a genuine empty
+   * response but needs a different fix (more budget / less context), not just a nudge.
+   */
+  finishReason?: string;
   raw?: any;
 }
 

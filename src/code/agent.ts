@@ -807,15 +807,24 @@ ${directive ? `\n${directive}` : ''}`;
       // ── In-loop context compaction ──────────────────────────────────────────
       // Check if we're approaching the context window limit and compact if needed.
       // Triggered once per turn (compactedThisTurn flag) to avoid thrashing.
-      // Only runs when: threshold > 0, orchestrator available, not already compacted,
-      // and the response carried token usage data.
+      // Only runs when: threshold > 0, orchestrator available, not already compacted.
+      //
+      // Deliberately NOT gated on the response having tool calls: a model that's
+      // starved for completion-token budget by a bloated prompt (spending its
+      // whole budget "thinking" before it can emit a tool call, or even any
+      // visible text) is EXACTLY the scenario compaction needs to rescue —
+      // gating on tool calls here created a deadlock where a large context
+      // would push the model into empty responses, and because empty responses
+      // never carry tool calls, compaction could never fire to shrink the
+      // context back down. The model would then just keep re-hitting the same
+      // starved budget on every recovery-nudge retry and give up after
+      // MAX_EMPTY_RESPONSES, even with abundant maxIterations remaining.
       const promptTokens = response.usage?.promptTokens ?? 0;
       if (
         this.compactionThreshold > 0 &&
         promptTokens > this.compactionThreshold &&
         !compactedThisTurn &&
-        this.conversationManager &&
-        response.toolCalls && response.toolCalls.length > 0
+        this.conversationManager
       ) {
         logger.warn(
           `[CodeAgent] Context at ${promptTokens} tokens (threshold: ${this.compactionThreshold}) — compacting in-loop history`,
@@ -870,7 +879,34 @@ ${directive ? `\n${directive}` : ''}`;
         }
 
         if (!response.content && emptyResponseCount < MAX_EMPTY_RESPONSES) {
-          // Model returned empty content with no tool calls — it got stuck or confused.
+          // Model returned empty content with no tool calls.
+          //
+          // Two distinct causes look identical here but need different fixes:
+          //   1. finishReason === 'length' — the model hit its max_tokens ceiling
+          //      while still "thinking" and never got to emit a tool call or text.
+          //      This is a completion-token-budget problem, not confusion — nudging
+          //      with MORE instructions only adds prompt weight and makes the next
+          //      attempt hit the same wall (or worse). The real fix is to shrink the
+          //      context so more of the budget is left for actual output, so we force
+          //      an immediate compaction here regardless of the normal token threshold.
+          //   2. Anything else — the model is genuinely stuck/confused; a nudge is the
+          //      right tool.
+          const isLengthStarved = response.finishReason === 'length';
+          if (isLengthStarved && !compactedThisTurn && this.conversationManager) {
+            logger.warn(
+              '[CodeAgent] Empty response with finishReason=length — model ran out of completion budget ' +
+              'while thinking. Forcing context compaction instead of a text nudge.',
+            );
+            compactedThisTurn = true;
+            try {
+              const compacted = await this.compactInLoopMessages(messages, systemPrompt);
+              messages.splice(0, messages.length, ...compacted);
+              logger.info(`[CodeAgent] Forced compaction complete: ${messages.length} messages after compaction`);
+            } catch (compactErr) {
+              logger.error('[CodeAgent] Forced compaction failed, falling back to a recovery nudge', compactErr);
+            }
+          }
+
           // Inject an escalating recovery nudge and let it try again.
           emptyResponseCount++;
           logger.warn(
@@ -879,7 +915,14 @@ ${directive ? `\n${directive}` : ''}`;
 
           // Escalate urgency with each retry so the model doesn't keep ignoring it
           let nudgeContent: string;
-          if (emptyResponseCount <= 2) {
+          if (isLengthStarved) {
+            nudgeContent =
+              'Your last response ran out of space before producing any output — the context has now been ' +
+              'compacted to free up room. Continue the task with a SHORT, direct next step:\n' +
+              '- If you need to CREATE a file → call write_file now.\n' +
+              '- If you need to EDIT a file → call edit_file directly (skip re-reading files you already read).\n' +
+              '- If the task is already complete → provide a brief one-paragraph summary.';
+          } else if (emptyResponseCount <= 2) {
             nudgeContent =
               'Your last response was empty. Please continue working on the task.\n\n' +
               '- If you need to CREATE a file → call write_file now.\n' +
