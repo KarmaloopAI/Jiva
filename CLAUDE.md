@@ -45,7 +45,17 @@ Git identity for commits in both repos: use the repo's own configured author
 (`git log --format="%ae %an" -1` to check — currently
 `Abhishek Chatterjee <abhishek@gritsa.com>` for both). **Never** put "Claude"
 or "Anthropic" in commit messages, emails, or authorship — this was an
-explicit, repeated instruction.
+explicit, repeated instruction (asked more than once — treat it as a hard
+rule, not a one-off).
+
+**Jiva's branch workflow: `develop` first, always.** New work — including
+bug fixes discovered while working on Jivam — goes on `develop`, not `main`.
+`main` only receives changes via a `develop → main` PR merge. I got this
+wrong once (committed three fixes straight to `main` while debugging
+Jivam-triggered issues) and had to cherry-pick them onto `develop` and reset
+`main` back to `origin/main` afterward. Default to checking out/creating a
+local `develop` branch (tracking `origin/develop`) before starting any Jiva
+fix, not `main`, even when `main` is what happens to be checked out already.
 
 ## Architecture in one paragraph
 
