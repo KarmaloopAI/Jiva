@@ -208,6 +208,7 @@ export class SessionManager extends EventEmitter {
         reasoningEffortStrategy: rm.reasoningEffortStrategy,
         defaultReasoningEffort: 'high',
         defaultMaxTokens: rm.defaultMaxTokens,
+        maxRequestsPerMinute: rm.maxRequestsPerMinute,
       });
 
       // Tool-calling model: when configured, serves as the PRIMARY model for tool-call

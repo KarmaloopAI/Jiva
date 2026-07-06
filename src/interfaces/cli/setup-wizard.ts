@@ -27,6 +27,8 @@ interface ProviderPreset {
   useHarmonyFormat: boolean;
   reasoningEffortStrategy: 'api_param' | 'system_prompt' | 'both';
   defaultMaxTokens?: number;
+  /** Client-side proactive throttle — see ModelClientConfig.maxRequestsPerMinute. */
+  maxRequestsPerMinute?: number;
   hasMultimodal: boolean;
   note?: string; // shown during setup
 }
@@ -42,6 +44,8 @@ const PROVIDERS: Record<ProviderKey, ProviderPreset> = {
     reasoningEffortStrategy: 'api_param',
     // Sarvam's API caps completion output at 4096 tokens; requesting more is rejected.
     defaultMaxTokens: 4096,
+    // Sarvam's standard (non-enterprise) plan caps requests at 40/min.
+    maxRequestsPerMinute: 40,
     hasMultimodal: false,
     note: 'Sarvam does not offer a multimodal model. You will need to pick a separate provider for multimodal.',
   },
@@ -198,6 +202,7 @@ async function setupReasoningModel(collectedKeys: Map<ProviderKey, string>): Pro
     useHarmonyFormat: preset.useHarmonyFormat,
     reasoningEffortStrategy: preset.reasoningEffortStrategy,
     ...(preset.defaultMaxTokens ? { defaultMaxTokens: preset.defaultMaxTokens } : {}),
+    ...(preset.maxRequestsPerMinute ? { maxRequestsPerMinute: preset.maxRequestsPerMinute } : {}),
     ...(hasVision ? { hasVision: true } : {}),
   };
 
@@ -332,6 +337,8 @@ async function setupToolCallingModel(
     type: 'tool-calling',
     defaultModel: model,
     useHarmonyFormat: false, // always standard format for tool-calling models
+    ...(preset.defaultMaxTokens ? { defaultMaxTokens: preset.defaultMaxTokens } : {}),
+    ...(preset.maxRequestsPerMinute ? { maxRequestsPerMinute: preset.maxRequestsPerMinute } : {}),
     ...(hasVision ? { hasVision: true } : {}),
   };
 }

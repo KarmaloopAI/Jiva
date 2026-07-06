@@ -13,7 +13,17 @@ export class ConfigurationError extends JivaError {
 }
 
 export class ModelError extends JivaError {
-  constructor(message: string, public modelName?: string) {
+  constructor(
+    message: string,
+    public modelName?: string,
+    /**
+     * Milliseconds to wait before retrying, parsed from the API response's
+     * standard `Retry-After` header (RFC 6585) when the error was a 429.
+     * Preferred over parsing provider-specific wording out of the error
+     * message body, which only some providers (e.g. Groq) include.
+     */
+    public retryAfterMs?: number,
+  ) {
     super(message, 'MODEL_ERROR');
     this.name = 'ModelError';
   }

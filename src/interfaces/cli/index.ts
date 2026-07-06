@@ -192,6 +192,9 @@ program
         useHarmonyFormat: reasoningModelConfig.useHarmonyFormat,
         hasVision: reasoningModelConfig.hasVision,
         defaultReasoningEffort: reasoningModelConfig.defaultReasoningEffort ?? undefined,
+        reasoningEffortStrategy: reasoningModelConfig.reasoningEffortStrategy,
+        defaultMaxTokens: reasoningModelConfig.defaultMaxTokens,
+        maxRequestsPerMinute: reasoningModelConfig.maxRequestsPerMinute,
       });
 
       let multimodalModel;
@@ -219,6 +222,8 @@ program
           useHarmonyFormat: toolCallingModelConfig.useHarmonyFormat,
           hasVision: toolCallingModelConfig.hasVision,
           defaultReasoningEffort: 'medium',
+          defaultMaxTokens: toolCallingModelConfig.defaultMaxTokens,
+          maxRequestsPerMinute: toolCallingModelConfig.maxRequestsPerMinute,
         });
       }
 
@@ -377,6 +382,7 @@ program
           lspEnabled,
           mcpManager: codeMcpServerNames.length > 0 ? mcpManager : undefined,
           mcpServerNames: codeMcpServerNames,
+          harness: options.harness === 'evaluator' ? 'evaluator' : undefined,
         });
 
         const mcpNote = codeMcpServerNames.length > 0 ? ` | MCP: ${codeMcpServerNames.join(', ')}` : '';
@@ -704,6 +710,9 @@ program
         useHarmonyFormat: reasoningModelConfig.useHarmonyFormat,
         hasVision: reasoningModelConfig.hasVision,
         defaultReasoningEffort: reasoningModelConfig.defaultReasoningEffort ?? undefined,
+        reasoningEffortStrategy: reasoningModelConfig.reasoningEffortStrategy,
+        defaultMaxTokens: reasoningModelConfig.defaultMaxTokens,
+        maxRequestsPerMinute: reasoningModelConfig.maxRequestsPerMinute,
       });
 
       let multimodalModel;
@@ -730,6 +739,8 @@ program
           useHarmonyFormat: toolCallingModelCfg.useHarmonyFormat,
           hasVision: toolCallingModelCfg.hasVision,
           defaultReasoningEffort: 'medium',
+          defaultMaxTokens: toolCallingModelCfg.defaultMaxTokens,
+          maxRequestsPerMinute: toolCallingModelCfg.maxRequestsPerMinute,
         });
       }
 

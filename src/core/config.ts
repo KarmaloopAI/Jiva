@@ -114,6 +114,12 @@ const ModelConfigSchema = z.object({
   /** Default max tokens — required for reasoning models like Sarvam-105B */
   defaultMaxTokens: z.number().optional(),
   /**
+   * Client-side proactive rate limit — max requests this model instance will
+   * send per trailing 60s window (e.g. Sarvam's standard plan: 40 req/min).
+   * Model-agnostic: set for any provider with a known hard rate ceiling.
+   */
+  maxRequestsPerMinute: z.number().optional(),
+  /**
    * Use Google Application Default Credentials instead of a static apiKey.
    * Required for Vertex AI MaaS endpoints (aiplatform.googleapis.com).
    * On Cloud Run the service account token is fetched automatically;
