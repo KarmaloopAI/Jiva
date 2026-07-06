@@ -342,11 +342,20 @@ Keep the summary focused and complete — include file paths, function names, an
       const response = await orchestrator.chat({
         messages: [{ role: 'user', content: titlePrompt }],
         temperature: 0.1, // Low temperature for deterministic title generation
-        maxTokens: 20,
+        // Reasoning models (e.g. GLM-5.2) spend tokens on a thinking chain
+        // before emitting the title; 20 tokens was barely enough for the
+        // thinking alone, leaving nothing for the actual title.
+        maxTokens: 200,
+        reasoningEffort: 'low', // Minimize thinking for this simple task
       });
 
-      // Clean up the title
-      let title = response.content.trim();
+      // Clean up the title. Reasoning models (e.g. GLM-5.2, DeepSeek) emit
+      // inline thinking blocks; stripThinkingContent() removes those, then
+      // take the last non-empty line (the model sometimes emits preamble
+      // before the actual title).
+      let title = this.stripThinkingContent(response.content).trim();
+      const lines = title.split('\n').map(l => l.trim()).filter(Boolean);
+      title = lines.length > 0 ? lines[lines.length - 1] : '';
       // Remove quotes if present
       title = title.replace(/^["']|["']$/g, '');
       // Remove trailing punctuation
@@ -377,45 +386,25 @@ Keep the summary focused and complete — include file paths, function names, an
   }
 
   /**
+   * Remove reasoning/thinking blocks that some models (e.g. GLM-5.2,
+   * DeepSeek-R1) emit inline in the response content. Handles both
+   * properly-closed blocks and truncated/unclosed ones (where the model
+   * ran out of token budget mid-thought and never emitted the closing tag).
+   * \x3c is the '<' character, used here so the literal tag markers don't
+   * appear in the regex source.
+   */
+  private stripThinkingContent(content: string): string {
+    return content
+      .replace(/\x3cthink[\s\S]*?\x3c\/think>/g, '') // closed thinking blocks
+      .replace(/\x3cthink[\s\S]*$/g, ''); // unclosed (truncated) thinking
+  }
+
+  /**
    * Capitalize first letter of string
    */
   private capitalizeFirst(str: string): string {
     if (!str) return str;
     return str.charAt(0).toUpperCase() + str.slice(1);
-  }
-
-  /**
-   * Generate a summary for a conversation (for metadata)
-   */
-  async generateSummary(
-    messages: Message[],
-    orchestrator: ModelOrchestrator
-  ): Promise<string> {
-    try {
-      // Get user messages to understand the conversation topic
-      const userMessages = messages
-        .filter(msg => msg.role === 'user')
-        .map(msg => msg.content)
-        .slice(0, 5) // First 5 user messages
-        .join('\n');
-
-      const summaryPrompt = `Generate a brief 1-2 sentence summary of this conversation topic:
-
-${userMessages}
-
-Summary:`;
-
-      const response = await orchestrator.chat({
-        messages: [{ role: 'user', content: summaryPrompt }],
-        temperature: 0.1, // Low temperature for deterministic summary generation
-        maxTokens: 100,
-      });
-
-      return response.content.trim();
-    } catch (error) {
-      logger.error('Failed to generate summary', error);
-      return 'Conversation';
-    }
   }
 
   /**
