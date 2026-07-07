@@ -154,7 +154,7 @@ export const useCodeStore = create<CodeStore>((set, get) => ({
   },
 
   startSession: async (dir: string, mcpServers: string[] = [], opts?: { deepRun?: boolean; maxIterations?: number }) => {
-    const deepRun = opts?.deepRun ?? false
+    const deepRun = opts?.deepRun ?? true
     const maxIterations = opts?.maxIterations ?? 50
     const result = await window.electron.code.init(dir, mcpServers.length > 0 ? mcpServers : undefined, { deepRun, maxIterations })
     if (result.success) {
@@ -253,17 +253,13 @@ export const useCodeStore = create<CodeStore>((set, get) => ({
   },
 
   loadConversation: async (id: string) => {
-    const [raw, mcpServers] = await Promise.all([
-      window.electron.conversations.load(id) as Promise<{
-        metadata?: { workspace?: string }
-        messages?: Array<{ role: string; content: string | Array<{ type: string; text?: string }> }>
-      } | null>,
-      window.electron.code.getMcpSelection(id),
-    ])
+    const raw = await window.electron.conversations.load(id) as {
+      metadata?: { workspace?: string; mcpServers?: string[]; maxIterations?: number; harness?: string }
+      messages?: Array<{ role: string; content: string | Array<{ type: string; text?: string }> }>
+    } | null
 
     if (!raw) return
 
-    const workspace = raw.metadata?.workspace ?? null
     const messages: CodeMessage[] = (raw.messages ?? []).map((m, i) => {
       const content = typeof m.content === 'string'
         ? m.content
@@ -279,8 +275,35 @@ export const useCodeStore = create<CodeStore>((set, get) => ({
       }
     })
 
-    // Reset agent and re-init at the stored workspace with the original MCPs
+    // Reset any live agent instance before restoring — the actual re-init
+    // (with the right workspace/MCP servers/maxIterations) happens inside
+    // restoreConversation, driven by the conversation's own saved metadata.
     try { await window.electron.code.resetSession() } catch { /* ignore */ }
+
+    const result = await window.electron.code.restoreConversation(id)
+
+    if (result.success) {
+      set({
+        messages,
+        isThinking: false,
+        thinkingStartTime: null,
+        currentAction: null,
+        pendingEvents: [],
+        liveEvents: [],
+        isSessionStarted: true,
+        codeWorkspaceDir: result.workspace ?? raw.metadata?.workspace ?? null,
+        activeMcpServers: result.mcpServers ?? [],
+        maxIterations: result.maxIterations ?? 50,
+        deepRun: result.harness === 'deep-run',
+      })
+      return
+    }
+
+    // Fallback for conversations saved before v0.3.50 (no workspace/mcpServers/
+    // maxIterations/harness recorded in metadata) — best-effort restore using
+    // the legacy MCP-selection sidecar file.
+    const workspace = raw.metadata?.workspace ?? null
+    const mcpServers = await window.electron.code.getMcpSelection(id)
     if (workspace) {
       await window.electron.code.init(workspace, mcpServers.length > 0 ? mcpServers : undefined)
     }
@@ -313,7 +336,7 @@ export const useCodeStore = create<CodeStore>((set, get) => ({
       isSessionStarted: false,
       codeWorkspaceDir: null,
       activeMcpServers: [],
-      deepRun: false,
+      deepRun: true,
       maxIterations: 50,
     })
   },
