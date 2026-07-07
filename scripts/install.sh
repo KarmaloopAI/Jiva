@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Jivam installer for macOS (and Linux)
-# Usage: curl -fsSL https://raw.githubusercontent.com/karmaloop-ai/jivam/main/scripts/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/KarmaloopAI/Jivam/main/scripts/install.sh | bash
 set -euo pipefail
 
 JIVAM_COLOR='\033[0;35m'
@@ -108,7 +108,7 @@ fi
 header "Step 3 of 4 — Installing Jivam"
 log "Installing jivam and jiva-core globally (this may take a minute)..."
 npm install -g jivamai jiva-core
-ok "jivam $(jivam --version 2>/dev/null || node -e "const p=require('$(npm root -g)/jivam/package.json');console.log(p.version)" 2>/dev/null || echo '') installed"
+ok "jivam $(jivam --version 2>/dev/null || node -e "const p=require('$(npm root -g)/jivamai/package.json');console.log(p.version)" 2>/dev/null || echo '') installed"
 ok "jiva-core installed"
 
 # ── 5. App bundle + Dock (macOS) ─────────────────────────────────────────────

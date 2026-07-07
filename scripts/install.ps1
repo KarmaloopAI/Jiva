@@ -1,6 +1,6 @@
 # Jivam installer for Windows
 # Usage (run in PowerShell as normal user — no admin needed):
-#   irm https://raw.githubusercontent.com/karmaloop-ai/jivam/main/scripts/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/KarmaloopAI/Jivam/main/scripts/install.ps1 | iex
 #
 # Requires PowerShell 5.1+ (built into Windows 10/11).
 
