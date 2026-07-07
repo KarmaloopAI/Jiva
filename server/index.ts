@@ -30,25 +30,10 @@ const IS_DEV = process.env.NODE_ENV === 'development'
 // ---------------------------------------------------------------------------
 // jivam --install  (macOS only for now)
 // Creates ~/Applications/Jivam.app — a self-contained shell wrapper that
-// starts the server if not running, waits for it, then opens Chrome --app.
-// Also adds the app to the Dock via `defaults write`.
+// starts the server if not running, waits for it, then opens Safari (or
+// Chrome/Edge/Brave as a fallback). Also adds the app to the Dock via
+// `defaults write`.
 // ---------------------------------------------------------------------------
-/**
- * Install Jivam as a genuine Safari web app — a real, separate .app bundle
- * under ~/Applications/Safari Apps/ with its own bundle identifier
- * (com.apple.Safari.WebApp.<uuid>). This gives native macOS Dock semantics
- * for free: a distinct Dock icon and click-to-focus on the existing window
- * instead of spawning duplicates, which `chrome --app=` can never provide
- * (it shares Chrome's bundle ID).
- *
- * Safari's "Add to Dock" (macOS Sonoma+) has no CLI or URL-scheme trigger,
- * so this drives the File > Add to Dock menu item via System Events UI
- * scripting. This requires the user to grant Accessibility permission
- * (System Settings → Privacy & Security → Accessibility) to the calling
- * process (e.g. Terminal) the first time — if that's denied, or the OS is
- * pre-Sonoma, or anything else about this fails, it returns null and the
- * caller falls back to `chrome/edge/brave --app=` or plain Safari.
- */
 function findSafariWebAppBundle(sinceMs: number): string | null {
   // Safari writes the bundle either into ~/Applications/Safari Apps/ or
   // directly into ~/Applications/, depending on macOS version — and when a
@@ -81,22 +66,32 @@ function findSafariWebAppBundle(sinceMs: number): string | null {
 }
 
 /**
- * Install Jivam as a genuine Safari web app — a real, separate .app bundle
- * with its own bundle identifier (com.apple.Safari.WebApp.<uuid>). This
- * gives native macOS Dock semantics for free: a distinct Dock icon and
- * click-to-focus on the existing window instead of spawning duplicates,
- * which `chrome --app=` can never provide (it shares Chrome's bundle ID).
+ * Guide the user to install Jivam as a genuine Safari web app — a real,
+ * separate .app bundle with its own bundle identifier
+ * (com.apple.Safari.WebApp.<uuid>). This gives native macOS Dock semantics
+ * for free: a distinct Dock icon and click-to-focus on the existing window
+ * instead of spawning duplicates, which `chrome --app=` can never provide
+ * (it shares Chrome's bundle ID).
  *
  * Assumes `url` is already reachable — the caller is responsible for
  * ensuring the server is running before calling this.
  *
- * Safari's "Add to Dock" (macOS Sonoma+) has no CLI or URL-scheme trigger,
- * so this drives the File > Add to Dock… menu item via System Events UI
- * scripting. This requires the user to grant Accessibility permission
- * (System Settings → Privacy & Security → Accessibility) to the calling
- * process (e.g. Terminal) the first time — if that's denied, or the OS is
- * pre-Sonoma, or anything else about this fails, it returns null and the
- * caller falls back to a plain `--app=` wrapper.
+ * Earlier versions of this drove the File > Add to Dock… menu item directly
+ * via System Events UI scripting. That required the user to grant
+ * Accessibility permission (System Settings → Privacy & Security →
+ * Accessibility) to the calling process (e.g. Terminal) — and when that
+ * permission wasn't granted in time (or was denied), the whole flow fell
+ * back to a Chrome/Edge/Brave `--app=` wrapper instead, silently abandoning
+ * the Safari-first strategy for anyone who didn't grant Accessibility fast
+ * enough. Since the confirmation panel itself can never be scripted anyway
+ * (deliberately excluded from the Accessibility API — see CLAUDE.md), the
+ * System Events step was only ever saving the user one menu click, at the
+ * cost of an intimidating permission prompt. Simpler and more reliable: just
+ * open the page in a plain Safari tab and let the page itself (see
+ * AddToDockGuide in src/App.tsx) show the two-click walkthrough — no
+ * Accessibility permission needed at all, since `tell application "Safari"`
+ * (unlike `tell application "System Events"`) only needs the lightweight,
+ * rarely-denied Automation permission.
  */
 async function installSafariAddToDock(url: string): Promise<string | null> {
   const { exec } = await import('child_process')
@@ -108,75 +103,35 @@ async function installSafariAddToDock(url: string): Promise<string | null> {
     const { stdout: versionOut } = await execAsync('sw_vers -productVersion')
     const majorVersion = parseInt(versionOut.trim().split('.')[0] ?? '0', 10)
     if (majorVersion < 14) {
-      console.warn('Safari Add to Dock requires macOS Sonoma (14) or later — skipping.')
+      console.warn('Safari Add to Dock requires macOS Sonoma (14) or later — falling back to --app mode.')
       return null
     }
 
     const automationStartMs = Date.now()
+    const guideUrl = `${url}/?installGuide=safari-dock`
 
-    const scriptPath = path.join(os.tmpdir(), 'jivam-add-to-dock.applescript')
-    // Note: the real menu item name has a trailing ellipsis ("Add to Dock…").
-    // It's also disabled unless Safari's process is explicitly frontmost via
-    // System Events (not just `activate`), hence the extra frontmost dance.
-    const script = `
-on run
-  tell application "Safari"
-    activate
-    if (count of windows) = 0 then
-      make new document
-    end if
-    set URL of front document to "${url}"
-  end tell
-  delay 2
-  tell application "Safari" to activate
-  delay 1
-  tell application "System Events" to tell process "Safari" to set frontmost to true
-  delay 1
-  tell application "System Events"
-    tell process "Safari"
-      click menu item "Add to Dock…" of menu "File" of menu bar 1
-    end tell
-  end tell
-  delay 2
-end run
-`
-    fs.writeFileSync(scriptPath, script)
     try {
-      await execAsync(`osascript "${scriptPath}"`, { timeout: 20000 })
-    } finally {
-      fs.rmSync(scriptPath, { force: true })
+      await execAsync(
+        `osascript -e 'tell application "Safari" to open location "${guideUrl}"' -e 'tell application "Safari" to activate'`,
+      )
+    } catch (err) {
+      console.warn('Could not open Safari automatically — falling back to --app mode:', err)
+      return null
     }
 
-    // Safari's confirmation panel is deliberately excluded from the
-    // Accessibility API (same category as Touch ID/Apple Pay prompts) —
-    // installing an app is a security-sensitive action Apple requires a
-    // genuine human click for, and that can't (and shouldn't) be scripted
-    // around. Prompt the user, then poll for the resulting bundle.
-    console.log('\nA "Add to Dock" confirmation opened in Safari — click Add to finish setting up Jivam as an app.')
-    console.log('Waiting up to 60s for you to click it...')
-    for (let i = 0; i < 60; i++) {
+    console.log('\nOpened Jivam in Safari with on-screen instructions.')
+    console.log('Click File > Add to Dock… in Safari\'s menu bar, then click Add to confirm.')
+    console.log('Waiting up to 2 minutes for you to finish...')
+    for (let i = 0; i < 120; i++) {
       await new Promise(resolve => setTimeout(resolve, 1000))
       const found = findSafariWebAppBundle(automationStartMs)
       if (found) return found
     }
 
-    console.warn('No click detected within 60s — falling back to --app mode. Run `jivam --install` again anytime to retry.')
+    console.warn('No Dock install detected within 2 minutes — falling back to --app mode. Run `jivam --install` again anytime to retry.')
     return null
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    if (message.includes('assistive access') || message.includes('-1719')) {
-      console.warn(
-        '\nSafari Add to Dock needs Accessibility permission (one-time setup) to control Safari\'s menus.\n' +
-        'Opening System Settings — enable access for Terminal (or whichever app you ran this from),\n' +
-        'then re-run: jivam --install\n' +
-        'Falling back to --app mode for now — Jivam will still work, just without the native single-window Dock experience.',
-      )
-      try {
-        await execAsync('open "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"')
-      } catch {}
-    } else {
-      console.warn('Safari Add to Dock automation failed, falling back to --app mode:', err)
-    }
+    console.warn('Safari Add to Dock setup failed, falling back to --app mode:', err)
     return null
   }
 }
@@ -370,21 +325,23 @@ async function macCreateFallbackWrapper(): Promise<string> {
   fs.mkdirSync(resourcesDir, { recursive: true })
 
   const url = `http://localhost:${PORT}`
+  // Safari first (Jivam's preferred macOS browser — see openAppWindow/
+  // installSafariAddToDock); Chrome/Edge/Brave only as a fallback for
+  // users who don't have Safari available or have overridden the choice.
   const launcherScript = `#!/bin/bash
-URL="${url}"
+URL="${url}?installGuide=safari-dock"
 CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 EDGE="/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"
 BRAVE="/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"
 
-if [ -f "$CHROME" ]; then
-  "$CHROME" --app="$URL" --disable-extensions &
+if osascript -e "tell application \\"Safari\\" to open location \\"$URL\\"" -e "tell application \\"Safari\\" to activate" 2>/dev/null; then
+  :
+elif [ -f "$CHROME" ]; then
+  "$CHROME" --app="${url}" --disable-extensions &
 elif [ -f "$EDGE" ]; then
-  "$EDGE" --app="$URL" --disable-extensions &
+  "$EDGE" --app="${url}" --disable-extensions &
 elif [ -f "$BRAVE" ]; then
-  "$BRAVE" --app="$URL" --disable-extensions &
-else
-  osascript -e "tell application \\"Safari\\" to open location \\"$URL\\"" \\
-            -e "tell application \\"Safari\\" to activate"
+  "$BRAVE" --app="${url}" --disable-extensions &
 fi
 `
   fs.writeFileSync(path.join(macOSDir, 'jivam-launcher'), launcherScript, { mode: 0o755 })
@@ -500,7 +457,7 @@ async function runInstall(): Promise<void> {
   }
 
   // ── 3. Install as a genuine Safari web app (best experience) ──────────────
-  console.log('Installing Jivam as a Safari web app (this may take a few seconds)...')
+  console.log('Setting up Jivam as a Safari web app...')
   const pwaAppPath = await installSafariAddToDock(url)
 
   // ── 4. Add the resulting app to the Dock, falling back to a plain wrapper ──
@@ -854,43 +811,34 @@ async function openAppWindow(url: string): Promise<void> {
       }
     }
 
-    if (browserOverride === 'safari') {
-      // Safari regular window — user hasn't installed PWA yet
+    // Safari is Jivam's preferred macOS browser — no PWA installed yet, so
+    // open a plain Safari tab with the in-page Add to Dock walkthrough
+    // (see AddToDockGuide in src/App.tsx). Only skip this if the user has
+    // explicitly overridden to a Chromium browser via JIVAM_BROWSER.
+    if (!browserOverride || browserOverride === 'safari') {
       try {
         await execAsync(
-          `osascript -e 'tell application "Safari" to open location "${url}"' -e 'tell application "Safari" to activate'`
+          `osascript -e 'tell application "Safari" to open location "${url}/?installGuide=safari-dock"' -e 'tell application "Safari" to activate'`
         )
-        console.log('Opened in Safari (tip: File → Add to Dock for app experience)')
+        console.log('Opened in Safari — follow the on-screen instructions to add Jivam to your Dock.')
         return
       } catch (err) {
-        console.error('Failed to open Safari:', err)
+        console.warn('Failed to open Safari, falling back to Chromium browsers:', err)
       }
     }
 
-    if (browserOverride !== 'safari') {
-      // Try Chrome, Edge, Brave — all support --app flag
-      const macBrowsers: Array<[string, string]> = [
-        ['chrome', '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'],
-        ['edge',   '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'],
-        ['brave',  '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser'],
-      ]
-      for (const [key, browserPath] of macBrowsers) {
-        if (browserOverride && browserOverride !== key) continue
-        try {
-          execFile(browserPath, [`--app=${url}`, '--disable-extensions'])
-          console.log(`Opened in app-mode window: ${browserPath}`)
-          return
-        } catch {}
-      }
-    }
-
-    // Safari fallback when no Chromium found and no override
-    if (!browserOverride) {
+    // Chrome, Edge, Brave — only tried if Safari failed or was explicitly
+    // overridden. All support the --app flag.
+    const macBrowsers: Array<[string, string]> = [
+      ['chrome', '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'],
+      ['edge',   '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'],
+      ['brave',  '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser'],
+    ]
+    for (const [key, browserPath] of macBrowsers) {
+      if (browserOverride && browserOverride !== key) continue
       try {
-        await execAsync(
-          `osascript -e 'tell application "Safari" to open location "${url}"' -e 'tell application "Safari" to activate'`
-        )
-        console.log('Opened in Safari (tip: File → Add to Dock for app experience)')
+        execFile(browserPath, [`--app=${url}`, '--disable-extensions'])
+        console.log(`Opened in app-mode window: ${browserPath}`)
         return
       } catch {}
     }

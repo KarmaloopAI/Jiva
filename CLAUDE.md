@@ -119,19 +119,10 @@ a genuinely separate `.app` bundle with its own bundle ID.
 by construction** — it creates `~/Applications/Jivam.app` (or
 `~/Applications/Safari Apps/Jivam.app` on some macOS versions — check both;
 Safari picks the location) with a genuinely separate
-`com.apple.Safari.WebApp.<uuid>` bundle ID. Automating it via AppleScript/
-System Events:
+`com.apple.Safari.WebApp.<uuid>` bundle ID.
 - The File menu item is **`"Add to Dock…"` with a trailing Unicode ellipsis**
-  (`…`, not three periods) — `menu item "Add to Dock"` silently fails to find
-  it.
-- It's **disabled unless Safari is frontmost via System Events specifically**
-  (`tell application "System Events" to tell process "Safari" to set
-  frontmost to true`) — just `tell application "Safari" to activate` isn't
-  enough, the menu item stays disabled and the click errors.
-- Requires **Accessibility permission** (not "Automation") for the calling
-  process (Terminal, etc.) — System Settings → Privacy & Security →
-  Accessibility. Missing permission surfaces as `osascript is not allowed
-  assistive access (-1719)`.
+  (`…`, not three periods) — worth knowing if you ever reference it in UI copy
+  or docs, even though we no longer script clicking it (see below).
 - **The final "Add" confirmation panel cannot be scripted, on purpose.**
   Exhaustively confirmed via `System Events` UI-tree traversal across every
   process (including the "Web App" helper process that momentarily owns the
@@ -139,13 +130,40 @@ System Events:
   same category as Touch ID/Apple Pay confirmations: Apple deliberately
   excludes it from the Accessibility API since installing an app is
   security-sensitive. **Don't try to bypass this again** — it's a wall, not a
-  bug. `jivam --install` prompts the user and polls for the resulting bundle
-  for up to 60s, falling back to a plain `--app=` wrapper if nothing appears.
+  bug.
 - **Safari overwrites a same-named bundle in place** rather than picking a new
   name — if you're diffing directory contents to detect "did a new bundle
   appear", diff by `Info.plist` **mtime**, not by "is this a new filename",
   or you'll miss legitimate overwrites of a stale bundle from a prior run
   (this was a real, shipped bug — see git history on `develop` for the fix).
+
+**We used to drive the File > Add to Dock… click ourselves via AppleScript/
+System Events — don't go back to that.** It worked, but only after the user
+granted **Accessibility permission** (not "Automation") to the calling
+process (Terminal, etc.) — System Settings → Privacy & Security →
+Accessibility; missing permission surfaced as `osascript is not allowed
+assistive access (-1719)`. It also required Safari to be frontmost via
+System Events specifically (`tell application "System Events" to tell
+process "Safari" to set frontmost to true` — plain `tell application "Safari"
+to activate` left the menu item disabled). Since the confirmation panel can
+never be scripted anyway (previous point), all that Accessibility-gated
+automation was ever buying us was skipping one menu click — and when the
+permission wasn't granted fast enough, the whole install silently fell back
+to a Chrome/Edge/Brave `--app=` wrapper, undermining the Safari-first
+strategy for exactly the users who hit the permission prompt. Current
+approach: `jivam --install` just opens a plain Safari tab (`tell application
+"Safari" to open location ...` — needs only the lightweight, rarely-denied
+Automation permission, not Accessibility) at
+`http://localhost:7842/?installGuide=safari-dock`. The page itself detects
+that query param and shows an in-app graphical walkthrough (`AddToDockGuide`
+in `src/App.tsx`) telling the user to click File > Add to Dock… themselves.
+Meanwhile `jivam --install` polls `findSafariWebAppBundle()` in the
+background (up to 2 minutes) for the resulting bundle, falling back to a
+plain `--app=` wrapper only if nothing appears in that window. Safari is
+also now the default first choice everywhere else Jivam opens a window
+(`openAppWindow`, the fallback `.app` wrapper's launcher script) — Chrome/
+Edge/Brave are fallbacks, not the primary path, a reversal of the original
+Electron-era assumption that Chrome's `--app=` gave the best experience.
 
 **Chrome's CDP `PWA.install` domain exists and is genuinely real** (not a
 hallucination — confirmed via Chromium's own docs and a live test), but as of

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Download, X } from 'lucide-react'
+import { Download, X, Menu as MenuIcon, ChevronRight } from 'lucide-react'
 import { AppShell } from './components/layout/AppShell'
 import { SetupScreen } from './components/setup/SetupScreen'
 import { CloudSignIn } from './components/setup/CloudSignIn'
@@ -69,6 +69,13 @@ function SplashScreen({ status }: { status: string }) {
   )
 }
 
+// `jivam --install` opens Safari with ?installGuide=safari-dock so the page
+// itself can show the Add to Dock walkthrough — see AddToDockGuide below.
+// Suppress the generic InstallModal in that case; it would be redundant.
+function hasInstallGuideParam(): boolean {
+  return new URLSearchParams(window.location.search).get('installGuide') === 'safari-dock'
+}
+
 function InstallModal() {
   const [dismissed, setDismissed] = useState(() =>
     !!localStorage.getItem('jivam-install-modal-dismissed')
@@ -77,7 +84,7 @@ function InstallModal() {
   // Only show in a regular browser tab — not when already running as installed app
   const isStandalone = window.matchMedia('(display-mode: standalone)').matches
 
-  if (dismissed || isStandalone) return null
+  if (dismissed || isStandalone || hasInstallGuideParam()) return null
 
   const handleDismiss = () => {
     localStorage.setItem('jivam-install-modal-dismissed', '1')
@@ -155,6 +162,89 @@ function InstallModal() {
             Got it
           </button>
         </div>
+      </motion.div>
+    </motion.div>
+  )
+}
+
+/**
+ * Shown when `jivam --install` opens Safari to a plain browser tab (no
+ * Accessibility permission needed, unlike scripting the File menu click
+ * ourselves) — walks the user through the one manual step Safari requires:
+ * clicking File > Add to Dock… themselves. `jivam --install` polls in the
+ * background for the resulting app bundle to appear.
+ */
+function AddToDockGuide() {
+  const [dismissed, setDismissed] = useState(false)
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches
+
+  if (dismissed || isStandalone || !hasInstallGuideParam()) return null
+
+  const handleDismiss = () => {
+    const url = new URL(window.location.href)
+    url.searchParams.delete('installGuide')
+    window.history.replaceState({}, '', url.toString())
+    setDismissed(true)
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-6"
+      style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(6px)' }}
+    >
+      <motion.div
+        initial={{ scale: 0.95, opacity: 0, y: 12 }}
+        animate={{ scale: 1, opacity: 1, y: 0 }}
+        transition={{ type: 'spring', stiffness: 300, damping: 28 }}
+        className="relative max-w-md w-full rounded-2xl p-8 text-center shadow-2xl"
+        style={{
+          background: 'var(--bg-card, #1a1a2e)',
+          border: '1px solid rgba(139,92,246,0.25)',
+        }}
+      >
+        <button
+          onClick={handleDismiss}
+          className="absolute top-4 right-4 text-[var(--text-subtle)] hover:text-[var(--text-muted)] transition-colors"
+        >
+          <X size={16} />
+        </button>
+
+        <div className="mx-auto mb-5 w-16 h-16 rounded-2xl flex items-center justify-center"
+          style={{ background: 'linear-gradient(135deg, rgba(139,92,246,0.2), rgba(59,130,246,0.15))' }}>
+          <img src={logoUrl} alt="Jivam" className="w-10 h-10 object-contain" />
+        </div>
+
+        <h2 className="text-xl font-semibold gradient-text mb-2">One click to finish</h2>
+        <p className="text-sm text-[var(--text-muted)] mb-6 leading-relaxed">
+          Add Jivam to your Dock as a real app — its own window and icon, no browser chrome.
+        </p>
+
+        <div
+          className="rounded-xl p-4 mb-5 text-left"
+          style={{ background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.2)' }}
+        >
+          <div className="flex items-center gap-2 text-xs text-[var(--text-subtle)] mb-3">
+            <MenuIcon size={13} />
+            <span>In the Safari menu bar at the top of your screen:</span>
+          </div>
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <span className="px-2.5 py-1.5 rounded-md text-[var(--text)]" style={{ background: 'rgba(139,92,246,0.15)' }}>
+              File
+            </span>
+            <ChevronRight size={14} className="text-[var(--text-subtle)] shrink-0" />
+            <span className="px-2.5 py-1.5 rounded-md text-white" style={{ background: 'var(--accent)' }}>
+              Add to Dock…
+            </span>
+          </div>
+        </div>
+
+        <p className="text-xs text-[var(--text-subtle)] leading-relaxed">
+          Safari will ask you to confirm — click <strong className="text-[var(--text)]">Add</strong> and
+          Jivam appears in your Dock within a few seconds.
+        </p>
       </motion.div>
     </motion.div>
   )
@@ -370,6 +460,7 @@ function App() {
 
       <AnimatePresence>
         <InstallModal key="install-modal" />
+        <AddToDockGuide key="add-to-dock-guide" />
         <UpdateBanner key="update-banner" />
       </AnimatePresence>
 
