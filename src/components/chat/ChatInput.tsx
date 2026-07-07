@@ -95,9 +95,9 @@ export function ChatInput() {
       if (converted.category === 'image') {
         // Always reference by path; enrich with description when multimodal is configured
         let markdown = `[Image file: ${converted.markdown}]`
-        if (isMultimodalEnabled) {
+        if (isMultimodalEnabled && converted.dataUri) {
           try {
-            const result = await window.electron.files.describeImage(converted.markdown)
+            const result = await window.electron.files.describeImage(converted.dataUri)
             if (result.success && result.description) {
               markdown = `[Image file: ${converted.markdown}]\n${result.description}`
             }
