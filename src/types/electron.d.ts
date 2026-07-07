@@ -135,6 +135,7 @@ interface ElectronAPI {
     set: (content: string) => Promise<{ success: boolean }>
   }
   onNativeThemeChanged: (callback: (isDark: boolean) => void) => void
+  onPwaInstalled: (callback: () => void) => void
   setup: {
     check: () => Promise<{
       nodejs:   { ok: boolean; version?: string }

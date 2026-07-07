@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Download, X, Menu as MenuIcon, ChevronRight } from 'lucide-react'
+import { Download, X, Menu as MenuIcon, ChevronRight, CheckCircle2 } from 'lucide-react'
 import { AppShell } from './components/layout/AppShell'
 import { SetupScreen } from './components/setup/SetupScreen'
 import { CloudSignIn } from './components/setup/CloudSignIn'
@@ -174,9 +174,71 @@ function InstallModal() {
  * clicking File > Add to Dock… themselves. `jivam --install` polls in the
  * background for the resulting app bundle to appear.
  */
+// Mirrors Safari's actual File menu layout (macOS Sonoma+) so the user can
+// spot "Add to Dock…" in the real menu at a glance, with the same items
+// above and below it for context.
+const SAFARI_FILE_MENU_ABOVE = [
+  'New Window', 'New Private Window', 'New Tab', 'New Empty Tab Group',
+  'New Tab Group with 2 Tabs', 'Open File…', 'Open Location…',
+]
+const SAFARI_FILE_MENU_BETWEEN = [
+  'Close Window', 'Close All Windows', 'Close Tab', 'Delete Tab Group',
+  'Save As…',
+]
+const SAFARI_FILE_MENU_BELOW = ['Share…', 'Export as PDF…']
+
+function SafariFileMenuMockup() {
+  return (
+    <div
+      className="rounded-lg overflow-hidden text-[13px] mx-auto"
+      style={{ background: '#2b2b2e', border: '1px solid rgba(255,255,255,0.08)', maxWidth: 280 }}
+    >
+      {SAFARI_FILE_MENU_ABOVE.map(item => (
+        <div key={item} className="px-3 py-[3px] text-white/70">{item}</div>
+      ))}
+      <div className="my-1 border-t border-white/10" />
+      {SAFARI_FILE_MENU_BETWEEN.map(item => (
+        <div key={item} className={`px-3 py-[3px] ${item === 'Delete Tab Group' ? 'text-white/30' : 'text-white/70'}`}>{item}</div>
+      ))}
+      <div className="my-1 border-t border-white/10" />
+      {SAFARI_FILE_MENU_BELOW.map(item => (
+        <div key={item} className="px-3 py-[3px] text-white/70">{item}</div>
+      ))}
+
+      {/* Add to Dock… — the row we're guiding the user to click */}
+      <div className="relative px-1 py-1">
+        <motion.div
+          animate={{ boxShadow: ['0 0 0 2px rgba(139,92,246,0.4)', '0 0 0 2px rgba(139,92,246,0.9)', '0 0 0 2px rgba(139,92,246,0.4)'] }}
+          transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}
+          className="rounded-md px-2 py-[3px] text-white font-medium"
+        >
+          Add to Dock…
+        </motion.div>
+      </div>
+
+      <div className="my-1 border-t border-white/10" />
+      <div className="px-3 py-[3px] text-white/70 flex items-center justify-between">
+        <span>Import From</span>
+        <ChevronRight size={12} className="text-white/40" />
+      </div>
+      <div className="px-3 py-[3px] text-white/70 flex items-center justify-between">
+        <span>Export</span>
+        <ChevronRight size={12} className="text-white/40" />
+      </div>
+      <div className="my-1 border-t border-white/10" />
+      <div className="px-3 py-[3px] text-white/70">Print…</div>
+    </div>
+  )
+}
+
 function AddToDockGuide() {
   const [dismissed, setDismissed] = useState(false)
+  const [installed, setInstalled] = useState(false)
   const isStandalone = window.matchMedia('(display-mode: standalone)').matches
+
+  useEffect(() => {
+    window.electron?.onPwaInstalled?.(() => setInstalled(true))
+  }, [])
 
   if (dismissed || isStandalone || !hasInstallGuideParam()) return null
 
@@ -199,7 +261,7 @@ function AddToDockGuide() {
         initial={{ scale: 0.95, opacity: 0, y: 12 }}
         animate={{ scale: 1, opacity: 1, y: 0 }}
         transition={{ type: 'spring', stiffness: 300, damping: 28 }}
-        className="relative max-w-md w-full rounded-2xl p-8 text-center shadow-2xl"
+        className="relative max-w-xl w-full rounded-2xl p-9 text-center shadow-2xl"
         style={{
           background: 'var(--bg-card, #1a1a2e)',
           border: '1px solid rgba(139,92,246,0.25)',
@@ -209,42 +271,56 @@ function AddToDockGuide() {
           onClick={handleDismiss}
           className="absolute top-4 right-4 text-[var(--text-subtle)] hover:text-[var(--text-muted)] transition-colors"
         >
-          <X size={16} />
+          <X size={18} />
         </button>
 
-        <div className="mx-auto mb-5 w-16 h-16 rounded-2xl flex items-center justify-center"
-          style={{ background: 'linear-gradient(135deg, rgba(139,92,246,0.2), rgba(59,130,246,0.15))' }}>
-          <img src={logoUrl} alt="Jivam" className="w-10 h-10 object-contain" />
-        </div>
+        {installed ? (
+          <>
+            <div className="mx-auto mb-5 w-20 h-20 rounded-2xl flex items-center justify-center"
+              style={{ background: 'linear-gradient(135deg, rgba(34,197,94,0.2), rgba(59,130,246,0.15))' }}>
+              <CheckCircle2 size={40} style={{ color: '#22c55e' }} />
+            </div>
+            <h2 className="text-2xl font-semibold gradient-text mb-2">Added to your Dock!</h2>
+            <p className="text-sm text-[var(--text-muted)] mb-7 leading-relaxed">
+              Jivam is now a real app on your Mac. You can close this tab and launch it from the Dock from now on.
+            </p>
+            <button
+              onClick={handleDismiss}
+              className="px-5 py-2.5 rounded-xl text-sm font-medium text-white transition-all"
+              style={{ background: 'var(--accent)' }}
+            >
+              Got it
+            </button>
+          </>
+        ) : (
+          <>
+            <div className="mx-auto mb-5 w-20 h-20 rounded-2xl flex items-center justify-center"
+              style={{ background: 'linear-gradient(135deg, rgba(139,92,246,0.2), rgba(59,130,246,0.15))' }}>
+              <img src={logoUrl} alt="Jivam" className="w-12 h-12 object-contain" />
+            </div>
 
-        <h2 className="text-xl font-semibold gradient-text mb-2">One click to finish</h2>
-        <p className="text-sm text-[var(--text-muted)] mb-6 leading-relaxed">
-          Add Jivam to your Dock as a real app — its own window and icon, no browser chrome.
-        </p>
+            <h2 className="text-2xl font-semibold gradient-text mb-2">One click to finish</h2>
+            <p className="text-sm text-[var(--text-muted)] mb-6 leading-relaxed max-w-md mx-auto">
+              Add Jivam to your Dock as a real app — its own window and icon, no browser chrome.
+            </p>
 
-        <div
-          className="rounded-xl p-4 mb-5 text-left"
-          style={{ background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.2)' }}
-        >
-          <div className="flex items-center gap-2 text-xs text-[var(--text-subtle)] mb-3">
-            <MenuIcon size={13} />
-            <span>In the Safari menu bar at the top of your screen:</span>
-          </div>
-          <div className="flex items-center gap-2 text-sm font-medium">
-            <span className="px-2.5 py-1.5 rounded-md text-[var(--text)]" style={{ background: 'rgba(139,92,246,0.15)' }}>
-              File
-            </span>
-            <ChevronRight size={14} className="text-[var(--text-subtle)] shrink-0" />
-            <span className="px-2.5 py-1.5 rounded-md text-white" style={{ background: 'var(--accent)' }}>
-              Add to Dock…
-            </span>
-          </div>
-        </div>
+            <div
+              className="rounded-xl p-5 mb-5 text-left"
+              style={{ background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.2)' }}
+            >
+              <div className="flex items-center gap-2 text-xs text-[var(--text-subtle)] mb-4 justify-center">
+                <MenuIcon size={13} />
+                <span>In the Safari menu bar at the top of your screen, click <strong className="text-[var(--text)]">File</strong>, then:</span>
+              </div>
+              <SafariFileMenuMockup />
+            </div>
 
-        <p className="text-xs text-[var(--text-subtle)] leading-relaxed">
-          Safari will ask you to confirm — click <strong className="text-[var(--text)]">Add</strong> and
-          Jivam appears in your Dock within a few seconds.
-        </p>
+            <p className="text-xs text-[var(--text-subtle)] leading-relaxed">
+              Safari will ask you to confirm — click <strong className="text-[var(--text)]">Add</strong> and
+              this page will update automatically once Jivam appears in your Dock.
+            </p>
+          </>
+        )}
       </motion.div>
     </motion.div>
   )

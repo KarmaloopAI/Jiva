@@ -6,7 +6,7 @@ import http from 'http'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
-import { initWebSocketServer } from './ws'
+import { initWebSocketServer, broadcast } from './ws'
 import { JivaRunner } from './jiva-runner'
 import { CodeRunner } from './code-runner'
 import { CloudRunner } from './cloud-runner'
@@ -125,7 +125,16 @@ async function installSafariAddToDock(url: string): Promise<string | null> {
     for (let i = 0; i < 120; i++) {
       await new Promise(resolve => setTimeout(resolve, 1000))
       const found = findSafariWebAppBundle(automationStartMs)
-      if (found) return found
+      if (found) {
+        // Tell the running background server to relay the news over
+        // WebSocket to whichever tab is showing AddToDockGuide — this CLI
+        // process and the server are separate processes, so it can't call
+        // ws.ts's broadcast() itself.
+        try {
+          await fetch(`${url}/api/system/pwa-installed`, { method: 'POST' })
+        } catch {}
+        return found
+      }
     }
 
     console.warn('No Dock install detected within 2 minutes — falling back to --app mode. Run `jivam --install` again anytime to retry.')
@@ -757,6 +766,16 @@ app.use('/api/mcp', createMcpRouter(jivaRunner))
 app.use('/api/code', createCodeRouter(codeRunner))
 app.use('/api/files', createFilesRouter(jivaRunner))
 app.use('/api/cloud', createCloudRouter(cloudRunner))
+
+// `jivam --install` runs as a separate one-off CLI process from the
+// persistent background server, so it can't call ws.ts's broadcast()
+// directly — it hits this endpoint instead once it detects the Safari
+// "Add to Dock" bundle, and the server (which owns the WebSocket
+// connections) relays the news to any open tab showing AddToDockGuide.
+app.post('/api/system/pwa-installed', (_req, res) => {
+  broadcast('jivam:pwa-installed', {})
+  res.json({ success: true })
+})
 
 // Platform + version endpoints for the frontend shim
 app.get('/api/platform', (_req, res) => res.json(process.platform))

@@ -231,6 +231,12 @@ const electronShim = {
     mq.addEventListener('change', (e) => cb(e.matches))
   },
 
+  // Fired once `jivam --install` detects the Safari "Add to Dock" bundle —
+  // see AddToDockGuide in App.tsx.
+  onPwaInstalled: (cb: () => void) => {
+    on('jivam:pwa-installed', () => cb())
+  },
+
   setup: {
     check: () => get('/setup/check'),
   },
