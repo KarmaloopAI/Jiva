@@ -48,6 +48,38 @@ or "Anthropic" in commit messages, emails, or authorship — this was an
 explicit, repeated instruction (asked more than once — treat it as a hard
 rule, not a one-off).
 
+## A third repo: `~/dev/JivamAI/` — the public website
+
+`~/dev/JivamAI/` (`KarmaloopAI/JivamAI` on GitHub) is the public marketing
+site at `jivamai.com` — a Jekyll site (see `_config.yml`, `CNAME`) deployed via
+GitHub Pages. It is **not** part of the Jivam or jiva-core codebases and has no
+`CLAUDE.md` of its own; this section is the pointer to remember it exists and
+how to keep it in sync.
+
+**The install scripts are duplicated on purpose, and must be kept in sync.**
+`~/dev/JivamAI/install.sh` and `~/dev/JivamAI/install.ps1` are mirrored copies
+of this repo's `scripts/install.sh` / `scripts/install.ps1`, hosted directly on
+the website (`https://jivamai.com/install.sh`, `https://jivamai.com/install.ps1`)
+so the public one-liner (`curl -fsSL https://jivamai.com/install.sh | bash`)
+has **no dependency on GitHub raw-content URLs or on this repo being public**.
+Whenever `scripts/install.sh` or `scripts/install.ps1` changes here, copy the
+updated file over to `~/dev/JivamAI/` verbatim except for the usage-comment
+header (which points at `jivamai.com`, not `raw.githubusercontent.com`), then
+commit and push in the JivamAI repo separately. The download page
+(`~/dev/JivamAI/download.html`) describes the install flow step-by-step — if
+the script's actual behavior changes (new steps, different flags, macOS vs.
+Windows differences), update that page's step list to match, since it's meant
+to describe exactly what the script does, not just link to it.
+
+**The site no longer distributes per-platform Electron binaries.** It used to
+(a `_data/downloads.yml` populated by a GitHub Actions workflow that watched
+GitHub Releases for `.dmg`/`.exe`/`.AppImage` assets), from before Jivam's
+Electron-to-PWA migration (see the main "What Jivam is" section above). That
+data file and workflow were removed since `npm run build` in this repo no
+longer produces those artifacts at all — don't recreate them. The download
+page now only ever links to the install script and to
+`https://github.com/KarmaloopAI/Jivam/releases` for release notes.
+
 **Jiva's branch workflow: `develop` first, always.** New work — including
 bug fixes discovered while working on Jivam — goes on `develop`, not `main`.
 `main` only receives changes via a `develop → main` PR merge. I got this
