@@ -26,7 +26,7 @@ export function WorkspacePickerView() {
   const [mcpExpanded, setMcpExpanded] = useState(false)
 
   const [maxIterations, setMaxIterations] = useState<10 | 50 | 100>(50)
-  const [deepRun, setDeepRun] = useState(false)
+  const [deepRun, setDeepRun] = useState(true)
   const [runConfigExpanded, setRunConfigExpanded] = useState(true)
 
   const { startSession, initLogListener } = useCodeStore()

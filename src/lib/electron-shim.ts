@@ -55,6 +55,19 @@ function connectWS() {
 
 connectWS()
 
+// Spreading a large Uint8Array into String.fromCharCode(...) as call args blows
+// the JS engine's argument-count limit (~65k) — chunk it instead so image/doc
+// uploads of any size survive base64 encoding.
+function arrayBufferToBase64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf)
+  let binary = ''
+  const chunkSize = 0x8000
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize))
+  }
+  return btoa(binary)
+}
+
 // --- File picker helper (browser native → upload to server) ---
 async function pickAndUploadFiles(includeImages: boolean): Promise<string[]> {
   return new Promise((resolve) => {
@@ -70,18 +83,22 @@ async function pickAndUploadFiles(includeImages: boolean): Promise<string[]> {
 
     input.onchange = async () => {
       if (!input.files?.length) return resolve([])
-      const files = Array.from(input.files)
-      const encoded = await Promise.all(files.map(async f => {
-        const buf = await f.arrayBuffer()
-        const data = btoa(String.fromCharCode(...new Uint8Array(buf)))
-        return { name: f.name, data, mimeType: f.type }
-      }))
-      const results = await post<Array<{ name: string; category: string; markdown: string; mimeType?: string; error?: string }>>(
-        '/files/upload-and-convert', { files: encoded }
-      )
-      // Store results by a synthetic key for files.convert() to retrieve
-      results.forEach(r => uploadedFiles.set(r.name, r))
-      resolve(results.map(r => `__uploaded__${r.name}`))
+      try {
+        const files = Array.from(input.files)
+        const encoded = await Promise.all(files.map(async f => {
+          const buf = await f.arrayBuffer()
+          const data = arrayBufferToBase64(buf)
+          return { name: f.name, data, mimeType: f.type }
+        }))
+        const results = await post<Array<{ name: string; category: string; markdown: string; mimeType?: string; error?: string }>>(
+          '/files/upload-and-convert', { files: encoded }
+        )
+        // Store results by a synthetic key for files.convert() to retrieve
+        results.forEach(r => uploadedFiles.set(r.name, r))
+        resolve(results.map(r => `__uploaded__${r.name}`))
+      } catch {
+        resolve([])
+      }
     }
 
     input.click()
@@ -186,6 +203,9 @@ const electronShim = {
     getConversationId: () => get('/code/conversation-id'),
     getMcpSelection: (convId: string) => get(`/code/mcp-selection/${convId}`),
     setMcpSelection: (convId: string, servers: string[]) => post('/code/mcp-selection', { convId, servers }),
+    restoreConversation: (id: string) => post<{
+      success: boolean; workspace?: string; mcpServers?: string[]; maxIterations?: number; harness?: string; error?: string
+    }>('/code/restore-conversation', { id }),
     onCodeLog: (cb: (event: unknown) => void) => {
       on('jiva:code-log', (msg: unknown) => cb((msg as Record<string, unknown>).event))
     },
@@ -209,6 +229,12 @@ const electronShim = {
     // Use browser media query instead of native theme IPC
     const mq = window.matchMedia('(prefers-color-scheme: dark)')
     mq.addEventListener('change', (e) => cb(e.matches))
+  },
+
+  // Fired once `jivam --install` detects the Safari "Add to Dock" bundle —
+  // see AddToDockGuide in App.tsx.
+  onPwaInstalled: (cb: () => void) => {
+    on('jivam:pwa-installed', () => cb())
   },
 
   setup: {

@@ -118,6 +118,9 @@ interface ElectronAPI {
     getConversationId: () => Promise<string | null>
     getMcpSelection: (convId: string) => Promise<string[]>
     setMcpSelection: (convId: string, servers: string[]) => Promise<{ success: boolean; error?: string }>
+    restoreConversation: (id: string) => Promise<{
+      success: boolean; workspace?: string; mcpServers?: string[]; maxIterations?: number; harness?: string; error?: string
+    }>
     onCodeLog: (cb: (event: CodeLogEvent) => void) => void
   }
   git: {
@@ -132,6 +135,7 @@ interface ElectronAPI {
     set: (content: string) => Promise<{ success: boolean }>
   }
   onNativeThemeChanged: (callback: (isDark: boolean) => void) => void
+  onPwaInstalled: (callback: () => void) => void
   setup: {
     check: () => Promise<{
       nodejs:   { ok: boolean; version?: string }
@@ -164,6 +168,7 @@ interface ElectronAPI {
       category: 'text' | 'pdf' | 'docx' | 'image' | 'unsupported'
       markdown: string
       mimeType?: string
+      dataUri?: string
       error?: string
     }>
     describeImage: (dataUri: string) => Promise<{ success: boolean; description?: string; error?: string }>

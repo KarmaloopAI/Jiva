@@ -7,8 +7,9 @@ export type FileCategory = 'text' | 'pdf' | 'docx' | 'image' | 'unsupported'
 export interface ConvertedFile {
   name: string
   category: FileCategory
-  markdown: string  // text/pdf/docx → markdown content; image → base64 data URI
+  markdown: string  // text/pdf/docx → markdown content; image → original file path
   mimeType?: string // images only
+  dataUri?: string  // images only — base64 data URI for vision model consumption
   error?: string
 }
 
@@ -291,6 +292,8 @@ function convertImage(filePath: string, name: string, ext: string): ConvertedFil
   }
 
   const mimeType = IMAGE_EXTENSIONS[ext.toLowerCase()] ?? 'image/png'
-  // Return the original path — the IPC handler will copy it to the workspace uploads dir
-  return { name, category: 'image', markdown: filePath, mimeType }
+  const dataUri = `data:${mimeType};base64,${fs.readFileSync(filePath).toString('base64')}`
+  // markdown carries the original path — the route handler copies it into the workspace
+  // uploads dir so a code-mode agent can reference it by path; dataUri is for vision models.
+  return { name, category: 'image', markdown: filePath, mimeType, dataUri }
 }

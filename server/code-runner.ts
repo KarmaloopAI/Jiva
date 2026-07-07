@@ -74,6 +74,36 @@ export class CodeRunner extends EventEmitter {
     return (this.conversationManager as Record<string, unknown>).currentConversationId as string ?? null
   }
 
+  /**
+   * Restore a previously-saved code conversation: reads the workspace/MCP
+   * servers/maxIterations/harness it was configured with (from
+   * ConversationMetadata, added in jiva-core v0.3.50) and re-initializes
+   * with those exact settings before loading conversation history into the
+   * agent, so continuing a session behaves like it never stopped.
+   */
+  async restoreConversation(id: string): Promise<{ workspace?: string; mcpServers?: string[]; maxIterations?: number; harness?: string }> {
+    const convPath = path.join(os.homedir(), '.jiva', 'conversations', `${id}.json`)
+    let meta: { workspace?: string; mcpServers?: string[]; maxIterations?: number; harness?: string }
+    try {
+      const raw = JSON.parse(fs.readFileSync(convPath, 'utf-8'))
+      meta = raw.metadata ?? {}
+    } catch {
+      throw new Error(`Conversation ${id} not found`)
+    }
+    if (!meta.workspace) {
+      throw new Error('Conversation has no recorded workspace to restore')
+    }
+
+    await this.initialize(meta.workspace, meta.mcpServers, {
+      deepRun: meta.harness === 'deep-run',
+      maxIterations: meta.maxIterations ?? 50,
+    })
+
+    await (this.agent as { loadConversation(id: string): Promise<void> }).loadConversation(id)
+
+    return meta
+  }
+
   async initialize(workspaceDir: string, mcpServerNames?: string[], opts?: { deepRun?: boolean; maxIterations?: number }): Promise<void> {
     this.deepRun = opts?.deepRun ?? false
     this.maxIterations = opts?.maxIterations ?? 50

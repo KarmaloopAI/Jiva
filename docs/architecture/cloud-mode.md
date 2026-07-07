@@ -7,8 +7,12 @@ handled by Supabase; chat inference runs on a Google Cloud Run deployment
 (`https://jiva-hdjcuspt2a-uc.a.run.app`).
 
 Cloud mode is architected to support two hosts:
-- **Electron desktop** — a separate `BrowserWindow` loaded with `?mode=cloud`
-- **Web (jivamai.com)** — the same React app served statically, no Electron layer
+- **Jivam desktop (local server)** — a new browser tab/window opened via
+  `window.open('/?mode=cloud', '_blank')` (see `src/lib/electron-shim.ts`
+  `cloud.openWindow()`) — there's no separate Electron `BrowserWindow` anymore,
+  just a plain second tab pointed at the same local server with a query param
+- **Web (jivamai.com)** — the same React app served statically, with no local
+  server behind it at all
 
 The abstraction that makes this work is `src/lib/cloud-api.ts`.
 
@@ -20,16 +24,16 @@ The abstraction that makes this work is `src/lib/cloud-api.ts`.
 
 | Area | File(s) | What was done |
 |------|---------|---------------|
-| Separate cloud window | `electron/main.ts` | `createCloudWindow()` opens a new `BrowserWindow` at `?mode=cloud`; clicking the cloud icon in TopBar fires `cloud:open-window` IPC |
-| Cloud window detection | `src/store/auth.store.ts` | `isCloudWindow` reads URL param at module load; `isCloudMode` is permanently `true` in the cloud window |
+| Cloud tab/window | `src/lib/electron-shim.ts` | `cloud.openWindow()` does `window.open('/?mode=cloud', '_blank')` — a plain new tab against the same local server, no separate process |
+| Cloud window detection | `src/store/auth.store.ts` | `isCloudWindow` reads URL param at module load; `isCloudMode` is permanently `true` in the cloud tab |
 | Auth store | `src/store/auth.store.ts` | Zustand store: `signIn`, `signUp`, `signOut`, `restoreSession`; session persisted to `localStorage` under key `jivam-cloud-session` |
 | Sign-in UI | `src/components/setup/CloudSignIn.tsx` | Email/password form, sign-in / create account toggle, loading spinner, error display |
-| Supabase auth (Electron) | `electron/cloud-auth.ts` | Fetch-based, no SDK: `cloudSignIn`, `cloudSignUp`, `cloudSignOut`, `initCloudSession` |
-| API shim | `src/lib/cloud-api.ts` | `cloudApiSignIn/Up/Out/Init` — Electron delegates to IPC; web calls Supabase/Cloud Run directly |
-| Cloud runner | `electron/cloud-runner.ts` | `CloudRunner` class: SSE streaming (`/api/chat/stream`) with non-streaming fallback (`/api/chat`). Configures via `configure(userId, sessionId)` |
-| IPC routing | `electron/ipc-handlers.ts` | `jiva:send-message` checks `cloudRunner.isActive()` and routes accordingly; phase/log events sent to `event.sender` (not hardcoded main window) |
-| IPC surface | `electron/preload.ts` + `src/types/electron.d.ts` | `window.electron.cloud.{openWindow, signIn, signUp, signOut, init}` |
-| App.tsx routing | `src/App.tsx` | Cloud window without `cloudUser` shows `<CloudSignIn>`; skips local preflight and `startServer()` |
+| Supabase auth (server) | `server/cloud-auth.ts` | Fetch-based, no SDK: `cloudSignIn`, `cloudSignUp`, `cloudSignOut`, `initCloudSession` |
+| API shim | `src/lib/cloud-api.ts` | `cloudApiSignIn/Up/Out/Init` — local mode calls `/api/cloud/*` via `electron-shim.ts`; web build calls Supabase/Cloud Run directly |
+| Cloud runner | `server/cloud-runner.ts` | `CloudRunner` class: SSE streaming (`/api/chat/stream`) with non-streaming fallback (`/api/chat`). Configures via `configure(userId, sessionId)` |
+| Server-side routing | `server/routes/jiva.ts` | `send-message` checks `cloudRunner.isActive()` and routes accordingly; phase/log events broadcast over the WebSocket instead of sent to a specific window |
+| REST surface | `server/routes/cloud.ts` + `src/lib/electron-shim.ts` | `window.electron.cloud.{openWindow, signIn, signUp, signOut, init}` → `POST /api/cloud/*` |
+| App.tsx routing | `src/App.tsx` | Cloud tab without `cloudUser` shows `<CloudSignIn>`; skips local preflight and `startServer()` |
 | TopBar | `src/components/layout/TopBar.tsx` | Cloud icon directly calls `openWindow()` (no dropdown in local mode); cloud mode shows badge with email + sign-out dropdown |
 | Code tab guard | `src/components/code/CodeChatView.tsx` | "Local install required" overlay when `isCloudMode` |
 
@@ -37,11 +41,11 @@ The abstraction that makes this work is `src/lib/cloud-api.ts`.
 
 | Issue | File | Notes |
 |-------|------|-------|
-| **Chat does not work end-to-end** | `electron/cloud-runner.ts` | ~~FIXED~~ `cloudRunner.startInit()` is called in `cloud:init` handler before the async HTTP call. `jiva:send-message` detects cloud senders via `event.sender.getURL().includes('mode=cloud')` and calls `cloudRunner.waitUntilReady(30_000)` if not yet active. Cloud Run cold starts up to 30s are handled. |
-| **Supabase email confirmation** | `electron/cloud-auth.ts` + `src/lib/cloud-api.ts` | If the Supabase project has email confirmation enabled, `cloudSignUp` returns the user object at top-level with no `access_token`. This is handled defensively now (`data.user ?? data`), but the UX shows no "check your email" message — user just sees the app with an unconfigured session |
+| **Chat does not work end-to-end** | `server/cloud-runner.ts` | ~~FIXED~~ `cloudRunner.startInit()` is called in the `/api/cloud/init` handler before the async HTTP call. `send-message` detects cloud senders and calls `cloudRunner.waitUntilReady(30_000)` if not yet active. Cloud Run cold starts up to 30s are handled. |
+| **Supabase email confirmation** | `server/cloud-auth.ts` + `src/lib/cloud-api.ts` | If the Supabase project has email confirmation enabled, `cloudSignUp` returns the user object at top-level with no `access_token`. This is handled defensively now (`data.user ?? data`), but the UX shows no "check your email" message — user just sees the app with an unconfigured session |
 | **Session restoration** | `src/store/auth.store.ts` | `restoreSession()` fires and forgets `cloudApiInit`. If the cloud runner is never actually configured before a chat message, the message silently routes to the local runner |
-| **Sign-out in cloud window** | `src/store/auth.store.ts` | `signOut` clears `localStorage` and calls `cloudApiSignOut`. But `cloudRunner.deactivate()` is called from `ipc-handlers.ts cloud:sign-out` — this path works. What doesn't work: the `cloudSignOut` IPC handler in `ipc-handlers.ts` passes no `accessToken` (it just calls `cloudRunner.deactivate()`), so Supabase session is not actually revoked server-side |
-| **Activity log in cloud window** | `electron/cloud-runner.ts` | `onLog` is called with `Tool: ${msg}` for every SSE `status` event. Whether the Cloud Run backend actually emits these is untested |
+| **Sign-out in cloud tab** | `src/store/auth.store.ts` | `signOut` clears `localStorage` and calls `cloudApiSignOut`. But `cloudRunner.deactivate()` is called from `server/routes/cloud.ts`'s sign-out handler — this path works. What doesn't work: it passes no `accessToken` (it just calls `cloudRunner.deactivate()`), so Supabase session is not actually revoked server-side |
+| **Activity log in cloud tab** | `server/cloud-runner.ts` | `onLog` is called with `Tool: ${msg}` for every SSE `status` event. Whether the Cloud Run backend actually emits these is untested |
 | **Splash screen timing** | `src/App.tsx` | `showSplash` is set to `false` by the init effect before the user signs in. After sign-in, `showSplash` is already `false` — AppShell should render. This was still causing "Connecting to Jivam..." in testing; root cause not fully confirmed |
 
 ---
@@ -49,16 +53,16 @@ The abstraction that makes this work is `src/lib/cloud-api.ts`.
 ## Architecture Diagram
 
 ```
-USER CLICKS CLOUD ICON (TopBar, local window)
+USER CLICKS CLOUD ICON (TopBar, local tab)
          │
          ▼
 window.electron.cloud.openWindow()
          │
-         ▼ IPC: cloud:open-window
-electron/main.ts createCloudWindow()
+         ▼ electron-shim.ts
+window.open('/?mode=cloud', '_blank')
          │
          ▼
-New BrowserWindow loads index.html?mode=cloud
+New tab loads the same SPA with ?mode=cloud in the URL
          │
          ▼
 auth.store.ts  →  isCloudWindow = true  →  isCloudMode = true
@@ -69,14 +73,14 @@ App.tsx  →  isCloudMode && !cloudUser  →  render <CloudSignIn>
          ▼ User submits credentials
 auth.store.signIn/signUp()
   1. cloudApiSignIn/Up()  →  window.electron.cloud.signIn/Up()
-                          →  IPC: cloud:sign-in / cloud:sign-up
-                          →  electron/cloud-auth.ts cloudSignIn/Up()
+                          →  POST /api/cloud/sign-in or /sign-up
+                          →  server/cloud-auth.ts cloudSignIn/Up()
                           →  POST Supabase /auth/v1/token or /signup
   2. set({ cloudUser })   ← immediately (non-blocking)
   3. cloudApiInit()       → fire-and-forget
                           → window.electron.cloud.init()
-                          → IPC: cloud:init
-                          → electron/ipc-handlers.ts
+                          → POST /api/cloud/init
+                          → server/routes/cloud.ts
                           → initCloudSession() POST /api/session on Cloud Run
                           → cloudRunner.configure(userId, sessionId)
          │
@@ -86,11 +90,11 @@ App.tsx  →  isCloudMode && cloudUser  →  render <AppShell>
          ▼ User sends a chat message
 jiva.store.sendMessage()
   →  window.electron.jiva.sendMessage()
-  →  IPC: jiva:send-message
-  →  ipc-handlers.ts
+  →  POST /api/jiva/send-message
+  →  server/routes/jiva.ts
   →  cloudRunner.isActive() ? cloudRunner.chat() : jivaRunner.chat()
   →  POST https://jiva-hdjcuspt2a-uc.a.run.app/api/chat/stream (SSE)
-  →  SSE events → jiva:phase-update + jiva:jiva-log → sender window
+  →  SSE events → broadcast('jiva:phase-update'/'jiva:jiva-log') over the WebSocket
 ```
 
 ---
@@ -99,20 +103,18 @@ jiva.store.sendMessage()
 
 ```
 src/
-  lib/cloud-api.ts          Environment shim (Electron IPC vs. direct fetch)
+  lib/cloud-api.ts          Environment shim (local fetch to /api/cloud/* vs. direct Supabase/Cloud Run fetch on jivamai.com)
   store/auth.store.ts       Cloud auth state (Zustand)
   components/
     setup/CloudSignIn.tsx   Sign-in / create account form
     layout/TopBar.tsx       Cloud icon → openWindow(); cloud badge when signed in
     code/CodeChatView.tsx   "Local only" overlay in cloud mode
-  App.tsx                   Cloud window routing: sign-in guard, skip local setup
+  App.tsx                   Cloud tab routing: sign-in guard, skip local setup
 
-electron/
-  main.ts                   createCloudWindow(), ipcMain.handle('cloud:open-window')
-  cloud-auth.ts             Supabase fetch wrapper (Electron-side)
+server/
+  cloud-auth.ts             Supabase fetch wrapper
   cloud-runner.ts           HTTP/SSE client to Cloud Run
-  ipc-handlers.ts           cloud:sign-in/up/out/init handlers; jiva:send-message routing
-  preload.ts                window.electron.cloud.* IPC bridge
+  routes/cloud.ts           /api/cloud/sign-in|up|out|init handlers; jiva.ts routes send-message to cloud vs local runner
 ```
 
 ---

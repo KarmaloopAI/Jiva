@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Jivam installer for macOS (and Linux)
-# Usage: curl -fsSL https://raw.githubusercontent.com/karmaloop-ai/jivam/main/scripts/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/KarmaloopAI/Jivam/main/scripts/install.sh | bash
 set -euo pipefail
 
 JIVAM_COLOR='\033[0;35m'
@@ -29,7 +29,7 @@ if [[ "$OS" != "Darwin" && "$OS" != "Linux" ]]; then
 fi
 
 # ── 2. Node.js ───────────────────────────────────────────────────────────────
-header "Step 1 of 4 — Node.js"
+header "Step 1 of 3 — Node.js"
 
 install_node_mac() {
   log "Installing Node.js via nvm..."
@@ -80,41 +80,23 @@ if ! command -v node &>/dev/null; then
 fi
 ok "Node.js $(node --version) ready"
 
-# ── 3. Chrome recommendation (macOS only) ────────────────────────────────────
-if [[ "$OS" == "Darwin" ]]; then
-  header "Step 2 of 4 — Chrome (recommended)"
-  CHROME_PATH="/Applications/Google Chrome.app"
-  if [ -d "$CHROME_PATH" ]; then
-    ok "Google Chrome is already installed"
-  else
-    echo "  Jivam works best with Google Chrome (opens as a clean, tab-free app window)."
-    echo "  Without Chrome it will open in Safari, which lacks the app-window experience."
-    echo ""
-    read -r -p "  Download Chrome now? [Y/n] " CHROME_CHOICE
-    CHROME_CHOICE="${CHROME_CHOICE:-Y}"
-    if [[ "$CHROME_CHOICE" =~ ^[Yy] ]]; then
-      log "Opening Chrome download page..."
-      open "https://www.google.com/chrome/" 2>/dev/null || true
-      echo ""
-      echo "  Install Chrome, then press Enter to continue..."
-      read -r
-    else
-      warn "Skipping Chrome. You can install it later for the best experience."
-    fi
-  fi
-fi
-
-# ── 4. Install jivam + jiva-core ─────────────────────────────────────────────
-header "Step 3 of 4 — Installing Jivam"
+# ── 3. Install jivam + jiva-core ─────────────────────────────────────────────
+header "Step 2 of 3 — Installing Jivam"
 log "Installing jivam and jiva-core globally (this may take a minute)..."
 npm install -g jivamai jiva-core
-ok "jivam $(jivam --version 2>/dev/null || node -e "const p=require('$(npm root -g)/jivam/package.json');console.log(p.version)" 2>/dev/null || echo '') installed"
+ok "jivam $(jivam --version 2>/dev/null || node -e "const p=require('$(npm root -g)/jivamai/package.json');console.log(p.version)" 2>/dev/null || echo '') installed"
 ok "jiva-core installed"
 
-# ── 5. App bundle + Dock (macOS) ─────────────────────────────────────────────
+# ── 4. App bundle + Dock (macOS) ─────────────────────────────────────────────
+# Jivam runs as a genuine Safari web app on macOS — a real, separate .app
+# bundle with its own Dock icon (Safari's "Add to Dock", macOS Sonoma+).
+# `jivam --install` opens Safari to a plain tab with on-screen instructions
+# for the one manual step Safari requires (File > Add to Dock…), then waits
+# in the background for the resulting app bundle to appear — no
+# Accessibility permission needed for any of this.
 if [[ "$OS" == "Darwin" ]]; then
-  header "Step 4 of 4 — Setting up Jivam.app"
-  log "Creating Jivam.app and adding it to your Dock..."
+  header "Step 3 of 3 — Setting up the Jivam app"
+  log "Opening Safari — follow the on-screen instructions to add Jivam to your Dock..."
   jivam --install
 fi
 
