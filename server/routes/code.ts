@@ -63,6 +63,16 @@ export function createCodeRouter(codeRunner: CodeRunner) {
     }
   })
 
+  router.post('/restore-conversation', async (req, res) => {
+    const { id } = req.body as { id: string }
+    try {
+      const meta = await codeRunner.restoreConversation(id)
+      res.json({ success: true, ...meta })
+    } catch (err) {
+      res.json({ success: false, error: err instanceof Error ? err.message : String(err) })
+    }
+  })
+
   router.get('/mcp-for-code', (_req, res) => {
     try {
       const config = readConfig()
