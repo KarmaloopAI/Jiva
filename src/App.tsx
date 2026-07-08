@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Download, X, Menu as MenuIcon, ChevronRight, CheckCircle2 } from 'lucide-react'
+import { Download, X, Menu as MenuIcon, ChevronRight, CheckCircle2, Lock, Star, MoreHorizontal } from 'lucide-react'
 import { AppShell } from './components/layout/AppShell'
 import { SetupScreen } from './components/setup/SetupScreen'
 import { CloudSignIn } from './components/setup/CloudSignIn'
@@ -69,11 +69,19 @@ function SplashScreen({ status }: { status: string }) {
   )
 }
 
-// `jivam --install` opens Safari with ?installGuide=safari-dock so the page
-// itself can show the Add to Dock walkthrough — see AddToDockGuide below.
-// Suppress the generic InstallModal in that case; it would be redundant.
+// `jivam --install` opens Safari (?installGuide=safari-dock) or Edge
+// (?installGuide=edge-app) so the page itself can show the install
+// walkthrough — see AddToDockGuide below. Suppress the generic InstallModal
+// whenever either is present; it would be redundant.
+type InstallGuideKind = 'safari-dock' | 'edge-app'
+
+function getInstallGuideParam(): InstallGuideKind | null {
+  const v = new URLSearchParams(window.location.search).get('installGuide')
+  return v === 'safari-dock' || v === 'edge-app' ? v : null
+}
+
 function hasInstallGuideParam(): boolean {
-  return new URLSearchParams(window.location.search).get('installGuide') === 'safari-dock'
+  return getInstallGuideParam() !== null
 }
 
 function InstallModal() {
@@ -231,16 +239,86 @@ function SafariFileMenuMockup() {
   )
 }
 
+// Mirrors Edge's address bar with its "install this site as an app" icon —
+// the fastest route — plus the ⋯ menu > Apps route as a fallback for
+// versions/layouts where the address-bar icon doesn't show.
+function EdgeInstallMockup() {
+  return (
+    <div
+      className="rounded-lg overflow-hidden text-[13px] mx-auto"
+      style={{ background: '#2b2b2e', border: '1px solid rgba(255,255,255,0.08)', maxWidth: 320 }}
+    >
+      <div className="flex items-center gap-2 px-3 py-2.5">
+        <div
+          className="flex items-center gap-1.5 flex-1 min-w-0 rounded-md px-2.5 py-1.5"
+          style={{ background: 'rgba(255,255,255,0.06)' }}
+        >
+          <Lock size={11} className="text-white/40 shrink-0" />
+          <span className="text-white/60 truncate text-[12px]">localhost:7842</span>
+        </div>
+        <motion.div
+          animate={{ boxShadow: ['0 0 0 2px rgba(139,92,246,0.4)', '0 0 0 2px rgba(139,92,246,0.9)', '0 0 0 2px rgba(139,92,246,0.4)'] }}
+          transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}
+          className="shrink-0 w-7 h-7 rounded-md flex items-center justify-center"
+          style={{ background: 'rgba(139,92,246,0.25)' }}
+        >
+          <Download size={14} className="text-white" />
+        </motion.div>
+        <Star size={13} className="text-white/40 shrink-0" />
+        <MoreHorizontal size={14} className="text-white/40 shrink-0" />
+      </div>
+      <div className="my-1 border-t border-white/10" />
+      <div className="px-3 py-2 text-white/50 text-[11px] leading-relaxed">
+        Don't see it? Click <strong className="text-white/70">⋯</strong> (top right) →{' '}
+        <strong className="text-white/70">Apps</strong> →{' '}
+        <strong className="text-white/70">Install this site as an app</strong>
+      </div>
+    </div>
+  )
+}
+
+const INSTALL_GUIDE_COPY: Record<InstallGuideKind, {
+  destination: string
+  successBody: string
+  menuIntro: React.ReactNode
+  confirmBody: React.ReactNode
+}> = {
+  'safari-dock': {
+    destination: 'Dock',
+    successBody: "Jivam is now a real app on your Mac. You can close this tab and launch it from the Dock from now on.",
+    menuIntro: (
+      <>In the Safari menu bar at the top of your screen, click <strong className="text-[var(--text)]">File</strong>, then:</>
+    ),
+    confirmBody: (
+      <>Safari will ask you to confirm — click <strong className="text-[var(--text)]">Add</strong> and
+        this page will update automatically once Jivam appears in your Dock.</>
+    ),
+  },
+  'edge-app': {
+    destination: 'Start Menu',
+    successBody: "Jivam is now a real app on your PC. You can close this tab and launch it from the Start Menu or Desktop from now on.",
+    menuIntro: (
+      <>In Edge's address bar, click the install icon:</>
+    ),
+    confirmBody: (
+      <>Edge will ask you to confirm — click <strong className="text-[var(--text)]">Install</strong> and
+        this page will update automatically once Jivam is installed.</>
+    ),
+  },
+}
+
 function AddToDockGuide() {
   const [dismissed, setDismissed] = useState(false)
   const [installed, setInstalled] = useState(false)
   const isStandalone = window.matchMedia('(display-mode: standalone)').matches
+  const guideKind = getInstallGuideParam()
 
   useEffect(() => {
     window.electron?.onPwaInstalled?.(() => setInstalled(true))
   }, [])
 
-  if (dismissed || isStandalone || !hasInstallGuideParam()) return null
+  if (dismissed || isStandalone || !guideKind) return null
+  const copy = INSTALL_GUIDE_COPY[guideKind]
 
   const handleDismiss = () => {
     const url = new URL(window.location.href)
@@ -280,9 +358,9 @@ function AddToDockGuide() {
               style={{ background: 'linear-gradient(135deg, rgba(34,197,94,0.2), rgba(59,130,246,0.15))' }}>
               <CheckCircle2 size={40} style={{ color: '#22c55e' }} />
             </div>
-            <h2 className="text-2xl font-semibold gradient-text mb-2">Added to your Dock!</h2>
+            <h2 className="text-2xl font-semibold gradient-text mb-2">Added to your {copy.destination}!</h2>
             <p className="text-sm text-[var(--text-muted)] mb-7 leading-relaxed">
-              Jivam is now a real app on your Mac. You can close this tab and launch it from the Dock from now on.
+              {copy.successBody}
             </p>
             <button
               onClick={handleDismiss}
@@ -301,7 +379,7 @@ function AddToDockGuide() {
 
             <h2 className="text-2xl font-semibold gradient-text mb-2">One click to finish</h2>
             <p className="text-sm text-[var(--text-muted)] mb-6 leading-relaxed max-w-md mx-auto">
-              Add Jivam to your Dock as a real app — its own window and icon, no browser chrome.
+              Install Jivam as a real app — its own window and icon, no browser chrome.
             </p>
 
             <div
@@ -310,14 +388,13 @@ function AddToDockGuide() {
             >
               <div className="flex items-center gap-2 text-xs text-[var(--text-subtle)] mb-4 justify-center">
                 <MenuIcon size={13} />
-                <span>In the Safari menu bar at the top of your screen, click <strong className="text-[var(--text)]">File</strong>, then:</span>
+                <span>{copy.menuIntro}</span>
               </div>
-              <SafariFileMenuMockup />
+              {guideKind === 'safari-dock' ? <SafariFileMenuMockup /> : <EdgeInstallMockup />}
             </div>
 
             <p className="text-xs text-[var(--text-subtle)] leading-relaxed">
-              Safari will ask you to confirm — click <strong className="text-[var(--text)]">Add</strong> and
-              this page will update automatically once Jivam appears in your Dock.
+              {copy.confirmBody}
             </p>
           </>
         )}
@@ -509,44 +586,54 @@ function App() {
     }
   }, [showSplash, loadPersonas])
 
-  // Pre-flight still running — show blank background to avoid flash
+  // AddToDockGuide is driven by a URL param set by `jivam --install` and has
+  // nothing to do with setup/splash/cloud-signin state — it needs to render
+  // no matter which of those screens is up, otherwise a first-run user stuck
+  // on setup would never see it (see the branches below).
+  let body: React.ReactNode
+
   if (setupDone === null) {
-    return <div className="fixed inset-0" style={{ background: 'var(--bg)' }}><div className="aurora-bg" /></div>
-  }
-
-  // Pre-flight failed — show setup screen
-  if (!setupDone) {
-    return <SetupScreen checks={setupChecks} onContinue={() => setSetupDone(true)} />
-  }
-
-  // Cloud window with no authenticated user → show full-window sign-in
-  // Note: keep this guard even during loading (CloudSignIn handles its own spinner)
-  if (isCloudMode && !cloudUser) {
-    return (
+    // Pre-flight still running — show blank background to avoid flash
+    body = <div className="fixed inset-0" style={{ background: 'var(--bg)' }}><div className="aurora-bg" /></div>
+  } else if (!setupDone) {
+    // Pre-flight failed — show setup screen
+    body = <SetupScreen checks={setupChecks} onContinue={() => setSetupDone(true)} />
+  } else if (isCloudMode && !cloudUser) {
+    // Cloud window with no authenticated user → show full-window sign-in
+    // Note: keep this guard even during loading (CloudSignIn handles its own spinner)
+    body = (
       <>
         <div className="aurora-bg" />
         <CloudSignIn onSuccess={() => {}} onBack={() => { window.close() }} />
+      </>
+    )
+  } else {
+    body = (
+      <>
+        <div className="aurora-bg" />
+
+        <AnimatePresence>
+          <InstallModal key="install-modal" />
+          <UpdateBanner key="update-banner" />
+        </AnimatePresence>
+
+        <AnimatePresence>
+          {showSplash && <SplashScreen status={serverStatus} />}
+        </AnimatePresence>
+
+        {!showSplash && (
+          <AppShell activeTab={activeTab} onTabChange={setActiveTab} />
+        )}
       </>
     )
   }
 
   return (
     <>
-      <div className="aurora-bg" />
-
+      {body}
       <AnimatePresence>
-        <InstallModal key="install-modal" />
         <AddToDockGuide key="add-to-dock-guide" />
-        <UpdateBanner key="update-banner" />
       </AnimatePresence>
-
-      <AnimatePresence>
-        {showSplash && <SplashScreen status={serverStatus} />}
-      </AnimatePresence>
-
-      {!showSplash && (
-        <AppShell activeTab={activeTab} onTabChange={setActiveTab} />
-      )}
     </>
   )
 }

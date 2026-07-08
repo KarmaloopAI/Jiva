@@ -66,6 +66,47 @@ function findSafariWebAppBundle(sinceMs: number): string | null {
 }
 
 /**
+ * Finds the shortcut Edge creates when a site is installed as an app via
+ * "Install this site as an app" (the Windows equivalent of Safari's Add to
+ * Dock). Edge places these in the Start Menu — sometimes directly in the
+ * Programs folder, sometimes nested under a "Microsoft Edge Apps" subfolder
+ * depending on Windows/Edge version — so this checks both, one level deep.
+ * `sinceMs` filters to shortcuts written after that time, same mtime-based
+ * approach as findSafariWebAppBundle, so we don't false-positive on an
+ * unrelated older shortcut. Pass 0 to accept any existing match (used by
+ * openAppWindow to find an already-installed PWA on a later launch).
+ */
+function findEdgePwaShortcut(sinceMs: number): string | null {
+  const startMenuDirs = [
+    path.join(process.env.APPDATA ?? '', 'Microsoft', 'Windows', 'Start Menu', 'Programs'),
+    path.join(process.env.LOCALAPPDATA ?? '', 'Microsoft', 'Windows', 'Start Menu', 'Programs'),
+  ]
+  const searchDirs: string[] = []
+  for (const dir of startMenuDirs) {
+    if (!dir || !fs.existsSync(dir)) continue
+    searchDirs.push(dir)
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) searchDirs.push(path.join(dir, entry.name))
+    }
+  }
+  for (const dir of searchDirs) {
+    let entries: string[]
+    try { entries = fs.readdirSync(dir) } catch { continue }
+    for (const entry of entries) {
+      if (!entry.toLowerCase().endsWith('.lnk')) continue
+      if (!entry.toLowerCase().includes('jivam')) continue
+      const lnkPath = path.join(dir, entry)
+      try {
+        const stat = fs.statSync(lnkPath)
+        if (stat.mtimeMs < sinceMs) continue
+        return lnkPath
+      } catch {}
+    }
+  }
+  return null
+}
+
+/**
  * Guide the user to install Jivam as a genuine Safari web app — a real,
  * separate .app bundle with its own bundle identifier
  * (com.apple.Safari.WebApp.<uuid>). This gives native macOS Dock semantics
@@ -143,6 +184,60 @@ async function installSafariAddToDock(url: string): Promise<string | null> {
     console.warn('Safari Add to Dock setup failed, falling back to --app mode:', err)
     return null
   }
+}
+
+/**
+ * Guide the user to install Jivam as an app via Edge's own "Install this
+ * site as an app" feature — the Windows equivalent of installSafariAddToDock
+ * above, and built the same way on purpose: earlier attempts at scripting
+ * Windows app-installation automatically (driving Edge's UI, or relying on
+ * winget/MSI installers that need elevation) ran into the same class of
+ * permission problems as the old macOS Accessibility approach — some of them
+ * silently fail for standard (non-admin) accounts. Since Edge ships by
+ * default on every Windows install, there's no need for a Chrome fallback
+ * chain here either: just open a plain Edge tab with on-screen instructions
+ * (see AddToDockGuide in src/App.tsx, which also handles this platform) and
+ * poll for the resulting Start Menu shortcut.
+ */
+async function installEdgeAppGuide(url: string): Promise<string | null> {
+  const { execFile } = await import('child_process')
+
+  const edgePaths = [
+    path.join(process.env['ProgramFiles'] ?? 'C:\\Program Files', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+    path.join(process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+  ]
+  const edgePath = edgePaths.find(p => fs.existsSync(p))
+  if (!edgePath) {
+    console.warn('Microsoft Edge was not found — falling back to a plain shortcut wrapper.')
+    return null
+  }
+
+  const automationStartMs = Date.now()
+  const guideUrl = `${url}/?installGuide=edge-app`
+
+  try {
+    execFile(edgePath, [guideUrl])
+  } catch (err) {
+    console.warn('Could not open Edge automatically — falling back to a plain shortcut wrapper:', err)
+    return null
+  }
+
+  console.log('\nOpened Jivam in Edge with on-screen instructions.')
+  console.log('Click the install icon in Edge\'s address bar (or ⋯ menu > Apps > Install this site as an app).')
+  console.log('Waiting up to 2 minutes for you to finish...')
+  for (let i = 0; i < 120; i++) {
+    await new Promise(resolve => setTimeout(resolve, 1000))
+    const found = findEdgePwaShortcut(automationStartMs)
+    if (found) {
+      try {
+        await fetch(`${url}/api/system/pwa-installed`, { method: 'POST' })
+      } catch {}
+      return found
+    }
+  }
+
+  console.warn('No app install detected within 2 minutes — falling back to a plain shortcut wrapper. Run `jivam --install` again anytime to retry.')
+  return null
 }
 
 // ---------------------------------------------------------------------------
@@ -615,25 +710,11 @@ async function winServiceControl(action: 'start' | 'stop' | 'restart' | 'status'
 // jivam --install  (Windows)
 // Registers a Scheduled Task so the server runs persistently in the
 // background (started at logon, restarted automatically on failure), then
-// creates Desktop + Start Menu shortcuts that just open the browser — no
-// server-start logic needed there anymore since the task keeps it alive.
+// guides the user through installing Jivam as an Edge app — the real,
+// single-instance kind, not a `--app=` window sharing Edge's own identity.
+// Only falls back to a plain shortcut wrapper if that doesn't complete.
 // ---------------------------------------------------------------------------
 async function runInstallWindows(): Promise<void> {
-  const { exec } = await import('child_process')
-  const { promisify } = await import('util')
-  const execAsync = promisify(exec)
-
-  const localAppData = process.env.LOCALAPPDATA ?? path.join(os.homedir(), 'AppData', 'Local')
-  const installDir = path.join(localAppData, 'Jivam')
-  const batPath = path.join(installDir, 'jivam-launcher.bat')
-  const vbsPath = path.join(installDir, 'jivam-launcher.vbs')
-  const icoPath = path.join(installDir, 'Jivam.ico')
-  const desktopPath = path.join(os.homedir(), 'Desktop', 'Jivam.lnk')
-  const startMenuDir = path.join(localAppData, 'Microsoft', 'Windows', 'Start Menu', 'Programs')
-  const startMenuPath = path.join(startMenuDir, 'Jivam.lnk')
-
-  fs.mkdirSync(installDir, { recursive: true })
-
   const url = `http://localhost:${PORT}`
 
   // ── 1. Resolve the jivam binary and register the background task ─────────
@@ -657,19 +738,48 @@ async function runInstallWindows(): Promise<void> {
     console.log('Jivam server is running.')
   }
 
-  // ── 3. Shortcut launcher — just opens the browser (server is already up) ──
-  const batScript = `@echo off
-set URL=${url}
-set CHROME=%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe
-set EDGE=%ProgramFiles(x86)%\\Microsoft\\Edge\\Application\\msedge.exe
+  // ── 3. Guide the user through installing Jivam as an Edge app ─────────────
+  console.log('Setting up Jivam as an Edge app...')
+  const pwaShortcut = await installEdgeAppGuide(url)
 
-if exist "%CHROME%" (
-  start "" "%CHROME%" --app=%URL% --disable-extensions
-) else if exist "%EDGE%" (
-  start "" "%EDGE%" --app=%URL% --disable-extensions
-) else (
-  start "" %URL%
-)
+  if (pwaShortcut) {
+    console.log(`\nDone! Jivam is installed as an app: ${pwaShortcut}`)
+  } else {
+    await winCreateFallbackWrapper(url)
+    console.log('\nDone! Double-click the Jivam icon on your Desktop to launch.')
+  }
+  console.log('The server runs continuously in the background — manage it with:')
+  console.log('  jivam stop      jivam start      jivam restart      jivam status')
+  process.exit(0)
+}
+
+/**
+ * Fallback for when installEdgeAppGuide doesn't complete in time (or Edge
+ * isn't found at all): a Desktop + Start Menu shortcut that just opens a
+ * plain Edge tab. No --app mode and no Chrome/Brave fallback chain here —
+ * Edge ships by default on every Windows install, so there's nothing to
+ * fall back further to.
+ */
+async function winCreateFallbackWrapper(url: string): Promise<void> {
+  const { exec } = await import('child_process')
+  const { promisify } = await import('util')
+  const execAsync = promisify(exec)
+
+  const localAppData = process.env.LOCALAPPDATA ?? path.join(os.homedir(), 'AppData', 'Local')
+  const installDir = path.join(localAppData, 'Jivam')
+  const batPath = path.join(installDir, 'jivam-launcher.bat')
+  const vbsPath = path.join(installDir, 'jivam-launcher.vbs')
+  const icoPath = path.join(installDir, 'Jivam.ico')
+  const desktopPath = path.join(os.homedir(), 'Desktop', 'Jivam.lnk')
+  const startMenuDir = path.join(localAppData, 'Microsoft', 'Windows', 'Start Menu', 'Programs')
+  const startMenuPath = path.join(startMenuDir, 'Jivam.lnk')
+
+  fs.mkdirSync(installDir, { recursive: true })
+
+  // ── Shortcut launcher — just opens Edge (server is already up) ────────────
+  const batScript = `@echo off
+set URL=${url}?installGuide=edge-app
+start "" msedge "%URL%"
 `
 
   // ── VBScript wrapper — runs the .bat silently (no terminal window) ─────────
@@ -736,11 +846,6 @@ $s.Save()
   } catch (err) {
     console.warn('Could not create shortcuts:', err)
   }
-
-  console.log('\nDone! Double-click the Jivam icon on your Desktop to launch.')
-  console.log('The server runs continuously in the background — manage it with:')
-  console.log('  jivam stop      jivam start      jivam restart      jivam status')
-  process.exit(0)
 }
 
 const __dirname_cjs = __dirname
@@ -862,18 +967,36 @@ async function openAppWindow(url: string): Promise<void> {
       } catch {}
     }
   } else if (process.platform === 'win32') {
-    const winBrowsers = [
-      ['msedge', [`--app=${url}`]],
-      ['chrome', [`--app=${url}`]],
-      ['brave', [`--app=${url}`]],
-    ] as Array<[string, string[]]>
-    for (const [browser, args] of winBrowsers) {
+    // If Jivam was previously installed as a real Edge app, launch that
+    // shortcut directly rather than opening a browser tab.
+    const existingShortcut = findEdgePwaShortcut(0)
+    if (existingShortcut) {
       try {
-        execFile(`start ${browser}`, args, { shell: true })
+        await execAsync(`start "" "${existingShortcut}"`)
+        console.log(`Launched Edge app: ${existingShortcut}`)
         return
       } catch {}
     }
-    // PowerShell fallback
+
+    // No PWA installed yet — open a plain Edge tab with the in-page install
+    // walkthrough (see AddToDockGuide in src/App.tsx). Edge ships by default
+    // on every Windows install, so there's no Chrome/Brave fallback chain
+    // here, and no --app= mode (that shares Edge's own window identity
+    // rather than being a real, single-instance app).
+    try {
+      const edgePaths = [
+        path.join(process.env['ProgramFiles'] ?? 'C:\\Program Files', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+        path.join(process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+      ]
+      const edgePath = edgePaths.find(p => fs.existsSync(p))
+      if (edgePath) {
+        execFile(edgePath, [`${url}/?installGuide=edge-app`])
+        console.log('Opened in Edge — follow the on-screen instructions to install Jivam as an app.')
+        return
+      }
+    } catch {}
+
+    // Last resort: default browser, whatever it is.
     try {
       await execAsync(`start "" "${url}"`)
       return
