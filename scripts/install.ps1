@@ -1,8 +1,12 @@
 # Jivam installer for Windows
-# Usage (run in PowerShell as normal user — no admin needed):
+# Usage (run in PowerShell as a normal user — admin rights are not required):
 #   irm https://raw.githubusercontent.com/KarmaloopAI/Jivam/main/scripts/install.ps1 | iex
 #
-# Requires PowerShell 5.1+ (built into Windows 10/11).
+# Requires PowerShell 5.1+ (built into Windows 10/11). If Node.js needs to be
+# installed and winget is available, it may show a one-time UAC prompt (its
+# Node.js package installs machine-wide); if you can't approve that (no admin
+# rights) or winget isn't available, this falls back to a portable, per-user
+# Node.js install that needs no elevation at all.
 
 $ErrorActionPreference = 'Stop'
 
@@ -23,7 +27,7 @@ Write-Host "  This will install Jivam and set it up on your Windows PC."
 Write-Host ""
 
 # ── 1. Node.js ───────────────────────────────────────────────────────────────
-Header "Step 1 of 4 - Node.js"
+Header "Step 1 of 3 - Node.js"
 
 function Get-NodeMajor {
     try {
@@ -32,43 +36,73 @@ function Get-NodeMajor {
     } catch { return 0 }
 }
 
+# jiva-core requires Node >=20 (see its package.json "engines" field) — this
+# used to check >=18, which let an already-too-old Node quietly pass.
 $nodeMajor = Get-NodeMajor
 
-if ($nodeMajor -ge 18) {
+if ($nodeMajor -ge 20) {
     Ok "Node.js v$nodeMajor already installed"
 } else {
     if ($nodeMajor -gt 0) {
-        Warn "Node.js v$nodeMajor is too old (need >=18). Upgrading..."
+        Warn "Node.js v$nodeMajor is too old (need >=20). Upgrading..."
     } else {
         Warn "Node.js not found. Installing..."
     }
 
-    # Try winget first (available on Windows 10 1709+ / Windows 11)
+    # Try winget first — fast and keeps Node on the system PATH the normal
+    # way. NOTE: this can still trigger a UAC elevation prompt, since Node's
+    # official winget package installs machine-wide (Program Files) rather
+    # than declaring per-user scope. If winget isn't present, or its install
+    # didn't actually succeed (e.g. the user can't elevate — no admin
+    # rights, UAC prompt dismissed), fall through to a portable install that
+    # needs no elevation at all: download the plain Node.js zip and unpack
+    # it into the user's own AppData, then prepend it to the *User* PATH
+    # (not Machine) — a pure per-user operation, no installer/UAC involved.
     $wingetOk = $false
-    try {
-        $null = Get-Command winget -ErrorAction Stop
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
         Log "Installing Node.js LTS via winget..."
-        winget install OpenJS.NodeJS.LTS --accept-package-agreements --accept-source-agreements --silent
-        $wingetOk = $true
-    } catch {}
-
-    if (-not $wingetOk) {
-        # Download the MSI directly
-        Log "Downloading Node.js LTS installer..."
-        $msiUrl = "https://nodejs.org/dist/lts/node-lts-x64.msi"
-        $msiPath = "$env:TEMP\node-lts.msi"
-        Invoke-WebRequest -Uri $msiUrl -OutFile $msiPath -UseBasicParsing
-        Log "Running Node.js installer (follow the prompts)..."
-        Start-Process msiexec.exe -ArgumentList "/i `"$msiPath`" /passive /norestart" -Wait
-        Remove-Item $msiPath -Force
+        winget install OpenJS.NodeJS.LTS --accept-package-agreements --accept-source-agreements --silent --scope user 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            $env:Path = [System.Environment]::GetEnvironmentVariable('Path','Machine') + ';' +
+                        [System.Environment]::GetEnvironmentVariable('Path','User')
+            if ((Get-NodeMajor) -ge 20) { $wingetOk = $true }
+        }
+        if (-not $wingetOk) {
+            Warn "winget install didn't take (often needs admin approval) — falling back to a portable install that needs no elevation."
+        }
     }
 
-    # Refresh PATH
-    $env:Path = [System.Environment]::GetEnvironmentVariable('Path','Machine') + ';' +
-                [System.Environment]::GetEnvironmentVariable('Path','User')
+    if (-not $wingetOk) {
+        Log "Downloading a portable Node.js LTS build (no admin rights needed)..."
+        $nodeDir = "$env:LOCALAPPDATA\Jivam\node"
+        $zipPath = "$env:TEMP\node-lts.zip"
+        # nodejs.org publishes a version-pinned "latest LTS" index; resolve it
+        # so the zip filename (which embeds the version) is known up front.
+        $ltsVersion = (Invoke-RestMethod -Uri "https://nodejs.org/dist/index.json" |
+            Where-Object { $_.lts } | Select-Object -First 1).version
+        $zipUrl = "https://nodejs.org/dist/$ltsVersion/node-$ltsVersion-win-x64.zip"
+        Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing
+
+        if (Test-Path $nodeDir) { Remove-Item $nodeDir -Recurse -Force }
+        New-Item -ItemType Directory -Path $nodeDir -Force | Out-Null
+        Expand-Archive -Path $zipPath -DestinationPath $nodeDir -Force
+        Remove-Item $zipPath -Force
+
+        # The zip extracts into a version-named subfolder — flatten it up one level.
+        $extracted = Get-ChildItem $nodeDir -Directory | Select-Object -First 1
+        Get-ChildItem $extracted.FullName | Move-Item -Destination $nodeDir -Force
+        Remove-Item $extracted.FullName -Force
+
+        # Prepend to the *User* PATH (not Machine — that would need admin).
+        $userPath = [System.Environment]::GetEnvironmentVariable('Path','User')
+        if ($userPath -notlike "*$nodeDir*") {
+            [System.Environment]::SetEnvironmentVariable('Path', "$nodeDir;$userPath", 'User')
+        }
+        $env:Path = "$nodeDir;$env:Path"
+    }
 
     $nodeMajor = Get-NodeMajor
-    if ($nodeMajor -lt 18) {
+    if ($nodeMajor -lt 20) {
         Write-Host ""
         Write-Host "  Node.js installation failed or PATH not updated yet." -ForegroundColor Red
         Write-Host "  Please install Node.js 20+ from https://nodejs.org, then re-run this script." -ForegroundColor Red
@@ -78,45 +112,23 @@ if ($nodeMajor -ge 18) {
 
 Ok "Node.js $(node --version) ready"
 
-# ── 2. Chrome recommendation ─────────────────────────────────────────────────
-Header "Step 2 of 4 - Chrome (recommended)"
-
-$chromePaths = @(
-    "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
-    "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
-    "$env:LocalAppData\Google\Chrome\Application\chrome.exe"
-)
-$chromeInstalled = $chromePaths | Where-Object { Test-Path $_ } | Select-Object -First 1
-
-if ($chromeInstalled) {
-    Ok "Google Chrome is already installed"
-} else {
-    Write-Host "  Jivam works best with Google Chrome (opens as a clean, tab-free app window)."
-    Write-Host "  Without Chrome it will open in Edge, which also supports app-window mode."
-    Write-Host ""
-    $choice = Read-Host "  Download Chrome now? [Y/n]"
-    if ($choice -eq '' -or $choice -match '^[Yy]') {
-        Log "Opening Chrome download page..."
-        Start-Process "https://www.google.com/chrome/"
-        Write-Host ""
-        Read-Host "  Install Chrome, then press Enter to continue"
-    } else {
-        Warn "Skipping Chrome. Edge will be used for the app window."
-    }
-}
-
-# ── 3. Install jivam + jiva-core ─────────────────────────────────────────────
-Header "Step 3 of 4 - Installing Jivam"
+# ── 2. Install jivam + jiva-core ─────────────────────────────────────────────
+Header "Step 2 of 3 - Installing Jivam"
 Log "Installing jivam and jiva-core globally..."
 npm install -g jivamai jiva-core
 Ok "jivam installed"
 Ok "jiva-core installed"
 
-# ── 4. Shortcuts ─────────────────────────────────────────────────────────────
-Header "Step 4 of 4 - Setting up shortcuts"
-Log "Creating Desktop shortcut and Start Menu entry..."
+# ── 3. Background service + Edge app setup ───────────────────────────────────
+# Jivam registers a Scheduled Task so the server runs in the background, then
+# opens Edge (installed by default on every Windows PC — no separate browser
+# needed) to a page with on-screen instructions for the one manual step —
+# installing Jivam as an app via Edge's own "Install this site as an app" —
+# and waits in the background for it to complete.
+Header "Step 3 of 3 - Setting up the Jivam app"
+Log "Opening Edge — follow the on-screen instructions to install Jivam as an app..."
 jivam --install
-Ok "Shortcuts created"
+Ok "Background service running"
 
 # ── Done ─────────────────────────────────────────────────────────────────────
 Write-Host ""
