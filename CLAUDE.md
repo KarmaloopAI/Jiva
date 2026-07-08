@@ -165,6 +165,77 @@ also now the default first choice everywhere else Jivam opens a window
 Edge/Brave are fallbacks, not the primary path, a reversal of the original
 Electron-era assumption that Chrome's `--app=` gave the best experience.
 
+**Windows follows the same playbook as Safari: guide, don't automate.**
+`jivam --install` used to try to force-create the app automatically on
+Windows too, and it had the same class of problem as the old Safari
+System Events approach — silent failures tied to permissions (Node install
+via winget/MSI triggering a UAC prompt that a non-admin account can't
+approve at all, for example). Current approach (`installEdgeAppGuide` in
+`server/index.ts`): open a plain Edge tab at
+`http://localhost:7842/?installGuide=edge-app` — Edge ships on every Windows
+install by default, so there's no browser-detection chain needed — and let
+the page itself (`AddToDockGuide` in `src/App.tsx`, shared with the Safari
+flow via an `InstallGuideKind` union) show where to click: the install icon
+in Edge's address bar, with the ⋯ → Apps → "Install this site as an app"
+route as a documented fallback for older Edge layouts. `jivam --install`
+polls `findEdgePwaShortcut()` (Start Menu `.lnk` files, matched by name and
+mtime — the Windows equivalent of `findSafariWebAppBundle`'s Info.plist
+diffing) for up to 2 minutes, falling back to a plain Edge-tab shortcut
+wrapper only if nothing appears. **No Chrome/Brave fallback chain on
+Windows** — Edge's guaranteed presence removes the need for one, unlike
+macOS where Safari's absence is theoretically possible.
+
+**Node.js version parsing bug (fixed, worth remembering the shape of it):**
+`scripts/install.sh` used to strip the `v` prefix and pre-release suffix
+from `node --version` with `${NODE_VER//[^0-9.]*/}` — this looks like a
+regex but bash parameter-expansion patterns are **glob** patterns, where
+`*` is a standalone "match anything" wildcard, not a quantifier tied to the
+preceding character class. So `[^0-9.]*` matched "one non-digit char
+followed by literally anything" and wiped the entire version string,
+leaving `MAJOR` empty every time. An empty string in `[ -lt ]` numeric
+context evaluates as `0` in bash, so the script always concluded Node was
+too old and tried to reinstall/upgrade — even when e.g. v24 was already
+installed. Fixed with plain `${NODE_VER#v}` (prefix strip, not glob
+substitution). If you ever need to parse a version string in bash again,
+default to `#`/`%` prefix/suffix stripping, not `//pattern/repl` — the glob
+semantics are a trap that looks like it should work like regex and doesn't.
+Also: the threshold itself was stale — jiva-core's `package.json` requires
+Node `>=20`, but both install scripts only checked `>=18`. Both now check
+`>=20` (and Jivam's own `package.json` now declares the same `engines`
+constraint).
+
+**winget/choco on Windows generally need elevation — don't claim otherwise.**
+Verified via web research (see PR history around this note): Node's official
+winget package (`OpenJS.NodeJS.LTS`) installs machine-wide, which typically
+triggers a UAC prompt; a standard (non-admin) account can't approve that at
+all. Chocolatey is even more explicit about it — most packages require an
+elevated shell. `install.ps1` tries winget first (now checking `$LASTEXITCODE`
+instead of blindly assuming success), but the real fix is the fallback: a
+portable Node.js build, downloaded as a plain zip and extracted into
+`%LOCALAPPDATA%\Jivam\node`, added to the **User** (not Machine) PATH via
+`[Environment]::SetEnvironmentVariable(...,'User')`. That's a pure per-user
+filesystem + registry operation — no installer, no UAC, works for any
+account. If you're ever tempted to reach for choco in this script, remember
+the portable-zip approach is the one that's actually guaranteed to work
+without admin rights.
+
+**The setup/check screen (`SetupScreen.tsx`) is deliberately not a 3-step
+gate anymore.** It used to require Node.js, jiva-core, *and* config checks
+to all pass in sequence before showing anything else — but by the time this
+screen can even load, Node and jiva-core are already installed and running
+(that's how the user got here via `scripts/install.sh`/`install.ps1`), so
+treating them as steps to click through was pure friction for the common
+case. They're now a quiet safety net (a red banner) that only appears if
+one of them is actually broken; the API key form (`ModelSetupStep`) is the
+main, prominent content. Also: `App.tsx` used to `return <SetupScreen />`
+early, which meant `AddToDockGuide` — driven by a URL param, unrelated to
+setup state — never got a chance to render for a first-run user stuck on
+setup. Fixed by hoisting `AddToDockGuide` outside the `setupDone` branching
+entirely, rendered unconditionally in `App()`'s final return. If you add
+another screen-state branch to `App()` in the future, make sure anything
+similarly state-independent (URL-param-driven overlays, WS-driven banners)
+stays outside the branch, not nested inside one arm of it.
+
 **Chrome's CDP `PWA.install` domain exists and is genuinely real** (not a
 hallucination — confirmed via Chromium's own docs and a live test), but as of
 Chrome 149 (mid-2026) it's still gated to Dev/Canary channel only, never
