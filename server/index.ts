@@ -251,7 +251,6 @@ async function installEdgeAppGuide(url: string): Promise<string | null> {
 // ---------------------------------------------------------------------------
 
 const JIVAM_LABEL = 'ai.karmaloop.jivam'
-const WIN_TASK_NAME = 'JivamServer'
 
 function macPlistPath(): string {
   return path.join(os.homedir(), 'Library', 'LaunchAgents', `${JIVAM_LABEL}.plist`)
@@ -603,65 +602,127 @@ async function winFindJivamBin(): Promise<string> {
   return `"${process.execPath}" "${process.argv[1]}"`
 }
 
+function winServiceDir(): string {
+  const localAppData = process.env.LOCALAPPDATA ?? path.join(os.homedir(), 'AppData', 'Local')
+  return path.join(localAppData, 'Jivam')
+}
+
+function winServicePs1Path(): string {
+  return path.join(winServiceDir(), 'jivam-service.ps1')
+}
+
+function winServiceVbsPath(): string {
+  return path.join(winServiceDir(), 'jivam-service-launcher.vbs')
+}
+
+function winServicePidPath(): string {
+  return path.join(winServiceDir(), 'jivam-service.pid')
+}
+
+function winStartupShortcutPath(): string {
+  const appData = process.env.APPDATA ?? path.join(os.homedir(), 'AppData', 'Roaming')
+  return path.join(appData, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup', 'Jivam Server.lnk')
+}
+
 /**
- * Registers "JivamServer" as a Windows Scheduled Task: starts at logon,
- * restarts automatically on failure, runs hidden (no console window). This
- * is the Windows equivalent of the macOS LaunchAgent — the server runs
- * persistently in the background instead of being started on-demand by
- * whatever opens the Desktop/Start Menu shortcut.
+ * Sets up Jivam's background server to start automatically — without any
+ * elevation. A Windows Scheduled Task with a logon trigger was the obvious
+ * choice here (and what this used to do), but creating one requires
+ * SeCreateGlobalPrivilege, which only administrators hold — this isn't a
+ * run-level thing (LeastPrivilege doesn't help), it's specifically a
+ * restriction on the *trigger type* itself. A standard, non-admin Windows
+ * account gets a flat "Access is denied" trying to create it.
+ *
+ * Instead: a small self-restarting PowerShell supervisor, launched via a
+ * shortcut placed in the current user's own Startup folder
+ * (%APPDATA%\...\Startup). Windows runs everything in that folder
+ * automatically at logon — it's a pure per-user filesystem operation with
+ * no privilege requirements at all. The supervisor loop approximates a
+ * Scheduled Task's RestartOnFailure by just re-launching jivam --server-only
+ * a few seconds after any exit, and records its own PID so
+ * start/stop/restart/status have something to act on (taskkill /T to stop
+ * the whole tree, since Windows has no launchctl-style service registry to
+ * query).
  */
-async function winRegisterTask(jivamBinPath: string): Promise<void> {
+async function winSetupStartupService(jivamBinPath: string): Promise<void> {
   const { exec } = await import('child_process')
   const { promisify } = await import('util')
   const execAsync = promisify(exec)
+
+  const serviceDir = winServiceDir()
+  fs.mkdirSync(serviceDir, { recursive: true })
+  const jivamHome = path.join(os.homedir(), '.jivam')
+  fs.mkdirSync(jivamHome, { recursive: true })
+  const logPath = path.join(jivamHome, 'jivam.log')
+  const ps1Path = winServicePs1Path()
+  const vbsPath = winServiceVbsPath()
+  const pidPath = winServicePidPath()
 
   const isQuotedCmd = jivamBinPath.startsWith('"')
   const [command, ...restArgs] = isQuotedCmd
     ? jivamBinPath.split('" "').map(s => s.replace(/^"|"$/g, ''))
     : [jivamBinPath]
-  const args = [...restArgs, '--server-only'].join(' ')
+  const psQuote = (s: string) => `'${s.replace(/'/g, "''")}'`
+  const psArgs = [...restArgs, '--server-only'].map(psQuote).join(' ')
 
-  const taskXml = `<?xml version="1.0" encoding="UTF-16"?>
-<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
-  <Triggers>
-    <LogonTrigger>
-      <Enabled>true</Enabled>
-    </LogonTrigger>
-  </Triggers>
-  <Principals>
-    <Principal id="Author">
-      <LogonType>InteractiveToken</LogonType>
-      <RunLevel>LeastPrivilege</RunLevel>
-    </Principal>
-  </Principals>
-  <Settings>
-    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
-    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
-    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
-    <StartWhenAvailable>true</StartWhenAvailable>
-    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
-    <Hidden>true</Hidden>
-    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
-    <RestartOnFailure>
-      <Interval>PT1M</Interval>
-      <Count>999</Count>
-    </RestartOnFailure>
-  </Settings>
-  <Actions Context="Author">
-    <Exec>
-      <Command>${command}</Command>
-      <Arguments>${args}</Arguments>
-    </Exec>
-  </Actions>
-</Task>
+  const ps1 = `
+$pidPath = ${psQuote(pidPath)}
+$PID | Out-File -FilePath $pidPath -Encoding ascii -Force
+$logPath = ${psQuote(logPath)}
+while ($true) {
+  "$(Get-Date -Format o): starting jivam server" | Out-File -Append -FilePath $logPath
+  & ${psQuote(command)} ${psArgs} *>> $logPath
+  "$(Get-Date -Format o): jivam server exited — restarting in 5s" | Out-File -Append -FilePath $logPath
+  Start-Sleep -Seconds 5
+}
+`.trim()
+  fs.writeFileSync(ps1Path, ps1)
+
+  const vbs = `Set oShell = CreateObject("WScript.Shell")
+oShell.Run "powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File " & Chr(34) & "${ps1Path.replace(/\\/g, '\\\\')}" & Chr(34), 0, False
 `
-  const xmlPath = path.join(os.tmpdir(), 'jivam-task.xml')
-  // Task Scheduler XML must be UTF-16LE with BOM
-  fs.writeFileSync(xmlPath, Buffer.concat([Buffer.from([0xFF, 0xFE]), Buffer.from(taskXml, 'utf16le')]))
+  fs.writeFileSync(vbsPath, vbs)
+
+  // Startup-folder shortcut — Windows launches this automatically at every
+  // logon. Same CreateShortcut approach used for the Desktop/Start Menu app
+  // shortcuts elsewhere in this file — a per-user COM call, no elevation.
+  const shortcutPath = winStartupShortcutPath()
+  const shortcutPs = `
+$ws = New-Object -ComObject WScript.Shell
+$s = $ws.CreateShortcut('${shortcutPath.replace(/\\/g, '\\\\')}')
+$s.TargetPath = 'wscript.exe'
+$s.Arguments = '//B "${vbsPath.replace(/\\/g, '\\\\')}"'
+$s.WorkingDirectory = '${serviceDir.replace(/\\/g, '\\\\')}'
+$s.Description = 'Jivam background server'
+$s.Save()
+`.trim()
   try {
-    await execAsync(`schtasks /Create /TN "${WIN_TASK_NAME}" /XML "${xmlPath}" /F`)
-  } finally {
-    fs.rmSync(xmlPath, { force: true })
+    fs.mkdirSync(path.dirname(shortcutPath), { recursive: true })
+    await execAsync(`powershell -NoProfile -NonInteractive -Command "${shortcutPs.replace(/"/g, '\\"').replace(/\n/g, '; ')}"`)
+  } catch (err) {
+    console.warn('Could not create Startup shortcut:', err)
+  }
+}
+
+function winReadServicePid(): number | null {
+  try {
+    const raw = fs.readFileSync(winServicePidPath(), 'utf-8').trim()
+    const pid = parseInt(raw, 10)
+    return Number.isFinite(pid) && pid > 0 ? pid : null
+  } catch {
+    return null
+  }
+}
+
+async function winIsProcessAlive(pid: number): Promise<boolean> {
+  const { exec } = await import('child_process')
+  const { promisify } = await import('util')
+  const execAsync = promisify(exec)
+  try {
+    const { stdout } = await execAsync(`tasklist /FI "PID eq ${pid}" /FO CSV /NH`)
+    return stdout.includes(String(pid))
+  } catch {
+    return false
   }
 }
 
@@ -670,37 +731,50 @@ async function winServiceControl(action: 'start' | 'stop' | 'restart' | 'status'
   const { promisify } = await import('util')
   const execAsync = promisify(exec)
 
-  try {
-    await execAsync(`schtasks /Query /TN "${WIN_TASK_NAME}"`)
-  } catch {
+  const vbsPath = winServiceVbsPath()
+  if (!fs.existsSync(vbsPath)) {
     console.log('Jivam background service is not installed. Run: jivam --install')
     return
   }
 
-  if (action === 'start' || action === 'restart') {
-    if (action === 'restart') {
-      try { await execAsync(`schtasks /End /TN "${WIN_TASK_NAME}"`) } catch {}
-      await new Promise(resolve => setTimeout(resolve, 1000))
-    }
+  const startSupervisor = async () => {
     try {
-      await execAsync(`schtasks /Run /TN "${WIN_TASK_NAME}"`)
-      console.log(`Jivam background service ${action === 'restart' ? 'restarted' : 'started'}.`)
+      await execAsync(`wscript.exe //B "${vbsPath}"`)
     } catch (err) {
-      console.error(`Failed to ${action} service:`, err)
+      console.error('Failed to start service:', err)
     }
+  }
+
+  const stopSupervisor = async () => {
+    const pid = winReadServicePid()
+    if (pid && await winIsProcessAlive(pid)) {
+      // /T kills the whole process tree — the supervisor AND the jivam
+      // server process it spawned — /F forces it.
+      try { await execAsync(`taskkill /PID ${pid} /T /F`) } catch {}
+    }
+  }
+
+  if (action === 'start') {
+    const pid = winReadServicePid()
+    if (pid && await winIsProcessAlive(pid)) {
+      console.log('Jivam background service is already running.')
+      return
+    }
+    await startSupervisor()
+    console.log('Jivam background service started.')
   } else if (action === 'stop') {
-    try {
-      await execAsync(`schtasks /End /TN "${WIN_TASK_NAME}"`)
-      console.log('Jivam background service stopped.')
-    } catch {
-      console.warn('Service was not running (or already stopped).')
-    }
+    await stopSupervisor()
+    console.log('Jivam background service stopped.')
+  } else if (action === 'restart') {
+    await stopSupervisor()
+    await new Promise(resolve => setTimeout(resolve, 1000))
+    await startSupervisor()
+    console.log('Jivam background service restarted.')
   } else if (action === 'status') {
-    try {
-      const { stdout } = await execAsync(`schtasks /Query /TN "${WIN_TASK_NAME}" /FO LIST /V`)
-      const statusMatch = stdout.match(/Status:\s*(.+)/)
-      console.log(statusMatch ? `Jivam background service status: ${statusMatch[1].trim()}` : 'Jivam background service is registered.')
-    } catch {
+    const pid = winReadServicePid()
+    if (pid && await winIsProcessAlive(pid)) {
+      console.log(`Jivam background service is running. Supervisor PID: ${pid}`)
+    } else {
       console.log('Jivam background service is not running.')
     }
   }
@@ -717,10 +791,10 @@ async function winServiceControl(action: 'start' | 'stop' | 'restart' | 'status'
 async function runInstallWindows(): Promise<void> {
   const url = `http://localhost:${PORT}`
 
-  // ── 1. Resolve the jivam binary and register the background task ─────────
+  // ── 1. Resolve the jivam binary and set up the background service ─────────
   console.log('Setting up the Jivam background service...')
   const jivamBinPath = await winFindJivamBin()
-  await winRegisterTask(jivamBinPath)
+  await winSetupStartupService(jivamBinPath)
   await winServiceControl('restart')
 
   // ── 2. Wait for the server to come up ──────────────────────────────────────

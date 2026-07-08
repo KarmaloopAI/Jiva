@@ -245,16 +245,46 @@ current status before spending time on it again.
 
 **Background service architecture**: the Jivam server now runs persistently
 via a macOS `launchd` LaunchAgent (`~/Library/LaunchAgents/ai.karmaloop.jivam.plist`,
-`RunAtLoad` + `KeepAlive`) or a Windows Scheduled Task (`JivamServer`, logon
-trigger + `RestartOnFailure`), started by `jivam --install`. This eliminates
-the old "click Dock icon before server is up → blank page" race entirely,
-since the server is (almost) always already running by the time any icon is
-clicked. Managed via `jivam start/stop/restart/status`. The actual Dock/
-Desktop icon is now just a thin launcher — it assumes the server is already up
-and only opens a browser window; server startup responsibility moved
-entirely to the OS service manager. See `server/index.ts`:
-`macWriteLaunchAgent`, `macServiceControl`, `winRegisterTask`,
+`RunAtLoad` + `KeepAlive`) or, on Windows, a self-restarting PowerShell
+supervisor launched from the user's own Startup folder — **not** a Scheduled
+Task, see the next note for why — started by `jivam --install`. This
+eliminates the old "click Dock icon before server is up → blank page" race
+entirely, since the server is (almost) always already running by the time
+any icon is clicked. Managed via `jivam start/stop/restart/status`. The
+actual Dock/Desktop icon is now just a thin launcher — it assumes the server
+is already up and only opens a browser window; server startup responsibility
+moved entirely to the OS service manager. See `server/index.ts`:
+`macWriteLaunchAgent`, `macServiceControl`, `winSetupStartupService`,
 `winServiceControl`.
+
+**Windows Scheduled Tasks with a logon trigger need admin — don't use them
+for "no elevation needed" background services.** This used to register a
+`JivamServer` Scheduled Task via `schtasks /Create /XML` with a
+`<LogonTrigger>` and `RunLevel: LeastPrivilege`, expecting the low run level
+to keep it elevation-free. It didn't — verified via research (multiple
+independent sources agree): creating a task with a **logon trigger**
+specifically requires `SeCreateGlobalPrivilege`, which only administrators
+hold, completely independent of the task's own run level. A standard
+account gets a flat "Access is denied" trying to register it — this is
+almost certainly why background-service setup was silently failing/
+requiring elevation for non-admin Windows users. Time-based triggers don't
+have this restriction, only logon/startup/workstation-unlock triggers do,
+which is exactly the trigger type a "start at login" service needs, so
+there's no LeastPrivilege-compatible way to make this work via Task
+Scheduler. Current fix: skip Task Scheduler entirely. `winSetupStartupService`
+writes a small self-restarting PowerShell supervisor
+(`%LOCALAPPDATA%\Jivam\jivam-service.ps1`) and points a shortcut in the
+user's own Startup folder (`%APPDATA%\...\Start Menu\Programs\Startup\`) at
+it — Windows auto-launches everything there at logon, and placing a file in
+your own Startup folder is a plain per-user filesystem operation with zero
+privilege requirements. The supervisor records its own PID
+(`jivam-service.pid`) so `jivam stop`/`restart` can `taskkill /PID <pid> /T
+/F` (killing the whole tree — supervisor + the jivam server it spawned), and
+loops re-launching `jivam --server-only` a few seconds after any exit as the
+RestartOnFailure equivalent. If you're ever tempted to reach for `schtasks`
+again for anything that needs to survive without an admin account, remember
+this restriction is about the trigger type, not anything you can configure
+around in the task definition.
 
 **Krutrim's stricter models (e.g. Qwen3.6) reject any request where the
 system message isn't first/alone.** This was a real bug in **jiva-core**

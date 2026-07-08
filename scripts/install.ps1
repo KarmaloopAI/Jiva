@@ -120,7 +120,8 @@ Ok "jivam installed"
 Ok "jiva-core installed"
 
 # ── 3. Background service + Edge app setup ───────────────────────────────────
-# Jivam registers a Scheduled Task so the server runs in the background, then
+# Jivam sets up a Startup-folder entry (no admin needed — a Scheduled Task's
+# logon trigger would require it) so the server runs in the background, then
 # opens Edge (installed by default on every Windows PC — no separate browser
 # needed) to a page with on-screen instructions for the one manual step —
 # installing Jivam as an app via Edge's own "Install this site as an app" —
