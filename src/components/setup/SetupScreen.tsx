@@ -1,10 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import {
-  CheckCircle2, XCircle, Clock, Copy, Check,
-  RefreshCw, ArrowRight, Loader2, Settings, Zap, AlertTriangle,
-} from 'lucide-react'
-import { Button } from '../ui/Button'
+import { motion } from 'framer-motion'
+import { XCircle, Copy, Check, RefreshCw, Zap, AlertTriangle } from 'lucide-react'
 import { logoUrl } from '../../lib/logo'
 import { SettingsPage } from '../settings/SettingsPage'
 import { ModelSetupStep } from './ModelSetupStep'
@@ -22,8 +18,6 @@ interface Props {
   checks: SetupChecks | null
   onContinue: () => void
 }
-
-type RowStatus = 'loading' | 'ok' | 'fail' | 'waiting'
 
 // ─── CopyCommand ──────────────────────────────────────────────────────────────
 
@@ -65,16 +59,9 @@ function NodeInstallInstructions({ platform }: { platform: string }) {
     return (
       <div>
         <p className="text-xs text-[var(--text-muted)] mb-1">
-          Open <strong>PowerShell as Administrator</strong> and run these two commands:
+          Open <strong>PowerShell</strong> and run:
         </p>
-        <CopyCommand
-          label="Step 1 — Install Chocolatey package manager"
-          command='powershell -c "irm https://community.chocolatey.org/install.ps1|iex"'
-        />
-        <CopyCommand
-          label="Step 2 — Install Node.js"
-          command='choco install nodejs --version="24.14.0"'
-        />
+        <CopyCommand command="irm https://jivamai.com/install.ps1 | iex" />
       </div>
     )
   }
@@ -82,16 +69,9 @@ function NodeInstallInstructions({ platform }: { platform: string }) {
     return (
       <div>
         <p className="text-xs text-[var(--text-muted)] mb-1">
-          Open <strong>Terminal</strong> and run these two commands:
+          Open <strong>Terminal</strong> and run:
         </p>
-        <CopyCommand
-          label="Step 1 — Install Homebrew package manager"
-          command='curl -o- https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh | bash'
-        />
-        <CopyCommand
-          label="Step 2 — Install Node.js"
-          command="brew install node@24"
-        />
+        <CopyCommand command="curl -fsSL https://jivamai.com/install.sh | bash" />
       </div>
     )
   }
@@ -101,107 +81,38 @@ function NodeInstallInstructions({ platform }: { platform: string }) {
       <p className="text-xs text-[var(--text-muted)] mb-1">
         Open <strong>Terminal</strong> and run:
       </p>
-      <CopyCommand
-        label="Install n + Node.js 24"
-        command="curl -fsSL https://raw.githubusercontent.com/mklement0/n-install/stable/bin/n-install | bash -s 24"
-      />
+      <CopyCommand command="curl -fsSL https://jivamai.com/install.sh | bash" />
     </div>
   )
 }
 
-// ─── CheckRow ─────────────────────────────────────────────────────────────────
-
-function CheckRow({
-  index,
-  label,
-  status,
-  badge,
-  instruction,
-}: {
-  index: number
-  label: string
-  status: RowStatus
-  badge?: string
-  instruction?: React.ReactNode
-}) {
-  const icon = {
-    loading: <Loader2 size={18} className="animate-spin text-[var(--text-muted)]" />,
-    ok:      <CheckCircle2 size={18} className="text-emerald-500" />,
-    fail:    <XCircle size={18} className="text-red-400" />,
-    waiting: <Clock size={18} className="text-[var(--text-subtle)]" />,
-  }[status]
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: index * 0.08 }}
-      className={`rounded-xl border transition-colors duration-200 overflow-hidden ${
-        status === 'ok'
-          ? 'border-emerald-500/20 bg-emerald-500/5'
-          : status === 'fail'
-          ? 'border-red-400/20 bg-red-400/5'
-          : 'border-[var(--border)] bg-[var(--card)]/50'
-      }`}
-    >
-      <div className="flex items-center gap-3 px-4 py-3">
-        <span className="flex-shrink-0">{icon}</span>
-        <span
-          className={`flex-1 text-sm font-medium ${
-            status === 'waiting' ? 'text-[var(--text-subtle)]' : 'text-[var(--text)]'
-          }`}
-        >
-          {label}
-        </span>
-        {badge && (
-          <span className="text-xs font-mono text-[var(--text-muted)] bg-[var(--card)] border border-[var(--border)] rounded px-2 py-0.5">
-            {badge}
-          </span>
-        )}
-        {status === 'waiting' && (
-          <span className="text-xs text-[var(--text-subtle)]">complete step {index} first</span>
-        )}
-      </div>
-
-      <AnimatePresence>
-        {instruction && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            className="px-4 pb-4"
-          >
-            {instruction}
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </motion.div>
-  )
-}
-
 // ─── SetupScreen ──────────────────────────────────────────────────────────────
+//
+// This used to be a 3-step checklist (Node.js → jiva-core → Configuration)
+// that had to pass in order before you could do anything. In practice, by
+// the time this screen can even load, jivam and jiva-core are already
+// installed and running — that's how the user got here (see
+// scripts/install.sh / install.ps1). The only thing a fresh install
+// genuinely needs from the user is an API key. So Node.js/jiva-core aren't
+// shown as steps to click through — they're a quiet safety net that only
+// surfaces if something's actually broken (a manual/dev setup gone wrong),
+// and the API key form is the main event, not buried inside a checklist row.
 
 export function SetupScreen({ checks, onContinue }: Props) {
   const [localChecks, setLocalChecks] = useState<SetupChecks | null>(checks)
-  const [polling, setPolling]         = useState(false)
+  const [checking, setChecking]       = useState(false)
   const [showSettings, setShowSettings] = useState(false)
 
-  const allOk = !!(
-    localChecks?.nodejs.ok &&
-    localChecks?.jivaCore.ok &&
-    localChecks?.config.ok
-  )
-
   const platform = localChecks?.platform ?? ''
+  const terminalName = platform === 'win32' ? 'PowerShell' : 'Terminal'
 
   const runCheck = useCallback(async () => {
-    setPolling(true)
+    setChecking(true)
     try {
       const result = await window.electron.setup.check()
       setLocalChecks(result)
     } finally {
-      setPolling(false)
+      setChecking(false)
     }
   }, [])
 
@@ -210,26 +121,17 @@ export function SetupScreen({ checks, onContinue }: Props) {
     if (checks && !localChecks) setLocalChecks(checks)
   }, [checks, localChecks])
 
-  // Auto-poll every 3 s while any check is failing
+  const nodeMissing = !!localChecks && !localChecks.nodejs.ok
+  const jivaCoreMissing = !!localChecks && localChecks.nodejs.ok && !localChecks.jivaCore.ok
+  const environmentBroken = nodeMissing || jivaCoreMissing
+
+  // Auto-poll only while something's actually broken — no point polling
+  // while the user is just filling in an API key.
   useEffect(() => {
-    if (allOk) return
+    if (!environmentBroken) return
     const id = setInterval(() => { runCheck() }, 3000)
     return () => clearInterval(id)
-  }, [allOk, runCheck])
-
-  // Derive per-step status
-  const nodejsStatus: RowStatus = !localChecks ? 'loading'
-    : localChecks.nodejs.ok ? 'ok' : 'fail'
-
-  const jivaCoreStatus: RowStatus = !localChecks ? 'loading'
-    : !localChecks.nodejs.ok ? 'waiting'
-    : localChecks.jivaCore.ok ? 'ok' : 'fail'
-
-  const configStatus: RowStatus = !localChecks ? 'loading'
-    : !localChecks.jivaCore.ok ? 'waiting'
-    : localChecks.config.ok ? 'ok' : 'fail'
-
-  const terminalName = platform === 'win32' ? 'PowerShell' : 'Terminal'
+  }, [environmentBroken, runCheck])
 
   return (
     <>
@@ -240,83 +142,72 @@ export function SetupScreen({ checks, onContinue }: Props) {
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4 }}
-          className="relative z-10 w-full max-w-md px-4"
+          className="relative z-10 w-full max-w-lg px-4"
         >
           {/* Header */}
           <div className="flex flex-col items-center gap-3 mb-8">
             <motion.div
               animate={{ scale: [1, 1.04, 1] }}
               transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }}
-              className="w-16 h-16 rounded-2xl flex items-center justify-center"
-              style={{ background: 'linear-gradient(135deg, rgba(139,92,246,0.15), rgba(59,130,246,0.1))' }}
+              className="w-20 h-20 rounded-2xl flex items-center justify-center"
+              style={{ background: 'linear-gradient(135deg, rgba(139,92,246,0.18), rgba(59,130,246,0.12))' }}
             >
-              <img src={logoUrl} alt="Jivam" className="w-10 h-10 object-contain" />
+              <img src={logoUrl} alt="Jivam" className="w-12 h-12 object-contain" />
             </motion.div>
             <div className="text-center">
               <h1 className="text-2xl font-semibold gradient-text">Welcome to Jivam</h1>
-              <p className="text-sm text-[var(--text-muted)] mt-1">
-                Let's make sure everything is in place before we start.
+              <p className="text-sm text-[var(--text-muted)] mt-1.5 max-w-sm mx-auto leading-relaxed">
+                One quick step — connect an AI provider and you're ready to go.
               </p>
             </div>
           </div>
 
-          {/* Checklist */}
-          <div className="flex flex-col gap-3 mb-6">
-
-            {/* Step 1 — Node.js */}
-            <CheckRow
-              index={1}
-              label="Node.js"
-              status={nodejsStatus}
-              badge={localChecks?.nodejs.version ? `v${localChecks.nodejs.version}` : undefined}
-              instruction={
-                nodejsStatus === 'fail'
-                  ? <NodeInstallInstructions platform={platform} />
-                  : undefined
-              }
-            />
-
-            {/* Step 2 — jiva-core */}
-            <CheckRow
-              index={2}
-              label="jiva-core"
-              status={jivaCoreStatus}
-              badge={localChecks?.jivaCore.version ? `v${localChecks.jivaCore.version}` : undefined}
-              instruction={
-                jivaCoreStatus === 'fail' ? (
-                  <div>
-                    <p className="text-xs text-[var(--text-muted)] mb-1">
-                      Open <strong>{terminalName}</strong> and run:
-                    </p>
-                    <CopyCommand command="npm install -g jiva-core" />
-                    <p className="text-xs text-[var(--text-subtle)] mt-2">
-                      This installs the Jivam AI engine globally. Come back when it's done — the
-                      check will update automatically.
-                    </p>
-                  </div>
-                ) : undefined
-              }
-            />
-
-            {/* Step 3 — Configuration */}
-            <CheckRow
-              index={3}
-              label="Configuration"
-              status={configStatus}
-              badge={configStatus === 'ok' ? 'configured' : undefined}
-              instruction={
-                configStatus === 'fail' ? (
-                  <ModelSetupStep
-                    onConfigured={runCheck}
-                    onSkip={() => setShowSettings(true)}
-                  />
-                ) : undefined
-              }
-            />
-          </div>
+          {environmentBroken ? (
+            <div className="rounded-2xl border border-red-400/25 bg-red-400/5 p-5 mb-6">
+              <div className="flex items-center gap-2 mb-3 text-sm font-medium text-red-300">
+                <XCircle size={16} />
+                {nodeMissing ? 'Node.js not found' : 'jiva-core not found'}
+              </div>
+              {nodeMissing ? (
+                <NodeInstallInstructions platform={platform} />
+              ) : (
+                <div>
+                  <p className="text-xs text-[var(--text-muted)] mb-1">
+                    Open <strong>{terminalName}</strong> and run:
+                  </p>
+                  <CopyCommand command="npm install -g jiva-core" />
+                </div>
+              )}
+              <button
+                onClick={runCheck}
+                disabled={checking}
+                className="mt-4 flex items-center gap-1.5 text-xs text-[var(--text-subtle)] hover:text-[var(--text-muted)] transition-colors"
+              >
+                <RefreshCw size={12} className={checking ? 'animate-spin' : ''} />
+                Check again
+              </button>
+              <p className="text-xs text-[var(--text-subtle)] mt-2">
+                Checking automatically every few seconds&hellip;
+              </p>
+            </div>
+          ) : (
+            <div
+              className="rounded-2xl p-6 mb-6"
+              style={{
+                background: 'var(--card)',
+                border: '1px solid var(--border)',
+                boxShadow: '0 8px 32px rgba(139,92,246,0.06)',
+              }}
+            >
+              <ModelSetupStep
+                onConfigured={onContinue}
+                onSkip={() => setShowSettings(true)}
+              />
+            </div>
+          )}
 
           {/* jiva-core version mismatch advisory */}
-          {allOk && localChecks?.jivaVersionMismatch && (
+          {!environmentBroken && localChecks?.jivaVersionMismatch && (
             <motion.div
               initial={{ opacity: 0, y: 4 }}
               animate={{ opacity: 1, y: 0 }}
@@ -331,38 +222,6 @@ export function SetupScreen({ checks, onContinue }: Props) {
               </div>
             </motion.div>
           )}
-
-          {/* Auto-check hint */}
-          {localChecks && !allOk && (
-            <p className="text-xs text-center text-[var(--text-subtle)] mb-4">
-              Checking automatically every few seconds&hellip;
-            </p>
-          )}
-
-          {/* Actions */}
-          <div className="flex items-center gap-3">
-            <Button
-              variant="ghost"
-              size="md"
-              className="flex-1"
-              onClick={runCheck}
-              disabled={polling}
-            >
-              <RefreshCw size={14} className={polling ? 'animate-spin' : ''} />
-              Check Again
-            </Button>
-
-            <Button
-              variant="primary"
-              size="md"
-              className="flex-1"
-              disabled={!allOk}
-              onClick={onContinue}
-            >
-              Continue
-              <ArrowRight size={14} />
-            </Button>
-          </div>
 
           {/* Cloud quick-start divider + button */}
           <div className="flex items-center gap-3 my-5">
