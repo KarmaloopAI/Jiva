@@ -101,22 +101,77 @@ export interface ModelClientConfig {
    * so use 4096 there. Leave unset for Groq/Krutrim.
    */
   defaultMaxTokens?: number;
+
+  /**
+   * Client-side proactive rate limit — max requests this model instance will
+   * send in any trailing 60s window. When set, `chat()` waits BEFORE sending
+   * a request that would exceed the limit, rather than only reacting to 429s
+   * after the fact. Model-agnostic: set this for any provider with a known
+   * hard rate ceiling (e.g. Sarvam's free tier: 40 req/min).
+   * Default: unset (no proactive throttling, only reactive 429 retry).
+   */
+  maxRequestsPerMinute?: number;
+
+  /**
+   * True when this model instance itself has native vision/multimodal
+   * capability, regardless of `type`. Lets a `reasoning`- (or `tool-calling`-)
+   * typed model accept image content directly (see `supportsVision()`),
+   * without needing a separate dedicated `multimodal` model configured.
+   * Default: false
+   */
+  hasVision?: boolean;
 }
 
 export class ModelClient implements IModel {
   private config: ModelClientConfig;
+  /** Timestamps (ms) of requests sent in the trailing rate-limit window. */
+  private requestTimestamps: number[] = [];
 
   constructor(config: ModelClientConfig) {
     this.config = config;
   }
 
   supportsVision(): boolean {
-    return this.config.type === 'multimodal';
+    return this.config.type === 'multimodal' || !!this.config.hasVision;
   }
 
   supportsToolCalling(): boolean {
     // Both the reasoning model and dedicated tool-calling model support tool calling
     return this.config.type === 'reasoning' || this.config.type === 'tool-calling';
+  }
+
+  /** The configured max output tokens for this model instance, if any. */
+  getDefaultMaxTokens(): number | undefined {
+    return this.config.defaultMaxTokens;
+  }
+
+  /**
+   * Proactively wait if sending a request right now would exceed
+   * `maxRequestsPerMinute`. No-op when the config doesn't set a limit.
+   * Called before every attempt (including retries) so a burst of calls in
+   * quick succession — tool-result turns, title generation, compaction
+   * summaries — can never collectively exceed the ceiling.
+   */
+  private async throttleIfNeeded(): Promise<void> {
+    const limit = this.config.maxRequestsPerMinute;
+    if (!limit || limit <= 0) return;
+
+    const windowMs = 60_000;
+    const now = Date.now();
+    this.requestTimestamps = this.requestTimestamps.filter(t => now - t < windowMs);
+
+    if (this.requestTimestamps.length >= limit) {
+      const oldest = this.requestTimestamps[0];
+      const waitMs = windowMs - (now - oldest) + 100; // small buffer past the window edge
+      logger.warn(
+        `[RateLimiter] ${this.config.model}: at the ${limit} req/min limit, waiting ${(waitMs / 1000).toFixed(1)}s`,
+      );
+      await new Promise(resolve => setTimeout(resolve, waitMs));
+      const afterWait = Date.now();
+      this.requestTimestamps = this.requestTimestamps.filter(t => afterWait - t < windowMs);
+    }
+
+    this.requestTimestamps.push(Date.now());
   }
 
   async chat(options: ChatCompletionOptions): Promise<ModelResponse> {
@@ -133,6 +188,7 @@ export class ModelClient implements IModel {
       }
 
       try {
+        await this.throttleIfNeeded();
         return await this.attemptChat(options, isReasoningModel);
       } catch (error) {
         lastError = error as Error;
@@ -161,11 +217,16 @@ export class ModelClient implements IModel {
           else if (error.message.includes('(503)')) errorType = '503 Service Unavailable';
           else if (error.message.includes('(504)')) errorType = '504 Gateway Timeout';
 
-          // For 429s, parse the actual retry-after time from the error message.
-          // Groq returns: "Please try again in 8.53s."
+          // For 429s, prefer the standard Retry-After header (captured on the
+          // error as retryAfterMs — provider-agnostic, RFC 6585) over parsing
+          // provider-specific wording out of the message body. Groq returns
+          // "Please try again in 8.53s." in the body; other providers (e.g.
+          // Sarvam) may only set the header with no matching text, so the
+          // header must be checked first rather than only as a fallback.
           if (is429) {
-            const match = error.message.match(/try again in (\d+(?:\.\d+)?)\s*s/i);
-            const retryAfterMs = match ? Math.ceil(parseFloat(match[1]) * 1000) + 500 : null;
+            const textMatch = error.message.match(/try again in (\d+(?:\.\d+)?)\s*s/i);
+            const textParsedMs = textMatch ? Math.ceil(parseFloat(textMatch[1]) * 1000) + 500 : null;
+            const retryAfterMs = error.retryAfterMs ?? textParsedMs;
             // Use parsed time, falling back to capped exponential backoff
             const exponential = Math.min(Math.pow(2, attempt) * 1000, 30_000);
             this._lastRetryWait = retryAfterMs ?? exponential;
@@ -315,9 +376,30 @@ export class ModelClient implements IModel {
           }
         }
 
+        // Standard RFC 6585 header — either delay-seconds ("30") or an HTTP-date.
+        // Captured here (not just parsed out of the message text later) so the
+        // retry logic works uniformly across providers regardless of whether
+        // they also include human-readable wording in the error body.
+        let retryAfterMs: number | undefined;
+        if (response.status === 429) {
+          const retryAfterHeader = response.headers.get('retry-after');
+          if (retryAfterHeader) {
+            const asSeconds = Number(retryAfterHeader);
+            if (!Number.isNaN(asSeconds)) {
+              retryAfterMs = asSeconds * 1000;
+            } else {
+              const asDate = Date.parse(retryAfterHeader);
+              if (!Number.isNaN(asDate)) {
+                retryAfterMs = Math.max(0, asDate - Date.now());
+              }
+            }
+          }
+        }
+
         throw new ModelError(
           `API error (${response.status}): ${errorText}`,
-          this.config.model
+          this.config.model,
+          retryAfterMs,
         );
       }
 
@@ -371,6 +453,7 @@ export class ModelClient implements IModel {
             completionTokens: data.usage.completion_tokens || 0,
             totalTokens: data.usage.total_tokens || 0,
           } : undefined,
+          finishReason: choice.finish_reason,
           raw: {
             ...data,
             parsedHarmony: parsed,
@@ -419,6 +502,7 @@ export class ModelClient implements IModel {
             completionTokens: data.usage.completion_tokens || 0,
             totalTokens: data.usage.total_tokens || 0,
           } : undefined,
+          finishReason: choice.finish_reason,
           raw: data,
         };
       }

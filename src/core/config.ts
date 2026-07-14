@@ -1,7 +1,74 @@
 import Conf from 'conf';
 import { z } from 'zod';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { ConfigurationError } from '../utils/errors.js';
 import { getDefaultFilesystemAllowedPath } from '../utils/platform.js';
+
+/**
+ * Jiva's per-user data directory. Conversations and logs already live here
+ * (see LocalStorageProvider); config.json now lives here too, unifying the
+ * CLI's config storage with what the local (non-cloud) HTTP interface's
+ * LocalStorageProvider was already using.
+ */
+const JIVA_HOME = path.join(os.homedir(), '.jiva');
+
+/**
+ * Where `conf` (via `projectName: 'jiva'`) used to store config.json, before
+ * the move to JIVA_HOME. Same platform-specific resolution `conf` itself
+ * used internally — kept here only to detect and migrate a pre-existing
+ * config on first run after upgrading.
+ */
+function getLegacyConfigPath(): string {
+  switch (process.platform) {
+    case 'win32': {
+      const appData = process.env.APPDATA ?? path.join(os.homedir(), 'AppData', 'Roaming');
+      return path.join(appData, 'jiva-nodejs', 'Config', 'config.json');
+    }
+    case 'darwin':
+      return path.join(os.homedir(), 'Library', 'Preferences', 'jiva-nodejs', 'config.json');
+    default:
+      return path.join(
+        process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), '.config'),
+        'jiva-nodejs', 'config.json',
+      );
+  }
+}
+
+/**
+ * One-time migration: if a config already exists at the new location
+ * (JIVA_HOME/config.json), it's authoritative — leave it alone. Otherwise,
+ * if a legacy config exists at the old platform-specific path, copy it to
+ * the new location so existing users don't lose their configuration.
+ *
+ * Defensive: if something already exists at the new path by the time we go
+ * to write (a race, or a stray file created between the check above and
+ * now), it is backed up to config-backup.json first rather than clobbered.
+ *
+ * Returns a short message describing what happened, or null if nothing
+ * needed to happen — callers (CLI, HTTP) print this so the migration is
+ * visible rather than silent.
+ */
+export function migrateLegacyConfigIfNeeded(): string | null {
+  const newPath = path.join(JIVA_HOME, 'config.json');
+  if (fs.existsSync(newPath)) return null; // already using the new location
+
+  const legacyPath = getLegacyConfigPath();
+  if (!fs.existsSync(legacyPath)) return null; // fresh install, nothing to migrate
+
+  fs.mkdirSync(JIVA_HOME, { recursive: true });
+
+  let backupMessage = '';
+  if (fs.existsSync(newPath)) {
+    const backupPath = path.join(JIVA_HOME, 'config-backup.json');
+    fs.copyFileSync(newPath, backupPath);
+    backupMessage = ` (existing file at the new location backed up to ${backupPath})`;
+  }
+
+  fs.copyFileSync(legacyPath, newPath);
+  return `Migrated config from ${legacyPath} to ${newPath}${backupMessage}`;
+}
 
 // Zod schemas for validation
 // Support both stdio-based and HTTP/SSE-based MCP servers
@@ -35,10 +102,23 @@ const ModelConfigSchema = z.object({
   model: z.string().optional(),
   defaultModel: z.string().optional(),
   useHarmonyFormat: z.boolean().optional(),
+  /**
+   * True when this model instance itself has native vision/multimodal
+   * capability, regardless of `type`. Lets a `reasoning`- (or `tool-calling`-)
+   * typed model accept image content directly, without needing a separate
+   * dedicated `multimodal` model configured for image captioning.
+   */
+  hasVision: z.boolean().optional(),
   /** How to send reasoning effort: 'api_param' | 'system_prompt' | 'both' */
   reasoningEffortStrategy: z.enum(['api_param', 'system_prompt', 'both']).optional(),
   /** Default max tokens — required for reasoning models like Sarvam-105B */
   defaultMaxTokens: z.number().optional(),
+  /**
+   * Client-side proactive rate limit — max requests this model instance will
+   * send per trailing 60s window (e.g. Sarvam's standard plan: 40 req/min).
+   * Model-agnostic: set for any provider with a known hard rate ceiling.
+   */
+  maxRequestsPerMinute: z.number().optional(),
   /**
    * Use Google Application Default Credentials instead of a static apiKey.
    * Required for Vertex AI MaaS endpoints (aiplatform.googleapis.com).
@@ -80,10 +160,23 @@ export type JivaConfig = z.infer<typeof JivaConfigSchema>;
 export class ConfigManager {
   private store: Conf<JivaConfig>;
   private static instance: ConfigManager;
+  /**
+   * Set once, the first time the singleton is constructed, if a legacy
+   * config was migrated to the new ~/.jiva/config.json location. CLI and
+   * HTTP entry points should check this right after the first
+   * `getInstance()` call and surface it (console/log) so the migration is
+   * visible rather than silent.
+   */
+  static lastMigrationMessage: string | null = null;
 
   private constructor() {
+    ConfigManager.lastMigrationMessage = migrateLegacyConfigIfNeeded();
     this.store = new Conf<JivaConfig>({
+      // cwd takes priority over projectName for path resolution — this is
+      // what actually pins storage to ~/.jiva/config.json. projectName is
+      // still required by Conf's types even when cwd is set.
       projectName: 'jiva',
+      cwd: JIVA_HOME,
     });
   }
 

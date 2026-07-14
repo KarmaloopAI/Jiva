@@ -129,6 +129,13 @@ export interface CodeAgentConfig {
    * Sourced from servers with `codeMode: true` in config and/or the --mcp CLI flag.
    */
   mcpServerNames?: string[];
+  /**
+   * Free-form harness/mode label recorded on saved conversations — e.g.
+   * jiva-core's own 'evaluator' harness (see --harness evaluator), or a
+   * UI-level feature like Jivam's 'deep-run'. Purely descriptive metadata;
+   * does not change CodeAgent's own behavior.
+   */
+  harness?: string;
 }
 
 const DEFAULT_MAX_ITERATIONS = 50;
@@ -139,8 +146,66 @@ const CODE_MODE_INDICATOR = '[CODE MODE]';
 // Default token threshold for in-loop compaction (90K leaves ~38K headroom in a 128K model)
 const DEFAULT_COMPACTION_THRESHOLD = 90_000;
 
+/**
+ * Below this output-token budget, the skeleton-first workflow becomes
+ * mandatory for EVERY new file (not just files over ~80 lines) — a low
+ * budget means even a moderately-sized file's content can get cut off
+ * mid-generation. Sarvam-105B (capped at 4096 by the provider) is the
+ * motivating case, but this applies to any model configured with a
+ * similarly small defaultMaxTokens.
+ */
+const LOW_OUTPUT_BUDGET_THRESHOLD = 8192;
+
 /** System prompt for code mode — focused on precision and persistence (ported from opencode beast.txt) */
-const _getSystemPromptBase = (workspaceDir: string, directive?: string, skillsBlock?: string, mcpToolNames?: string[]): string => {
+const _getSystemPromptBase = (
+  workspaceDir: string,
+  directive?: string,
+  skillsBlock?: string,
+  mcpToolNames?: string[],
+  outputTokenBudget?: number,
+): string => {
+  const isLowOutputBudget = !!outputTokenBudget && outputTokenBudget <= LOW_OUTPUT_BUDGET_THRESHOLD;
+
+  const largeFileGuidance = isLowOutputBudget
+    ? `8. OUTPUT BUDGET IS LIMITED — you can only write approximately ${outputTokenBudget} tokens per response.
+   This makes the skeleton-first approach MANDATORY for every new file, not just large ones —
+   even a moderately-sized file can get cut off mid-generation and silently corrupted at this budget.
+   MANDATORY WORKFLOW for creating any new file:
+   - Stage 1 — write_file: create the file as a SKELETON of marked sections, each wrapped like this:
+       ### section-<name>
+       <stub content — e.g. a single TODO comment, or empty body>
+       ### endsection
+     Use one section per logical unit (one function, one class, one config block). Keep each
+     section's stub to 1-3 lines. The whole skeleton for a typical file should fit comfortably
+     under your output budget.
+   - Stage 2+ — edit_file with use_regex: true: fill in ONE section per call, matching
+       old_string: "### section-<name>[\\s\\S]*?### endsection"
+     and passing the complete implementation (still wrapped in the same markers) as new_string.
+     This replaces the whole section in one shot without needing to reproduce its current
+     (stub) content exactly — far more reliable than exact-string matching when your own
+     stub output might not come back byte-for-byte identical.
+   - Never attempt to write more than one section's worth of real implementation in a single
+     tool call. If a section itself would exceed your output budget, split it into
+     ### section-<name>-part1 / ### section-<name>-part2 etc. and fill each separately.
+   EDITING an existing file — same idea: prefer edit_file with use_regex: true against a
+   ### section marker when the file already uses them; otherwise keep each edit_file call's
+   new_string small enough to comfortably fit your output budget.`
+    : `8. LARGE FILES — ALWAYS WORK IN SMALL CHUNKS (applies to ALL file types: TS, Python, HTML, CSS, JSON…):
+   "Large" means any file or edit whose total new content exceeds ~80 lines.
+   BEFORE writing or editing: mentally estimate the line count. If > 80 lines, apply the rules below.
+   EDITING large files:
+   - Break every edit into chunks of 50–80 lines maximum.
+   - Never pass a new_string longer than ~80 lines to edit_file.
+   - Split large edits into multiple sequential edit_file calls, one section at a time.
+   CREATING new large files (skeleton-first approach — mandatory for any file > 80 lines):
+   - Stage 1: write_file with a skeleton/scaffold only — class/function stubs, empty bodies,
+     placeholder comments like "// TODO: implement X". Keep the skeleton under 60 lines.
+   - Stage 2+: edit_file to replace each placeholder/stub with the real implementation,
+     50–80 lines per call. Never implement more than one function or section per call.
+     Consider wrapping stubs in ### section-<name> / ### endsection markers and using
+     edit_file's use_regex: true mode to replace a whole section reliably.
+   - Reason: model output longer than ~100 lines gets truncated mid-JSON, silently corrupting the file.`;
+
   const base = `You are a precise, highly capable coding assistant operating in code mode.
 You have direct access to code tools — use them to explore, understand, and modify code.
 
@@ -160,7 +225,7 @@ PERSISTENCE AND COMPLETION:
 
 TOOLS AVAILABLE:
 - read_file: Read an existing file or list a directory. Only needed before editing an existing file.
-- edit_file: Replace a specific string in an existing file (old_string → new_string). For partial changes.
+- edit_file: Replace a specific string (or regex pattern, with use_regex: true) in an existing file. For partial changes.
 - write_file: Create a new file or fully overwrite an existing one. Use this to create files from scratch.
 - glob: Find files matching a pattern (e.g. "**/*.ts"). Only when you need to locate existing files.
 - grep: Search existing file contents with regex. Only when you need to find something in existing code.
@@ -175,19 +240,7 @@ CODING PRINCIPLES — READ CAREFULLY:
 5. After editing, check LSP errors in the tool result and fix them.
 6. Verify your changes work by running tests or the build when appropriate.
 7. Use bash only for shell commands (tests, builds, git) — NOT for reading files.
-8. LARGE FILES — ALWAYS WORK IN SMALL CHUNKS (applies to ALL file types: TS, Python, HTML, CSS, JSON…):
-   "Large" means any file or edit whose total new content exceeds ~80 lines.
-   BEFORE writing or editing: mentally estimate the line count. If > 80 lines, apply the rules below.
-   EDITING large files:
-   - Break every edit into chunks of 50–80 lines maximum.
-   - Never pass a new_string longer than ~80 lines to edit_file.
-   - Split large edits into multiple sequential edit_file calls, one section at a time.
-   CREATING new large files (skeleton-first approach — mandatory for any file > 80 lines):
-   - Stage 1: write_file with a skeleton/scaffold only — class/function stubs, empty bodies,
-     placeholder comments like "// TODO: implement X". Keep the skeleton under 60 lines.
-   - Stage 2+: edit_file to replace each placeholder/stub with the real implementation,
-     50–80 lines per call. Never implement more than one function or section per call.
-   - Reason: model output longer than ~100 lines gets truncated mid-JSON, silently corrupting the file.
+${largeFileGuidance}
 
 TOOL SELECTION RULES (follow exactly):
 - To CREATE a new file → write_file immediately (no reads needed first)
@@ -269,6 +322,7 @@ export class CodeAgent {
   private tools: ICodeTool[];
   private _mcpManager?: MCPServerManager;
   private _mcpServerNames: string[] = [];
+  private _harness?: string;
   private _stopped = false;
 
   constructor(config: CodeAgentConfig) {
@@ -288,6 +342,7 @@ export class CodeAgent {
 
     this._mcpManager = config.mcpManager;
     this._mcpServerNames = config.mcpServerNames ?? [];
+    this._harness = config.harness;
 
     this.tools = [
       ReadFileTool,
@@ -434,7 +489,8 @@ ${directive ? `\n${directive}` : ''}`;
     const mcpToolNames = this._mcpManager
       ? this.tools.filter((t) => t.name.includes('__')).map((t) => t.name)
       : undefined;
-    const systemPrompt = _getSystemPromptBase(this.workspace.getWorkspaceDir(), directive || undefined, skillsBlock, mcpToolNames);
+    const outputTokenBudget = this.orchestrator.getReasoningModel().getDefaultMaxTokens();
+    const systemPrompt = _getSystemPromptBase(this.workspace.getWorkspaceDir(), directive || undefined, skillsBlock, mcpToolNames, outputTokenBudget);
 
     // Build message history: system + history + new user message
     const messages: Message[] = [
@@ -807,15 +863,24 @@ ${directive ? `\n${directive}` : ''}`;
       // ── In-loop context compaction ──────────────────────────────────────────
       // Check if we're approaching the context window limit and compact if needed.
       // Triggered once per turn (compactedThisTurn flag) to avoid thrashing.
-      // Only runs when: threshold > 0, orchestrator available, not already compacted,
-      // and the response carried token usage data.
+      // Only runs when: threshold > 0, orchestrator available, not already compacted.
+      //
+      // Deliberately NOT gated on the response having tool calls: a model that's
+      // starved for completion-token budget by a bloated prompt (spending its
+      // whole budget "thinking" before it can emit a tool call, or even any
+      // visible text) is EXACTLY the scenario compaction needs to rescue —
+      // gating on tool calls here created a deadlock where a large context
+      // would push the model into empty responses, and because empty responses
+      // never carry tool calls, compaction could never fire to shrink the
+      // context back down. The model would then just keep re-hitting the same
+      // starved budget on every recovery-nudge retry and give up after
+      // MAX_EMPTY_RESPONSES, even with abundant maxIterations remaining.
       const promptTokens = response.usage?.promptTokens ?? 0;
       if (
         this.compactionThreshold > 0 &&
         promptTokens > this.compactionThreshold &&
         !compactedThisTurn &&
-        this.conversationManager &&
-        response.toolCalls && response.toolCalls.length > 0
+        this.conversationManager
       ) {
         logger.warn(
           `[CodeAgent] Context at ${promptTokens} tokens (threshold: ${this.compactionThreshold}) — compacting in-loop history`,
@@ -870,7 +935,34 @@ ${directive ? `\n${directive}` : ''}`;
         }
 
         if (!response.content && emptyResponseCount < MAX_EMPTY_RESPONSES) {
-          // Model returned empty content with no tool calls — it got stuck or confused.
+          // Model returned empty content with no tool calls.
+          //
+          // Two distinct causes look identical here but need different fixes:
+          //   1. finishReason === 'length' — the model hit its max_tokens ceiling
+          //      while still "thinking" and never got to emit a tool call or text.
+          //      This is a completion-token-budget problem, not confusion — nudging
+          //      with MORE instructions only adds prompt weight and makes the next
+          //      attempt hit the same wall (or worse). The real fix is to shrink the
+          //      context so more of the budget is left for actual output, so we force
+          //      an immediate compaction here regardless of the normal token threshold.
+          //   2. Anything else — the model is genuinely stuck/confused; a nudge is the
+          //      right tool.
+          const isLengthStarved = response.finishReason === 'length';
+          if (isLengthStarved && !compactedThisTurn && this.conversationManager) {
+            logger.warn(
+              '[CodeAgent] Empty response with finishReason=length — model ran out of completion budget ' +
+              'while thinking. Forcing context compaction instead of a text nudge.',
+            );
+            compactedThisTurn = true;
+            try {
+              const compacted = await this.compactInLoopMessages(messages, systemPrompt);
+              messages.splice(0, messages.length, ...compacted);
+              logger.info(`[CodeAgent] Forced compaction complete: ${messages.length} messages after compaction`);
+            } catch (compactErr) {
+              logger.error('[CodeAgent] Forced compaction failed, falling back to a recovery nudge', compactErr);
+            }
+          }
+
           // Inject an escalating recovery nudge and let it try again.
           emptyResponseCount++;
           logger.warn(
@@ -879,7 +971,14 @@ ${directive ? `\n${directive}` : ''}`;
 
           // Escalate urgency with each retry so the model doesn't keep ignoring it
           let nudgeContent: string;
-          if (emptyResponseCount <= 2) {
+          if (isLengthStarved) {
+            nudgeContent =
+              'Your last response ran out of space before producing any output — the context has now been ' +
+              'compacted to free up room. Continue the task with a SHORT, direct next step:\n' +
+              '- If you need to CREATE a file → call write_file now.\n' +
+              '- If you need to EDIT a file → call edit_file directly (skip re-reading files you already read).\n' +
+              '- If the task is already complete → provide a brief one-paragraph summary.';
+          } else if (emptyResponseCount <= 2) {
             nudgeContent =
               'Your last response was empty. Please continue working on the task.\n\n' +
               '- If you need to CREATE a file → call write_file now.\n' +
@@ -1035,6 +1134,11 @@ ${directive ? `\n${directive}` : ''}`;
         this.orchestrator,
         'code',
         this.orchestrator.getTokenUsage(),
+        {
+          mcpServers: this._mcpServerNames,
+          maxIterations: this.maxIterations,
+          harness: this._harness,
+        },
       );
     }
 
@@ -1234,6 +1338,12 @@ Keep the summary concise but complete. Focus on what would help continue the wor
       undefined,
       this.orchestrator,
       'code',
+      undefined,
+      {
+        mcpServers: this._mcpServerNames,
+        maxIterations: this.maxIterations,
+        harness: this._harness,
+      },
     );
   }
 

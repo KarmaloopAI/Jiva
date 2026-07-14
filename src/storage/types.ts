@@ -15,6 +15,25 @@ export interface StorageContext {
 }
 
 /**
+ * Extra context captured for code-mode conversations only — lets a UI (e.g.
+ * Jivam) reconstruct exactly how a code task was configured when resuming
+ * or reviewing it later.
+ */
+export interface CodeConversationMeta {
+  /** Names of MCP servers that were enabled for this code task. */
+  mcpServers?: string[];
+  /** Iteration budget configured for this task. */
+  maxIterations?: number;
+  /**
+   * Free-form harness/mode label, if any — e.g. jiva-core's own 'evaluator'
+   * harness, or a UI-level feature like Jivam's 'deep-run'. Not validated
+   * against a fixed enum since callers outside jiva-core (like Jivam) may
+   * set their own values here.
+   */
+  harness?: string;
+}
+
+/**
  * Conversation metadata (lightweight, for listing)
  */
 export interface ConversationMetadata {
@@ -32,6 +51,10 @@ export interface ConversationMetadata {
   totalCompletionTokens?: number;
   /** totalPromptTokens + totalCompletionTokens */
   totalTokens?: number;
+  /** Code-mode specific context — see CodeConversationMeta. Only meaningful when type === 'code'. */
+  mcpServers?: string[];
+  maxIterations?: number;
+  harness?: string;
 }
 
 /**

@@ -14,6 +14,7 @@ import express, { Express } from 'express';
 import { createServer, Server as HttpServer } from 'http';
 import { WebSocketServer } from 'ws';
 import { logger, LogLevel } from '../../utils/logger.js';
+import { migrateLegacyConfigIfNeeded } from '../../core/config.js';
 import { SessionManager } from './session-manager.js';
 import { createStorageProvider } from '../../storage/factory.js';
 import { setupHealthRoutes } from './routes/health.js';
@@ -111,6 +112,17 @@ async function bootstrap(): Promise<{ app: Express; server: HttpServer; wss: Web
 async function start(): Promise<void> {
   try {
     logger.info('[HTTP] Starting Jiva HTTP/WebSocket server...');
+
+    // One-time config migration (old ~/Library/Preferences/jiva-nodejs or
+    // platform-equivalent config.json → ~/.jiva/config.json). Only matters
+    // when running with LocalStorageProvider (basePath ~/.jiva by default) —
+    // a no-op otherwise, since a GCS-backed deployment wouldn't have a
+    // legacy local config path to find anyway.
+    const migrationMessage = migrateLegacyConfigIfNeeded();
+    if (migrationMessage) {
+      logger.warn(`[HTTP] ${migrationMessage}`);
+    }
+
     logger.info(`[HTTP] Environment: ${process.env.NODE_ENV || 'development'}`);
     logger.info(`[HTTP] Storage: ${process.env.JIVA_STORAGE_PROVIDER || 'auto-detect'}`);
     logger.info(`[HTTP] Max sessions: ${MAX_CONCURRENT_SESSIONS}`);

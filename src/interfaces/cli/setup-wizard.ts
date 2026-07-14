@@ -10,6 +10,7 @@
 import inquirer from 'inquirer';
 import { configManager } from '../../core/config.js';
 import { logger } from '../../utils/logger.js';
+import { detectVisionCapability } from '../../utils/vision-detection.js';
 import chalk from 'chalk';
 import type { ModelConfig } from '../../core/config.js';
 
@@ -26,6 +27,8 @@ interface ProviderPreset {
   useHarmonyFormat: boolean;
   reasoningEffortStrategy: 'api_param' | 'system_prompt' | 'both';
   defaultMaxTokens?: number;
+  /** Client-side proactive throttle — see ModelClientConfig.maxRequestsPerMinute. */
+  maxRequestsPerMinute?: number;
   hasMultimodal: boolean;
   note?: string; // shown during setup
 }
@@ -41,6 +44,8 @@ const PROVIDERS: Record<ProviderKey, ProviderPreset> = {
     reasoningEffortStrategy: 'api_param',
     // Sarvam's API caps completion output at 4096 tokens; requesting more is rejected.
     defaultMaxTokens: 4096,
+    // Sarvam's standard (non-enterprise) plan caps requests at 40/min.
+    maxRequestsPerMinute: 40,
     hasMultimodal: false,
     note: 'Sarvam does not offer a multimodal model. You will need to pick a separate provider for multimodal.',
   },
@@ -123,6 +128,27 @@ async function askEndpointAndKey(collectedKeys: Map<ProviderKey, string>): Promi
   return answers;
 }
 
+// ── Vision capability prompt ────────────────────────────────────────────────
+
+async function askHasVision(modelName: string): Promise<boolean> {
+  const detection = detectVisionCapability(modelName);
+
+  if (detection.supported) {
+    console.log(chalk.gray(`  ${detection.reason}.`));
+  }
+
+  const { hasVision } = await inquirer.prompt([
+    {
+      type: 'confirm',
+      name: 'hasVision',
+      message: 'Does this model support vision (image input)?',
+      default: detection.supported,
+    },
+  ]);
+
+  return hasVision;
+}
+
 // ── Reasoning model setup ──────────────────────────────────────────────────
 
 async function setupReasoningModel(collectedKeys: Map<ProviderKey, string>): Promise<{ config: ModelConfig; provider: ProviderKey }> {
@@ -165,6 +191,8 @@ async function setupReasoningModel(collectedKeys: Map<ProviderKey, string>): Pro
     },
   ]);
 
+  const hasVision = await askHasVision(model);
+
   const config: ModelConfig = {
     name: 'reasoning',
     endpoint,
@@ -174,6 +202,8 @@ async function setupReasoningModel(collectedKeys: Map<ProviderKey, string>): Pro
     useHarmonyFormat: preset.useHarmonyFormat,
     reasoningEffortStrategy: preset.reasoningEffortStrategy,
     ...(preset.defaultMaxTokens ? { defaultMaxTokens: preset.defaultMaxTokens } : {}),
+    ...(preset.maxRequestsPerMinute ? { maxRequestsPerMinute: preset.maxRequestsPerMinute } : {}),
+    ...(hasVision ? { hasVision: true } : {}),
   };
 
   return { config, provider: provider as ProviderKey };
@@ -298,6 +328,8 @@ async function setupToolCallingModel(
     },
   ]);
 
+  const hasVision = await askHasVision(model);
+
   return {
     name: 'tool-calling',
     endpoint,
@@ -305,6 +337,9 @@ async function setupToolCallingModel(
     type: 'tool-calling',
     defaultModel: model,
     useHarmonyFormat: false, // always standard format for tool-calling models
+    ...(preset.defaultMaxTokens ? { defaultMaxTokens: preset.defaultMaxTokens } : {}),
+    ...(preset.maxRequestsPerMinute ? { maxRequestsPerMinute: preset.maxRequestsPerMinute } : {}),
+    ...(hasVision ? { hasVision: true } : {}),
   };
 }
 

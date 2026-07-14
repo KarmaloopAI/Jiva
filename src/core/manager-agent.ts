@@ -112,6 +112,11 @@ IMPORTANT:
   /**
    * Get system messages with fresh directive + optional AgentContext.
    * Follows the per-call directive injection pattern from JivaAgent.getSystemMessages().
+   *
+   * The directive is merged into the single system message rather than appended as a
+   * separate message. Manager never sends `tools`, so Harmony's developer-role tool
+   * injection never applies here — appending a second message only risked providers
+   * (e.g. Krutrim's Qwen3.6) that reject anything but a single leading system message.
    */
   private getSystemMessages(agentContext?: AgentContext): Message[] {
     const systemMessage = this.conversationHistory[0];
@@ -119,20 +124,14 @@ IMPORTANT:
     // Inject fresh directive per-call
     const freshDirective = agentContext?.directive || this.workspace.getDirectivePrompt() || '';
 
-    const parts: string[] = [];
-    if (freshDirective) {
-      parts.push(freshDirective);
-    }
-
-    if (parts.length === 0) {
+    if (!freshDirective) {
       return [systemMessage];
     }
 
     return [
-      systemMessage,
       {
-        role: 'developer' as any,
-        content: parts.join('\n'),
+        ...systemMessage,
+        content: `${systemMessage.content}\n${freshDirective}`,
       },
     ];
   }
