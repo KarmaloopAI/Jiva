@@ -141,6 +141,7 @@ export class JivaRunner extends EventEmitter {
       const reasoningConfig = jivaConfig.models.reasoning as {
         endpoint?: string; apiKey?: string; defaultModel?: string; model?: string
         useHarmonyFormat?: boolean; reasoningEffortStrategy?: string; defaultMaxTokens?: number
+        maxRequestsPerMinute?: number; hasVision?: boolean
       }
       const multimodalConfig = jivaConfig.models.multimodal as {
         endpoint?: string; apiKey?: string; defaultModel?: string
@@ -158,6 +159,8 @@ export class JivaRunner extends EventEmitter {
         useHarmonyFormat: reasoningConfig.useHarmonyFormat,
         ...(reasoningConfig.reasoningEffortStrategy ? { reasoningEffortStrategy: reasoningConfig.reasoningEffortStrategy } : {}),
         ...(reasoningConfig.defaultMaxTokens ? { defaultMaxTokens: reasoningConfig.defaultMaxTokens } : {}),
+        ...(reasoningConfig.maxRequestsPerMinute ? { maxRequestsPerMinute: reasoningConfig.maxRequestsPerMinute } : {}),
+        ...(reasoningConfig.hasVision ? { hasVision: true } : {}),
       })
 
       let multimodalModel: unknown

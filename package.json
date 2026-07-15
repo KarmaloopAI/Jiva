@@ -19,7 +19,7 @@
     "email": "achatterjee@gritsa.com"
   },
   "license": "MIT",
-  "jivaCompatibleVersion": "0.3.44",
+  "jivaCompatibleVersion": "0.3.50",
   "engines": {
     "node": ">=20.0.0"
   },

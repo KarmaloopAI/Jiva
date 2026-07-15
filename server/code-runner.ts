@@ -114,7 +114,6 @@ export class CodeRunner extends EventEmitter {
     const jiva = await import(pathToFileURL(entry).href)
 
     const {
-      configManager,
       ModelOrchestrator,
       WorkspaceManager,
       ConversationManager,
@@ -128,21 +127,36 @@ export class CodeRunner extends EventEmitter {
     // Store the jiva-core logger so runChat() can hook into it for tool event capture
     this.codeLogger = logger ?? null
 
-    // 1. Validate config
-    ;(configManager as { validateConfig(): void }).validateConfig()
-
-    const reasoningConfig = (configManager as {
-      getReasoningModel(): { endpoint: string; apiKey: string; defaultModel: string; useHarmonyFormat?: boolean }
-    }).getReasoningModel()
+    // 1. Load config from Jivam's own config file (not jiva-core's global
+    // singleton) — same source jiva-runner.ts uses for chat mode. This used
+    // to call jiva-core's own configManager.getReasoningModel(), which reads
+    // an entirely separate config file that's only populated by running the
+    // `jiva` CLI's own setup wizard — so defaultMaxTokens/hasVision/
+    // maxRequestsPerMinute/reasoningEffortStrategy set via Jivam's Settings
+    // UI never reached Code Mode at all.
+    const jivaConfig = readConfig()
+    if (!jivaConfig?.models?.reasoning?.apiKey) {
+      throw new Error('Jivam is not configured. Add your API key in Settings → Models.')
+    }
+    const reasoningConfig = jivaConfig.models.reasoning as {
+      endpoint?: string; apiKey?: string; defaultModel?: string; model?: string
+      useHarmonyFormat?: boolean; reasoningEffortStrategy?: string; defaultMaxTokens?: number
+      maxRequestsPerMinute?: number; hasVision?: boolean
+    }
 
     // 2. Create model + orchestrator
     const createModel = createKrutrimModel as (config: unknown) => unknown
+    const resolvedReasoningModel = reasoningConfig.defaultModel ?? reasoningConfig.model ?? ''
     const reasoningModel = createModel({
       endpoint: reasoningConfig.endpoint,
       apiKey: reasoningConfig.apiKey,
-      model: reasoningConfig.defaultModel,
+      model: resolvedReasoningModel,
       type: 'reasoning',
       useHarmonyFormat: reasoningConfig.useHarmonyFormat,
+      ...(reasoningConfig.reasoningEffortStrategy ? { reasoningEffortStrategy: reasoningConfig.reasoningEffortStrategy } : {}),
+      ...(reasoningConfig.defaultMaxTokens ? { defaultMaxTokens: reasoningConfig.defaultMaxTokens } : {}),
+      ...(reasoningConfig.maxRequestsPerMinute ? { maxRequestsPerMinute: reasoningConfig.maxRequestsPerMinute } : {}),
+      ...(reasoningConfig.hasVision ? { hasVision: true } : {}),
     })
 
     const OrchestratorClass = ModelOrchestrator as new (config: unknown) => unknown

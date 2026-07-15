@@ -65,6 +65,13 @@ export interface JivaReasoningConfig {
   useHarmonyFormat?: boolean
   reasoningEffortStrategy?: string
   defaultMaxTokens?: number
+  // Client-side proactive rate limit — max requests this model instance
+  // sends per trailing 60s window (e.g. Sarvam's standard plan: 40/min).
+  maxRequestsPerMinute?: number
+  // Declares this reasoning model has native vision support, so image
+  // content can be routed to it directly instead of through a separate
+  // dedicated multimodal model's caption-then-forward pipeline.
+  hasVision?: boolean
   name?: string
   type?: string
 }

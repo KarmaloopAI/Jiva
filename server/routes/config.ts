@@ -12,6 +12,14 @@ const PROVIDER_PRESETS: Record<ProviderKey, {
   useHarmonyFormat: boolean
   reasoningEffortStrategy: string
   defaultMaxTokens?: number
+  maxRequestsPerMinute?: number
+  // Whether this preset's *reasoning* model itself has native vision — as
+  // opposed to vision being provided via a separate `multimodal` model
+  // below. None of the built-in presets' reasoning models are vision-native
+  // today (vision comes from the bundled multimodal model instead), but
+  // openai-compatible users pointing at their own vision-capable model (via
+  // ModelSetupStep's "This model supports vision" toggle) need this set.
+  hasVision?: boolean
   multimodal: { defaultModel: string } | null
 }> = {
   sarvam: {
@@ -19,7 +27,10 @@ const PROVIDER_PRESETS: Record<ProviderKey, {
     defaultModel: 'sarvam-105b',
     useHarmonyFormat: false,
     reasoningEffortStrategy: 'api_param',
-    defaultMaxTokens: 8192,
+    // Sarvam-105B's standard plan caps completions at 4096 output tokens
+    // (enterprise plans allow more) and 40 requests/minute.
+    defaultMaxTokens: 4096,
+    maxRequestsPerMinute: 40,
     multimodal: null,
   },
   krutrim: {
@@ -59,11 +70,14 @@ router.get('/path', (_req, res) => {
 })
 
 router.post('/setup-provider', (req, res) => {
-  const { provider, apiKey, customEndpoint, customModel } = req.body as {
+  const { provider, apiKey, customEndpoint, customModel, hasVision } = req.body as {
     provider: ProviderKey
     apiKey: string
     customEndpoint?: string
     customModel?: string
+    // Only meaningful for 'openai-compatible' — built-in presets' reasoning
+    // models aren't vision-native (see PROVIDER_PRESETS comment above).
+    hasVision?: boolean
   }
   try {
     const preset = PROVIDER_PRESETS[provider]
@@ -87,6 +101,8 @@ router.post('/setup-provider', (req, res) => {
         useHarmonyFormat: preset.useHarmonyFormat,
         reasoningEffortStrategy: preset.reasoningEffortStrategy,
         ...(preset.defaultMaxTokens ? { defaultMaxTokens: preset.defaultMaxTokens } : {}),
+        ...(preset.maxRequestsPerMinute ? { maxRequestsPerMinute: preset.maxRequestsPerMinute } : {}),
+        ...(provider === 'openai-compatible' ? { hasVision: !!hasVision } : (preset.hasVision ? { hasVision: true } : {})),
       } as Parameters<typeof writeConfig>[0]['models']['reasoning'],
       multimodal: (preset.multimodal
         ? { name: 'multimodal', type: 'multimodal', endpoint, apiKey, defaultModel: preset.multimodal.defaultModel }
