@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Eye, EyeOff, ArrowLeft, ArrowRight, CheckCircle2, Loader2, ExternalLink } from 'lucide-react'
 import { Button } from '../ui/Button'
 
-type ProviderKey = 'sarvam' | 'krutrim' | 'groq' | 'openai-compatible'
+type ProviderKey = 'sarvam' | 'krutrim' | 'groq' | 'together' | 'openai-compatible'
 
 interface ProviderInfo {
   key: ProviderKey
@@ -38,6 +38,14 @@ const PROVIDERS: ProviderInfo[] = [
     badges: ['Reasoning + Vision'],
     apiKeyUrl: 'https://console.groq.com/keys',
     hasVision: true,
+  },
+  {
+    key: 'together',
+    name: 'Together AI',
+    tagline: 'Open models, including reasoning/thinking models',
+    badges: ['Reasoning model'],
+    apiKeyUrl: 'https://api.together.xyz/settings/api-keys',
+    hasVision: false,
   },
 ]
 

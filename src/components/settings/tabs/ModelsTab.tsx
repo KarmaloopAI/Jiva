@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Cpu, Key, Globe, Save, ChevronDown, ChevronUp, Zap } from 'lucide-react'
+import { Cpu, Key, Globe, Save, ChevronDown, ChevronUp, Zap, RefreshCw } from 'lucide-react'
 import { Button } from '../../ui/Button'
 import { ModelSetupStep } from '../../setup/ModelSetupStep'
+import { toChatCompletionsUrl } from '../../../lib/endpoint-utils'
 
 interface ModelConfig {
   provider?: string
@@ -38,6 +39,8 @@ export function ModelsTab() {
   const [rMaxTokens, setRMaxTokens] = useState('')
   const [rRateLimit, setRRateLimit] = useState('')
   const [rHasVision, setRHasVision] = useState(false)
+  const [modelOptions, setModelOptions] = useState<string[]>([])
+  const [loadingModels, setLoadingModels] = useState(false)
 
   // Multimodal model fields
   const [mEnabled, setMEnabled] = useState(false)
@@ -71,6 +74,28 @@ export function ModelsTab() {
 
   useEffect(() => { loadConfig() }, [loadConfig])
 
+  const fetchModels = useCallback(async () => {
+    if (!rEndpoint.trim() || !rApiKey.trim()) return
+    setLoadingModels(true)
+    try {
+      const result = await window.electron.config.listModels({ endpoint: rEndpoint, apiKey: rApiKey })
+      setModelOptions(result.success ? result.models : [])
+    } catch {
+      setModelOptions([])
+    } finally {
+      setLoadingModels(false)
+    }
+  }, [rEndpoint, rApiKey])
+
+  // Fetch once existing endpoint/key are loaded, so the dropdown is
+  // populated without requiring a manual click first.
+  useEffect(() => {
+    if (rEndpoint.trim() && rApiKey.trim() && modelOptions.length === 0) {
+      fetchModels()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rEndpoint, rApiKey])
+
   const handleSave = async () => {
     const base = config ?? { models: { reasoning: null } }
     setSaving(true)
@@ -80,7 +105,7 @@ export function ModelsTab() {
         reasoning: {
           ...base.models?.reasoning,
           provider: rProvider,
-          endpoint: rEndpoint,
+          endpoint: rEndpoint.trim() ? toChatCompletionsUrl(rEndpoint) : rEndpoint,
           apiKey: rApiKey,
           defaultModel: rModel,
           useHarmonyFormat: rHarmony,
@@ -89,7 +114,7 @@ export function ModelsTab() {
           hasVision: rHasVision,
         },
         multimodal: mEnabled
-          ? { endpoint: mEndpoint, apiKey: mApiKey, defaultModel: mModel }
+          ? { endpoint: mEndpoint.trim() ? toChatCompletionsUrl(mEndpoint) : mEndpoint, apiKey: mApiKey, defaultModel: mModel }
           : undefined,
       },
     }
@@ -216,13 +241,30 @@ export function ModelsTab() {
             />
           </div>
           <div>
-            <label style={labelStyle}>Model Name</label>
+            <label style={labelStyle}>
+              <span className="flex items-center justify-between">
+                <span>Model Name</span>
+                <button
+                  type="button"
+                  onClick={fetchModels}
+                  disabled={loadingModels || !rEndpoint.trim() || !rApiKey.trim()}
+                  className="flex items-center gap-1 text-[10px] text-[var(--accent)] hover:underline disabled:opacity-40 disabled:no-underline"
+                >
+                  <RefreshCw size={9} className={loadingModels ? 'animate-spin' : ''} />
+                  {modelOptions.length > 0 ? 'Refresh models' : 'Fetch models'}
+                </button>
+              </span>
+            </label>
             <input
               style={inputStyle}
+              list="reasoning-model-options"
               value={rModel}
               onChange={(e) => setRModel(e.target.value)}
               placeholder="Meta-Llama-3.1-405B-Instruct"
             />
+            <datalist id="reasoning-model-options">
+              {modelOptions.map((m) => <option key={m} value={m} />)}
+            </datalist>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
