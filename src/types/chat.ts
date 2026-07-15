@@ -19,4 +19,5 @@ export interface ChatMessage {
   errorMessage?: string
   attachments?: AttachedFile[]
   brainCommentary?: string[]   // brain event messages collected during Deep Run
+  thinking?: string            // <think> content extracted from raw model output (see lib/strip-thinking.ts)
 }
