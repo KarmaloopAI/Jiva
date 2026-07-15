@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { ChatMessage } from '../types/chat'
 import { useChatStore } from './chat.store'
 import { useJivaStore } from './jiva.store'
+import { extractThinking } from '../lib/strip-thinking'
 
 export interface ConversationItem {
   id: string
@@ -109,12 +110,16 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
             if (!content.trim()) return acc
 
             const role: 'user' | 'agent' = m.role === 'user' ? 'user' : 'agent'
+            const { thinking, content: visibleContent } = role === 'agent'
+              ? extractThinking(content)
+              : { thinking: null, content }
             const msg: ChatMessage = {
               id: `loaded_${id}_${idx}`,
               role,
-              content,
+              content: visibleContent,
               timestamp: m.timestamp ? new Date(m.timestamp) : new Date(),
               status: 'complete',
+              thinking: thinking ?? undefined,
             }
             acc.push(msg)
             return acc

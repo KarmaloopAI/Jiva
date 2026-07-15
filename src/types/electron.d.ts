@@ -61,17 +61,20 @@ interface ElectronAPI {
     onJivaLog: (callback: (event: CodeLogEvent) => void) => void
     resetConversation: () => Promise<{ success: boolean }>
     loadConversation: (id: string) => Promise<{ success: boolean; error?: string }>
+    switchModel: (model: string) => Promise<{ success: boolean; error?: string }>
   }
   config: {
     read: () => Promise<unknown>
     write: (config: unknown) => Promise<boolean>
     getPath: () => Promise<string>
     setupProvider: (args: {
-      provider: 'sarvam' | 'krutrim' | 'groq' | 'openai-compatible'
+      provider: 'sarvam' | 'krutrim' | 'groq' | 'together' | 'openai-compatible'
       apiKey: string
       customEndpoint?: string
       customModel?: string
+      hasVision?: boolean
     }) => Promise<{ success: boolean; error?: string }>
+    listModels: (params?: { endpoint?: string; apiKey?: string }) => Promise<{ success: boolean; models: string[]; error?: string }>
   }
   personas: {
     list: () => Promise<PersonaInfo[]>
@@ -121,6 +124,7 @@ interface ElectronAPI {
     restoreConversation: (id: string) => Promise<{
       success: boolean; workspace?: string; mcpServers?: string[]; maxIterations?: number; harness?: string; error?: string
     }>
+    switchModel: (model: string) => Promise<{ success: boolean; error?: string }>
     onCodeLog: (cb: (event: CodeLogEvent) => void) => void
   }
   git: {

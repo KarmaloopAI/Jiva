@@ -19,7 +19,10 @@
     "email": "achatterjee@gritsa.com"
   },
   "license": "MIT",
-  "jivaCompatibleVersion": "0.3.44",
+  "jivaCompatibleVersion": "0.3.50",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "dependencies": {
     "@tanstack/react-virtual": "^3.14.5",
     "clsx": "^2.1.1",

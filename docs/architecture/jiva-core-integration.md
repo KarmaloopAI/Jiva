@@ -30,9 +30,13 @@ process.env.PATH = loginPath
 ```
 
 This runs before any `execSync` or `import()` calls that depend on npm being
-on PATH. Also see `../CLAUDE.md` — the `--install` background-service setup
-(`macWriteLaunchAgent`/`winRegisterTask`) separately bakes an augmented PATH
-into the LaunchAgent plist / Scheduled Task, for the same underlying reason.
+on PATH. Also see `../CLAUDE.md` — the macOS `--install` background-service
+setup (`macWriteLaunchAgent`) separately bakes an augmented PATH into the
+LaunchAgent plist for the same underlying reason, since launchd's default
+environment is more minimal than an interactive shell's. The Windows
+equivalent (`winSetupStartupService`) doesn't need this — Startup-folder
+items run with the full interactive user environment already, unlike a
+launchd job.
 
 ### `resolveJivaCoreEntryPath()` (`server/jiva-runner.ts`)
 

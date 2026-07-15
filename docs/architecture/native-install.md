@@ -45,18 +45,40 @@ entirely — so KeepAlive never even gets a chance to fight a deliberate stop.
 Using an exit-code-based KeepAlive dict would only complicate reasoning
 about restarts without adding real safety.
 
-## Windows — Task Scheduler
+## Windows — Startup-folder supervisor (not Task Scheduler)
 
 **Implementation:** `server/index.ts` — `winFindJivamBin()`,
-`winRegisterTask()`, `winServiceControl()`.
+`winSetupStartupService()`, `winServiceControl()`.
 
-- Task name `JivamServer`, registered via `schtasks /Create /XML` (a
-  generated task definition, not command-line flags — needed for
-  `RestartOnFailure`, which has no `schtasks`-flag equivalent).
-- Logon trigger, `RestartOnFailure` (1 min interval, 999 retries), hidden
-  execution (no console window flash).
-- Managed via `schtasks /Run` / `/End` (`jivam start`/`stop`), and `/End`
-  then `/Run` for `restart`.
+This used to be a Scheduled Task (`JivamServer`, logon trigger,
+`RestartOnFailure`) — the obvious equivalent of the macOS LaunchAgent. It
+doesn't work for a script that promises "no admin needed": creating a task
+with a **logon trigger** specifically requires `SeCreateGlobalPrivilege`,
+which only administrators hold, regardless of the task's own run level
+(`LeastPrivilege` doesn't help — this is a trigger-type restriction, not a
+privilege-level one). A standard Windows account gets a flat "Access is
+denied" trying to register it.
+
+Current approach: a small self-restarting PowerShell supervisor script
+(`%LOCALAPPDATA%\Jivam\jivam-service.ps1`), launched via a shortcut in the
+current user's own Startup folder (`%APPDATA%\...\Start Menu\Programs\
+Startup\Jivam Server.lnk`). Windows runs everything in that folder
+automatically at every logon — a pure per-user filesystem operation, no
+privilege of any kind required.
+
+- The supervisor loop records its own PID to
+  `%LOCALAPPDATA%\Jivam\jivam-service.pid` on start, then loops running
+  `jivam --server-only`, restarting it 5s after any exit — the Startup-folder
+  equivalent of `RestartOnFailure`.
+- `jivam stop`/`restart` read that PID and run `taskkill /PID <pid> /T /F`
+  (`/T` kills the whole process tree — the supervisor *and* the jivam server
+  process it spawned).
+- `jivam start` re-launches the same VBScript wrapper the Startup shortcut
+  points to (`jivam-service-launcher.vbs`, which runs the `.ps1` hidden via
+  `wscript.exe //B`, matching the no-console-flash pattern already used for
+  the Desktop/Start Menu app launcher elsewhere in this file).
+- `jivam status` checks whether the recorded PID is still alive via
+  `tasklist /FI "PID eq <pid>"`.
 
 ## Update checks move to the background service
 

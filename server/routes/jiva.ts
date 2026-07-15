@@ -95,6 +95,16 @@ export function createJivaRouter(jivaRunner: JivaRunner, cloudRunner: CloudRunne
     }
   })
 
+  router.post('/switch-model', async (req, res) => {
+    const { model } = req.body as { model: string }
+    try {
+      await jivaRunner.switchModel(model)
+      res.json({ success: true })
+    } catch (err) {
+      res.json({ success: false, error: err instanceof Error ? err.message : String(err) })
+    }
+  })
+
   // Wire up status-changed events to WebSocket broadcasts
   jivaRunner.on('status-changed', (status: string, data: unknown) => {
     const serverStatus = status === 'ready' || status === 'busy' ? 'running' : status

@@ -65,6 +65,8 @@ interface JivaStore {
   lastError: string | null
   deepRun: boolean
   maxIterations: 10 | 50 | 100
+  currentModel: string | null
+  switchingModel: boolean
 
   setServerStatus: (status: ServerStatus) => void
   setConnectionStatus: (status: ConnectionStatus) => void
@@ -72,6 +74,7 @@ interface JivaStore {
   setCurrentPhase: (phase: string | null) => void
   setDeepRun: (value: boolean) => void
   setMaxIterations: (value: 10 | 50 | 100) => void
+  switchModel: (model: string) => Promise<{ success: boolean; error?: string }>
 
   startServer: () => Promise<{ success: boolean; error?: string }>
   stopServer: () => Promise<void>
@@ -97,12 +100,25 @@ export const useJivaStore = create<JivaStore>((set, get) => ({
   lastPlan: null,
   deepRun: true,
   maxIterations: 50,
+  currentModel: null,
+  switchingModel: false,
 
   setServerStatus: (status) => set({ serverStatus: status }),
   setConnectionStatus: (status) => set({ connectionStatus: status }),
   setLastError: (error) => set({ lastError: error }),
   setCurrentPhase: (phase) => set({ currentPhase: phase }),
   setLastPlan: (plan) => set({ lastPlan: plan }),
+
+  switchModel: async (model: string) => {
+    set({ switchingModel: true })
+    try {
+      const result = await window.electron.jiva.switchModel(model)
+      if (result.success) set({ currentModel: model })
+      return result
+    } finally {
+      set({ switchingModel: false })
+    }
+  },
   setDeepRun: (value) => set({ deepRun: value }),
   setMaxIterations: (value) => set({ maxIterations: value }),
 

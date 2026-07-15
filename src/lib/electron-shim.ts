@@ -131,14 +131,17 @@ const electronShim = {
     },
     resetConversation: () => post('/jiva/reset-conversation'),
     loadConversation: (id: string) => post('/jiva/load-conversation', { id }),
+    switchModel: (model: string) => post<{ success: boolean; error?: string }>('/jiva/switch-model', { model }),
   },
 
   config: {
     read: () => get('/config'),
     write: (config: unknown) => post('/config', config),
     getPath: () => get<string>('/config/path'),
-    setupProvider: (args: { provider: 'sarvam' | 'krutrim' | 'groq' | 'openai-compatible'; apiKey: string; customEndpoint?: string; customModel?: string }) =>
+    setupProvider: (args: { provider: 'sarvam' | 'krutrim' | 'groq' | 'together' | 'openai-compatible'; apiKey: string; customEndpoint?: string; customModel?: string; hasVision?: boolean }) =>
       post<{ success: boolean; error?: string }>('/config/setup-provider', args),
+    listModels: (params?: { endpoint?: string; apiKey?: string }) =>
+      get<{ success: boolean; models: string[]; error?: string }>('/config/models', params as Record<string, string> | undefined),
   },
 
   app: {
@@ -206,6 +209,7 @@ const electronShim = {
     restoreConversation: (id: string) => post<{
       success: boolean; workspace?: string; mcpServers?: string[]; maxIterations?: number; harness?: string; error?: string
     }>('/code/restore-conversation', { id }),
+    switchModel: (model: string) => post<{ success: boolean; error?: string }>('/code/switch-model', { model }),
     onCodeLog: (cb: (event: unknown) => void) => {
       on('jiva:code-log', (msg: unknown) => cb((msg as Record<string, unknown>).event))
     },

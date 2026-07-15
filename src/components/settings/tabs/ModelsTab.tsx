@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Cpu, Key, Globe, Save, ChevronDown, ChevronUp, Zap } from 'lucide-react'
+import { Cpu, Key, Globe, Save, ChevronDown, ChevronUp, Zap, RefreshCw } from 'lucide-react'
 import { Button } from '../../ui/Button'
 import { ModelSetupStep } from '../../setup/ModelSetupStep'
+import { toChatCompletionsUrl } from '../../../lib/endpoint-utils'
 
 interface ModelConfig {
   provider?: string
@@ -10,6 +11,9 @@ interface ModelConfig {
   defaultModel?: string
   model?: string           // legacy alias — prefer defaultModel
   useHarmonyFormat?: boolean
+  defaultMaxTokens?: number
+  maxRequestsPerMinute?: number
+  hasVision?: boolean
 }
 
 interface JivaConfig {
@@ -32,6 +36,11 @@ export function ModelsTab() {
   const [rModel, setRModel] = useState('')
   const [rProvider, setRProvider] = useState('')
   const [rHarmony, setRHarmony] = useState(false)
+  const [rMaxTokens, setRMaxTokens] = useState('')
+  const [rRateLimit, setRRateLimit] = useState('')
+  const [rHasVision, setRHasVision] = useState(false)
+  const [modelOptions, setModelOptions] = useState<string[]>([])
+  const [loadingModels, setLoadingModels] = useState(false)
 
   // Multimodal model fields
   const [mEnabled, setMEnabled] = useState(false)
@@ -50,6 +59,9 @@ export function ModelsTab() {
         setRModel(c.models.reasoning.defaultModel ?? c.models.reasoning.model ?? '')
         setRProvider(c.models.reasoning.provider ?? '')
         setRHarmony(c.models.reasoning.useHarmonyFormat ?? false)
+        setRMaxTokens(c.models.reasoning.defaultMaxTokens != null ? String(c.models.reasoning.defaultMaxTokens) : '')
+        setRRateLimit(c.models.reasoning.maxRequestsPerMinute != null ? String(c.models.reasoning.maxRequestsPerMinute) : '')
+        setRHasVision(c.models.reasoning.hasVision ?? false)
       }
       if (c?.models?.multimodal) {
         setMEnabled(true)
@@ -62,6 +74,31 @@ export function ModelsTab() {
 
   useEffect(() => { loadConfig() }, [loadConfig])
 
+  const fetchModels = useCallback(async () => {
+    if (!rEndpoint.trim() || !rApiKey.trim()) return
+    setLoadingModels(true)
+    try {
+      const result = await window.electron.config.listModels({ endpoint: rEndpoint, apiKey: rApiKey })
+      setModelOptions(result.success ? result.models : [])
+    } catch {
+      setModelOptions([])
+    } finally {
+      setLoadingModels(false)
+    }
+  }, [rEndpoint, rApiKey])
+
+  // Refetch whenever the endpoint/key change — including after switching
+  // providers via the picker above, which previously left the old
+  // provider's model list showing because this effect only ran once
+  // (guarded by `modelOptions.length === 0`, which was already non-empty).
+  useEffect(() => {
+    setModelOptions([])
+    if (rEndpoint.trim() && rApiKey.trim()) {
+      fetchModels()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rEndpoint, rApiKey])
+
   const handleSave = async () => {
     const base = config ?? { models: { reasoning: null } }
     setSaving(true)
@@ -71,18 +108,33 @@ export function ModelsTab() {
         reasoning: {
           ...base.models?.reasoning,
           provider: rProvider,
-          endpoint: rEndpoint,
+          endpoint: rEndpoint.trim() ? toChatCompletionsUrl(rEndpoint) : rEndpoint,
           apiKey: rApiKey,
           defaultModel: rModel,
           useHarmonyFormat: rHarmony,
+          defaultMaxTokens: rMaxTokens.trim() ? Number(rMaxTokens) : undefined,
+          maxRequestsPerMinute: rRateLimit.trim() ? Number(rRateLimit) : undefined,
+          hasVision: rHasVision,
         },
         multimodal: mEnabled
-          ? { endpoint: mEndpoint, apiKey: mApiKey, defaultModel: mModel }
+          ? { endpoint: mEndpoint.trim() ? toChatCompletionsUrl(mEndpoint) : mEndpoint, apiKey: mApiKey, defaultModel: mModel }
           : undefined,
       },
     }
     await window.electron.config.write(updated)
     setConfig(updated)
+
+    // Saving here only updates the config file — any chat/code session
+    // that's already running keeps using the model it was initialized
+    // with until something triggers a reinit. Fire the same switchModel
+    // reinit-and-reload used by the in-chat model dropdown so the change
+    // takes effect immediately instead of silently waiting for the next
+    // conversation/session restart.
+    if (rModel.trim()) {
+      window.electron.jiva.switchModel(rModel).catch(() => {})
+      window.electron.code.switchModel(rModel).catch(() => {})
+    }
+
     setSaving(false)
     setSaved(true)
     setTimeout(() => setSaved(false), 2500)
@@ -204,13 +256,54 @@ export function ModelsTab() {
             />
           </div>
           <div>
-            <label style={labelStyle}>Model Name</label>
+            <label style={labelStyle}>
+              <span className="flex items-center justify-between">
+                <span>Model Name</span>
+                <button
+                  type="button"
+                  onClick={fetchModels}
+                  disabled={loadingModels || !rEndpoint.trim() || !rApiKey.trim()}
+                  className="flex items-center gap-1 text-[10px] text-[var(--accent)] hover:underline disabled:opacity-40 disabled:no-underline"
+                >
+                  <RefreshCw size={9} className={loadingModels ? 'animate-spin' : ''} />
+                  {modelOptions.length > 0 ? 'Refresh models' : 'Fetch models'}
+                </button>
+              </span>
+            </label>
             <input
               style={inputStyle}
+              list="reasoning-model-options"
               value={rModel}
               onChange={(e) => setRModel(e.target.value)}
               placeholder="Meta-Llama-3.1-405B-Instruct"
             />
+            <datalist id="reasoning-model-options">
+              {modelOptions.map((m) => <option key={m} value={m} />)}
+            </datalist>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label style={labelStyle}>Max output tokens (optional)</label>
+              <input
+                style={inputStyle}
+                type="number"
+                min={1}
+                value={rMaxTokens}
+                onChange={(e) => setRMaxTokens(e.target.value)}
+                placeholder="e.g. 4096 for Sarvam"
+              />
+            </div>
+            <div>
+              <label style={labelStyle}>Rate limit — requests/min (optional)</label>
+              <input
+                style={inputStyle}
+                type="number"
+                min={1}
+                value={rRateLimit}
+                onChange={(e) => setRRateLimit(e.target.value)}
+                placeholder="e.g. 40 for Sarvam"
+              />
+            </div>
           </div>
           <div className="flex items-center gap-2 pt-1">
             <input
@@ -222,6 +315,18 @@ export function ModelsTab() {
             />
             <label htmlFor="harmony" className="text-xs text-[var(--text-muted)] cursor-pointer">
               Use Harmony format (Krutrim-specific)
+            </label>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="hasVision"
+              checked={rHasVision}
+              onChange={(e) => setRHasVision(e.target.checked)}
+              className="accent-purple-500"
+            />
+            <label htmlFor="hasVision" className="text-xs text-[var(--text-muted)] cursor-pointer">
+              This model supports vision (image input) natively
             </label>
           </div>
         </div>

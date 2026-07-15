@@ -1,5 +1,5 @@
-import { memo } from 'react'
-import { ChevronDown, ChevronUp, AlertCircle } from 'lucide-react'
+import { memo, useState } from 'react'
+import { ChevronDown, ChevronUp, AlertCircle, Brain } from 'lucide-react'
 import { MarkdownRenderer } from '../markdown/MarkdownRenderer'
 import { AgentWorkPanel } from './AgentWorkPanel'
 import { useChatStore } from '../../store/chat.store'
@@ -12,6 +12,7 @@ interface AgentMessageProps {
 
 export const AgentMessage = memo(function AgentMessage({ message }: AgentMessageProps) {
   const { toggleWorkPanel } = useChatStore()
+  const [thinkingExpanded, setThinkingExpanded] = useState(false)
   const hasWork = (message.agentWork && (
     (message.agentWork.plan?.subtasks?.length ?? 0) > 0 ||
     (message.agentWork.toolsUsed?.length ?? 0) > 0
@@ -32,6 +33,26 @@ export const AgentMessage = memo(function AgentMessage({ message }: AgentMessage
 
       {/* Content — full width, no constraining bubble (tables and wide content can expand freely) */}
       <div className="flex-1 min-w-0 w-full">
+        {message.thinking && (
+          <div className="mb-1.5">
+            <button
+              onClick={() => setThinkingExpanded((v) => !v)}
+              className="flex items-center gap-1.5 text-xs text-[var(--text-subtle)] hover:text-[var(--accent)] transition-colors"
+            >
+              <Brain size={12} />
+              {thinkingExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+              {thinkingExpanded ? 'Hide thinking' : 'Show thinking'}
+            </button>
+            {thinkingExpanded && (
+              <div
+                className="mt-1.5 rounded-lg px-3 py-2 text-xs italic leading-relaxed text-[var(--text-subtle)] whitespace-pre-wrap"
+                style={{ background: 'var(--bg-secondary)', border: '1px solid var(--card-border)' }}
+              >
+                {message.thinking}
+              </div>
+            )}
+          </div>
+        )}
         <div className="py-1">
           {message.status === 'error' ? (
             <div

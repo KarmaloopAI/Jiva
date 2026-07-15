@@ -5,7 +5,7 @@ import os from 'os'
 import path from 'path'
 import { pathToFileURL } from 'url'
 import { writeDirective } from './directive-manager'
-import { readConfig } from './config-manager'
+import { readConfig, writeConfig } from './config-manager'
 import * as harness from './harness'
 import type { Completer } from './harness'
 import { parseLogLine } from './code-runner'
@@ -141,6 +141,7 @@ export class JivaRunner extends EventEmitter {
       const reasoningConfig = jivaConfig.models.reasoning as {
         endpoint?: string; apiKey?: string; defaultModel?: string; model?: string
         useHarmonyFormat?: boolean; reasoningEffortStrategy?: string; defaultMaxTokens?: number
+        maxRequestsPerMinute?: number; hasVision?: boolean
       }
       const multimodalConfig = jivaConfig.models.multimodal as {
         endpoint?: string; apiKey?: string; defaultModel?: string
@@ -158,6 +159,8 @@ export class JivaRunner extends EventEmitter {
         useHarmonyFormat: reasoningConfig.useHarmonyFormat,
         ...(reasoningConfig.reasoningEffortStrategy ? { reasoningEffortStrategy: reasoningConfig.reasoningEffortStrategy } : {}),
         ...(reasoningConfig.defaultMaxTokens ? { defaultMaxTokens: reasoningConfig.defaultMaxTokens } : {}),
+        ...(reasoningConfig.maxRequestsPerMinute ? { maxRequestsPerMinute: reasoningConfig.maxRequestsPerMinute } : {}),
+        ...(reasoningConfig.hasVision ? { hasVision: true } : {}),
       })
 
       let multimodalModel: unknown
@@ -567,6 +570,33 @@ export class JivaRunner extends EventEmitter {
       await this.cleanup()
     }
     await this.initialize(persona)
+  }
+
+  /**
+   * Switch the reasoning model's defaultModel for dynamic mid-chat model
+   * selection. jiva-core's ModelOrchestrator has no live setter for its
+   * reasoning model, so this persists the new choice to Jivam's own config
+   * and re-initializes — preserving the current conversation by capturing
+   * its id first and reloading it after re-init, the same way resuming a
+   * saved conversation already works.
+   */
+  async switchModel(model: string): Promise<void> {
+    const conversationId = this.currentConversationId
+
+    const cfg = readConfig()
+    if (cfg?.models?.reasoning) {
+      cfg.models.reasoning.defaultModel = model
+      writeConfig(cfg)
+    }
+
+    if (this.agent) {
+      await this.cleanup()
+    }
+    await this.initialize()
+
+    if (conversationId) {
+      await this.loadConversation(conversationId)
+    }
   }
 
   /**

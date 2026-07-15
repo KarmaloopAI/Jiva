@@ -5,7 +5,7 @@ import os from 'os'
 import path from 'path'
 import { pathToFileURL } from 'url'
 import { writeDirective } from './directive-manager'
-import { readConfig } from './config-manager'
+import { readConfig, writeConfig } from './config-manager'
 import * as harness from './harness'
 import type { Completer } from './harness'
 
@@ -64,6 +64,10 @@ export class CodeRunner extends EventEmitter {
   private ready = false
   private deepRun = false
   private maxIterations = 50
+  // Cached so switchModel() can re-initialize with the same workspace/MCP
+  // servers — initialize() itself doesn't retain these as instance state.
+  private lastWorkspaceDir: string | null = null
+  private lastMcpServerNames: string[] | undefined = undefined
 
   isReady(): boolean {
     return this.ready
@@ -107,6 +111,8 @@ export class CodeRunner extends EventEmitter {
   async initialize(workspaceDir: string, mcpServerNames?: string[], opts?: { deepRun?: boolean; maxIterations?: number }): Promise<void> {
     this.deepRun = opts?.deepRun ?? false
     this.maxIterations = opts?.maxIterations ?? 50
+    this.lastWorkspaceDir = workspaceDir
+    this.lastMcpServerNames = mcpServerNames
 
     const entry = resolveJivaCoreEntryPath()
     console.log(`[CodeRunner] Loading jiva-core from: ${entry}`)
@@ -114,7 +120,6 @@ export class CodeRunner extends EventEmitter {
     const jiva = await import(pathToFileURL(entry).href)
 
     const {
-      configManager,
       ModelOrchestrator,
       WorkspaceManager,
       ConversationManager,
@@ -128,21 +133,36 @@ export class CodeRunner extends EventEmitter {
     // Store the jiva-core logger so runChat() can hook into it for tool event capture
     this.codeLogger = logger ?? null
 
-    // 1. Validate config
-    ;(configManager as { validateConfig(): void }).validateConfig()
-
-    const reasoningConfig = (configManager as {
-      getReasoningModel(): { endpoint: string; apiKey: string; defaultModel: string; useHarmonyFormat?: boolean }
-    }).getReasoningModel()
+    // 1. Load config from Jivam's own config file (not jiva-core's global
+    // singleton) — same source jiva-runner.ts uses for chat mode. This used
+    // to call jiva-core's own configManager.getReasoningModel(), which reads
+    // an entirely separate config file that's only populated by running the
+    // `jiva` CLI's own setup wizard — so defaultMaxTokens/hasVision/
+    // maxRequestsPerMinute/reasoningEffortStrategy set via Jivam's Settings
+    // UI never reached Code Mode at all.
+    const jivaConfig = readConfig()
+    if (!jivaConfig?.models?.reasoning?.apiKey) {
+      throw new Error('Jivam is not configured. Add your API key in Settings → Models.')
+    }
+    const reasoningConfig = jivaConfig.models.reasoning as {
+      endpoint?: string; apiKey?: string; defaultModel?: string; model?: string
+      useHarmonyFormat?: boolean; reasoningEffortStrategy?: string; defaultMaxTokens?: number
+      maxRequestsPerMinute?: number; hasVision?: boolean
+    }
 
     // 2. Create model + orchestrator
     const createModel = createKrutrimModel as (config: unknown) => unknown
+    const resolvedReasoningModel = reasoningConfig.defaultModel ?? reasoningConfig.model ?? ''
     const reasoningModel = createModel({
       endpoint: reasoningConfig.endpoint,
       apiKey: reasoningConfig.apiKey,
-      model: reasoningConfig.defaultModel,
+      model: resolvedReasoningModel,
       type: 'reasoning',
       useHarmonyFormat: reasoningConfig.useHarmonyFormat,
+      ...(reasoningConfig.reasoningEffortStrategy ? { reasoningEffortStrategy: reasoningConfig.reasoningEffortStrategy } : {}),
+      ...(reasoningConfig.defaultMaxTokens ? { defaultMaxTokens: reasoningConfig.defaultMaxTokens } : {}),
+      ...(reasoningConfig.maxRequestsPerMinute ? { maxRequestsPerMinute: reasoningConfig.maxRequestsPerMinute } : {}),
+      ...(reasoningConfig.hasVision ? { hasVision: true } : {}),
     })
 
     const OrchestratorClass = ModelOrchestrator as new (config: unknown) => unknown
@@ -384,6 +404,36 @@ export class CodeRunner extends EventEmitter {
   stop(): void {
     if (this.agent) {
       (this.agent as { stop(): void }).stop()
+    }
+  }
+
+  /**
+   * Switch the reasoning model's defaultModel for dynamic mid-session model
+   * selection. Same approach as JivaRunner.switchModel: jiva-core's
+   * ModelOrchestrator has no live setter for its reasoning model, so this
+   * persists the new choice and re-initializes with the same
+   * workspace/MCP servers/settings, then reloads the current conversation
+   * (if any) so history survives the swap.
+   */
+  async switchModel(model: string): Promise<void> {
+    if (!this.lastWorkspaceDir) {
+      throw new Error('CodeRunner not initialized')
+    }
+    const conversationId = this.getConversationId()
+
+    const cfg = readConfig()
+    if (cfg?.models?.reasoning) {
+      cfg.models.reasoning.defaultModel = model
+      writeConfig(cfg)
+    }
+
+    const workspaceDir = this.lastWorkspaceDir
+    const mcpServerNames = this.lastMcpServerNames
+    await this.cleanup()
+    await this.initialize(workspaceDir, mcpServerNames, { deepRun: this.deepRun, maxIterations: this.maxIterations })
+
+    if (conversationId) {
+      await (this.agent as { loadConversation(id: string): Promise<void> }).loadConversation(conversationId)
     }
   }
 

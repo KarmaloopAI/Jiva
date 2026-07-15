@@ -106,6 +106,42 @@ transport.
 
 ## Hard-won findings (don't rediscover these)
 
+**Dynamic model switching is a reinit+reload, not a live setter — jiva-core
+doesn't expose one.** `ModelOrchestrator` (jiva-core) holds its
+`reasoningModel` as a private field with no public setter, so there's no way
+to hot-swap the model inside an already-running `DualAgent`/`CodeAgent`
+session without a jiva-core change. `JivaRunner.switchModel()` /
+`CodeRunner.switchModel()` work around this by: persisting the new
+`defaultModel` to Jivam's own config, capturing the current conversation id,
+tearing down and re-initializing the runner (which builds a fresh
+`ModelClient` with the new model name), then reloading the captured
+conversation so history survives the swap. This is why `CodeRunner` now
+caches `lastWorkspaceDir`/`lastMcpServerNames` as instance fields —
+`initialize()` itself never retained them, but a reinit needs to reuse the
+exact same workspace/MCP servers the session was already running with.
+
+**`code-runner.ts` used to read model config from the wrong place entirely —
+watch for this pattern reappearing.** `jiva-runner.ts` (chat mode) has always
+deliberately read the reasoning model config from Jivam's own
+`~/.jivam/config.json` via `readConfig()` (see the comment right above where
+it does this) — never from jiva-core's own internal `configManager`
+singleton, which is populated by jiva-core's *own* CLI setup wizard (`jiva
+setup`/`jiva config`), a config file a Jivam-only user (who never touches the
+`jiva` CLI directly) would never have populated. `code-runner.ts` (code mode)
+didn't follow this pattern — it called jiva-core's own
+`configManager.getReasoningModel()` and `configManager.validateConfig()`
+directly, silently reading a completely different, likely-empty config file.
+This meant every field the Jivam UI writes (`defaultMaxTokens`,
+`reasoningEffortStrategy`, `maxRequestsPerMinute`, `hasVision`, whatever
+comes next) worked in Chat mode but had **zero effect in Code mode** — not
+because of a passthrough bug, but because Code mode wasn't even looking at
+the file those settings were saved to. Fixed by making `code-runner.ts`
+mirror `jiva-runner.ts` exactly: `readConfig()` from `./config-manager`, same
+`apiKey` presence check, same field passthrough into `createKrutrimModel()`.
+If a future jiva-core integration point (a new mode, a new agent type) reads
+model config, make sure it goes through Jivam's own `readConfig()` — never
+jiva-core's `configManager` singleton, which Jivam does not keep in sync.
+
 **Chrome `--app=URL` cannot give a real single-instance Dock/taskbar icon.**
 It runs inside the normal Chrome process/bundle ID, so the OS can't
 distinguish it from a regular browser window — clicking the "app" window's
@@ -165,6 +201,77 @@ also now the default first choice everywhere else Jivam opens a window
 Edge/Brave are fallbacks, not the primary path, a reversal of the original
 Electron-era assumption that Chrome's `--app=` gave the best experience.
 
+**Windows follows the same playbook as Safari: guide, don't automate.**
+`jivam --install` used to try to force-create the app automatically on
+Windows too, and it had the same class of problem as the old Safari
+System Events approach — silent failures tied to permissions (Node install
+via winget/MSI triggering a UAC prompt that a non-admin account can't
+approve at all, for example). Current approach (`installEdgeAppGuide` in
+`server/index.ts`): open a plain Edge tab at
+`http://localhost:7842/?installGuide=edge-app` — Edge ships on every Windows
+install by default, so there's no browser-detection chain needed — and let
+the page itself (`AddToDockGuide` in `src/App.tsx`, shared with the Safari
+flow via an `InstallGuideKind` union) show where to click: the install icon
+in Edge's address bar, with the ⋯ → Apps → "Install this site as an app"
+route as a documented fallback for older Edge layouts. `jivam --install`
+polls `findEdgePwaShortcut()` (Start Menu `.lnk` files, matched by name and
+mtime — the Windows equivalent of `findSafariWebAppBundle`'s Info.plist
+diffing) for up to 2 minutes, falling back to a plain Edge-tab shortcut
+wrapper only if nothing appears. **No Chrome/Brave fallback chain on
+Windows** — Edge's guaranteed presence removes the need for one, unlike
+macOS where Safari's absence is theoretically possible.
+
+**Node.js version parsing bug (fixed, worth remembering the shape of it):**
+`scripts/install.sh` used to strip the `v` prefix and pre-release suffix
+from `node --version` with `${NODE_VER//[^0-9.]*/}` — this looks like a
+regex but bash parameter-expansion patterns are **glob** patterns, where
+`*` is a standalone "match anything" wildcard, not a quantifier tied to the
+preceding character class. So `[^0-9.]*` matched "one non-digit char
+followed by literally anything" and wiped the entire version string,
+leaving `MAJOR` empty every time. An empty string in `[ -lt ]` numeric
+context evaluates as `0` in bash, so the script always concluded Node was
+too old and tried to reinstall/upgrade — even when e.g. v24 was already
+installed. Fixed with plain `${NODE_VER#v}` (prefix strip, not glob
+substitution). If you ever need to parse a version string in bash again,
+default to `#`/`%` prefix/suffix stripping, not `//pattern/repl` — the glob
+semantics are a trap that looks like it should work like regex and doesn't.
+Also: the threshold itself was stale — jiva-core's `package.json` requires
+Node `>=20`, but both install scripts only checked `>=18`. Both now check
+`>=20` (and Jivam's own `package.json` now declares the same `engines`
+constraint).
+
+**winget/choco on Windows generally need elevation — don't claim otherwise.**
+Verified via web research (see PR history around this note): Node's official
+winget package (`OpenJS.NodeJS.LTS`) installs machine-wide, which typically
+triggers a UAC prompt; a standard (non-admin) account can't approve that at
+all. Chocolatey is even more explicit about it — most packages require an
+elevated shell. `install.ps1` tries winget first (now checking `$LASTEXITCODE`
+instead of blindly assuming success), but the real fix is the fallback: a
+portable Node.js build, downloaded as a plain zip and extracted into
+`%LOCALAPPDATA%\Jivam\node`, added to the **User** (not Machine) PATH via
+`[Environment]::SetEnvironmentVariable(...,'User')`. That's a pure per-user
+filesystem + registry operation — no installer, no UAC, works for any
+account. If you're ever tempted to reach for choco in this script, remember
+the portable-zip approach is the one that's actually guaranteed to work
+without admin rights.
+
+**The setup/check screen (`SetupScreen.tsx`) is deliberately not a 3-step
+gate anymore.** It used to require Node.js, jiva-core, *and* config checks
+to all pass in sequence before showing anything else — but by the time this
+screen can even load, Node and jiva-core are already installed and running
+(that's how the user got here via `scripts/install.sh`/`install.ps1`), so
+treating them as steps to click through was pure friction for the common
+case. They're now a quiet safety net (a red banner) that only appears if
+one of them is actually broken; the API key form (`ModelSetupStep`) is the
+main, prominent content. Also: `App.tsx` used to `return <SetupScreen />`
+early, which meant `AddToDockGuide` — driven by a URL param, unrelated to
+setup state — never got a chance to render for a first-run user stuck on
+setup. Fixed by hoisting `AddToDockGuide` outside the `setupDone` branching
+entirely, rendered unconditionally in `App()`'s final return. If you add
+another screen-state branch to `App()` in the future, make sure anything
+similarly state-independent (URL-param-driven overlays, WS-driven banners)
+stays outside the branch, not nested inside one arm of it.
+
 **Chrome's CDP `PWA.install` domain exists and is genuinely real** (not a
 hallucination — confirmed via Chromium's own docs and a live test), but as of
 Chrome 149 (mid-2026) it's still gated to Dev/Canary channel only, never
@@ -174,16 +281,46 @@ current status before spending time on it again.
 
 **Background service architecture**: the Jivam server now runs persistently
 via a macOS `launchd` LaunchAgent (`~/Library/LaunchAgents/ai.karmaloop.jivam.plist`,
-`RunAtLoad` + `KeepAlive`) or a Windows Scheduled Task (`JivamServer`, logon
-trigger + `RestartOnFailure`), started by `jivam --install`. This eliminates
-the old "click Dock icon before server is up → blank page" race entirely,
-since the server is (almost) always already running by the time any icon is
-clicked. Managed via `jivam start/stop/restart/status`. The actual Dock/
-Desktop icon is now just a thin launcher — it assumes the server is already up
-and only opens a browser window; server startup responsibility moved
-entirely to the OS service manager. See `server/index.ts`:
-`macWriteLaunchAgent`, `macServiceControl`, `winRegisterTask`,
+`RunAtLoad` + `KeepAlive`) or, on Windows, a self-restarting PowerShell
+supervisor launched from the user's own Startup folder — **not** a Scheduled
+Task, see the next note for why — started by `jivam --install`. This
+eliminates the old "click Dock icon before server is up → blank page" race
+entirely, since the server is (almost) always already running by the time
+any icon is clicked. Managed via `jivam start/stop/restart/status`. The
+actual Dock/Desktop icon is now just a thin launcher — it assumes the server
+is already up and only opens a browser window; server startup responsibility
+moved entirely to the OS service manager. See `server/index.ts`:
+`macWriteLaunchAgent`, `macServiceControl`, `winSetupStartupService`,
 `winServiceControl`.
+
+**Windows Scheduled Tasks with a logon trigger need admin — don't use them
+for "no elevation needed" background services.** This used to register a
+`JivamServer` Scheduled Task via `schtasks /Create /XML` with a
+`<LogonTrigger>` and `RunLevel: LeastPrivilege`, expecting the low run level
+to keep it elevation-free. It didn't — verified via research (multiple
+independent sources agree): creating a task with a **logon trigger**
+specifically requires `SeCreateGlobalPrivilege`, which only administrators
+hold, completely independent of the task's own run level. A standard
+account gets a flat "Access is denied" trying to register it — this is
+almost certainly why background-service setup was silently failing/
+requiring elevation for non-admin Windows users. Time-based triggers don't
+have this restriction, only logon/startup/workstation-unlock triggers do,
+which is exactly the trigger type a "start at login" service needs, so
+there's no LeastPrivilege-compatible way to make this work via Task
+Scheduler. Current fix: skip Task Scheduler entirely. `winSetupStartupService`
+writes a small self-restarting PowerShell supervisor
+(`%LOCALAPPDATA%\Jivam\jivam-service.ps1`) and points a shortcut in the
+user's own Startup folder (`%APPDATA%\...\Start Menu\Programs\Startup\`) at
+it — Windows auto-launches everything there at logon, and placing a file in
+your own Startup folder is a plain per-user filesystem operation with zero
+privilege requirements. The supervisor records its own PID
+(`jivam-service.pid`) so `jivam stop`/`restart` can `taskkill /PID <pid> /T
+/F` (killing the whole tree — supervisor + the jivam server it spawned), and
+loops re-launching `jivam --server-only` a few seconds after any exit as the
+RestartOnFailure equivalent. If you're ever tempted to reach for `schtasks`
+again for anything that needs to survive without an admin account, remember
+this restriction is about the trigger type, not anything you can configure
+around in the task definition.
 
 **Krutrim's stricter models (e.g. Qwen3.6) reject any request where the
 system message isn't first/alone.** This was a real bug in **jiva-core**

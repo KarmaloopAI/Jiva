@@ -66,6 +66,47 @@ function findSafariWebAppBundle(sinceMs: number): string | null {
 }
 
 /**
+ * Finds the shortcut Edge creates when a site is installed as an app via
+ * "Install this site as an app" (the Windows equivalent of Safari's Add to
+ * Dock). Edge places these in the Start Menu — sometimes directly in the
+ * Programs folder, sometimes nested under a "Microsoft Edge Apps" subfolder
+ * depending on Windows/Edge version — so this checks both, one level deep.
+ * `sinceMs` filters to shortcuts written after that time, same mtime-based
+ * approach as findSafariWebAppBundle, so we don't false-positive on an
+ * unrelated older shortcut. Pass 0 to accept any existing match (used by
+ * openAppWindow to find an already-installed PWA on a later launch).
+ */
+function findEdgePwaShortcut(sinceMs: number): string | null {
+  const startMenuDirs = [
+    path.join(process.env.APPDATA ?? '', 'Microsoft', 'Windows', 'Start Menu', 'Programs'),
+    path.join(process.env.LOCALAPPDATA ?? '', 'Microsoft', 'Windows', 'Start Menu', 'Programs'),
+  ]
+  const searchDirs: string[] = []
+  for (const dir of startMenuDirs) {
+    if (!dir || !fs.existsSync(dir)) continue
+    searchDirs.push(dir)
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) searchDirs.push(path.join(dir, entry.name))
+    }
+  }
+  for (const dir of searchDirs) {
+    let entries: string[]
+    try { entries = fs.readdirSync(dir) } catch { continue }
+    for (const entry of entries) {
+      if (!entry.toLowerCase().endsWith('.lnk')) continue
+      if (!entry.toLowerCase().includes('jivam')) continue
+      const lnkPath = path.join(dir, entry)
+      try {
+        const stat = fs.statSync(lnkPath)
+        if (stat.mtimeMs < sinceMs) continue
+        return lnkPath
+      } catch {}
+    }
+  }
+  return null
+}
+
+/**
  * Guide the user to install Jivam as a genuine Safari web app — a real,
  * separate .app bundle with its own bundle identifier
  * (com.apple.Safari.WebApp.<uuid>). This gives native macOS Dock semantics
@@ -145,6 +186,60 @@ async function installSafariAddToDock(url: string): Promise<string | null> {
   }
 }
 
+/**
+ * Guide the user to install Jivam as an app via Edge's own "Install this
+ * site as an app" feature — the Windows equivalent of installSafariAddToDock
+ * above, and built the same way on purpose: earlier attempts at scripting
+ * Windows app-installation automatically (driving Edge's UI, or relying on
+ * winget/MSI installers that need elevation) ran into the same class of
+ * permission problems as the old macOS Accessibility approach — some of them
+ * silently fail for standard (non-admin) accounts. Since Edge ships by
+ * default on every Windows install, there's no need for a Chrome fallback
+ * chain here either: just open a plain Edge tab with on-screen instructions
+ * (see AddToDockGuide in src/App.tsx, which also handles this platform) and
+ * poll for the resulting Start Menu shortcut.
+ */
+async function installEdgeAppGuide(url: string): Promise<string | null> {
+  const { execFile } = await import('child_process')
+
+  const edgePaths = [
+    path.join(process.env['ProgramFiles'] ?? 'C:\\Program Files', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+    path.join(process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+  ]
+  const edgePath = edgePaths.find(p => fs.existsSync(p))
+  if (!edgePath) {
+    console.warn('Microsoft Edge was not found — falling back to a plain shortcut wrapper.')
+    return null
+  }
+
+  const automationStartMs = Date.now()
+  const guideUrl = `${url}/?installGuide=edge-app`
+
+  try {
+    execFile(edgePath, [guideUrl])
+  } catch (err) {
+    console.warn('Could not open Edge automatically — falling back to a plain shortcut wrapper:', err)
+    return null
+  }
+
+  console.log('\nOpened Jivam in Edge with on-screen instructions.')
+  console.log('Click the install icon in Edge\'s address bar (or ⋯ menu > Apps > Install this site as an app).')
+  console.log('Waiting up to 2 minutes for you to finish...')
+  for (let i = 0; i < 120; i++) {
+    await new Promise(resolve => setTimeout(resolve, 1000))
+    const found = findEdgePwaShortcut(automationStartMs)
+    if (found) {
+      try {
+        await fetch(`${url}/api/system/pwa-installed`, { method: 'POST' })
+      } catch {}
+      return found
+    }
+  }
+
+  console.warn('No app install detected within 2 minutes — falling back to a plain shortcut wrapper. Run `jivam --install` again anytime to retry.')
+  return null
+}
+
 // ---------------------------------------------------------------------------
 // Background service management (macOS: launchd, Windows: Task Scheduler)
 //
@@ -156,7 +251,6 @@ async function installSafariAddToDock(url: string): Promise<string | null> {
 // ---------------------------------------------------------------------------
 
 const JIVAM_LABEL = 'ai.karmaloop.jivam'
-const WIN_TASK_NAME = 'JivamServer'
 
 function macPlistPath(): string {
   return path.join(os.homedir(), 'Library', 'LaunchAgents', `${JIVAM_LABEL}.plist`)
@@ -508,65 +602,127 @@ async function winFindJivamBin(): Promise<string> {
   return `"${process.execPath}" "${process.argv[1]}"`
 }
 
+function winServiceDir(): string {
+  const localAppData = process.env.LOCALAPPDATA ?? path.join(os.homedir(), 'AppData', 'Local')
+  return path.join(localAppData, 'Jivam')
+}
+
+function winServicePs1Path(): string {
+  return path.join(winServiceDir(), 'jivam-service.ps1')
+}
+
+function winServiceVbsPath(): string {
+  return path.join(winServiceDir(), 'jivam-service-launcher.vbs')
+}
+
+function winServicePidPath(): string {
+  return path.join(winServiceDir(), 'jivam-service.pid')
+}
+
+function winStartupShortcutPath(): string {
+  const appData = process.env.APPDATA ?? path.join(os.homedir(), 'AppData', 'Roaming')
+  return path.join(appData, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup', 'Jivam Server.lnk')
+}
+
 /**
- * Registers "JivamServer" as a Windows Scheduled Task: starts at logon,
- * restarts automatically on failure, runs hidden (no console window). This
- * is the Windows equivalent of the macOS LaunchAgent — the server runs
- * persistently in the background instead of being started on-demand by
- * whatever opens the Desktop/Start Menu shortcut.
+ * Sets up Jivam's background server to start automatically — without any
+ * elevation. A Windows Scheduled Task with a logon trigger was the obvious
+ * choice here (and what this used to do), but creating one requires
+ * SeCreateGlobalPrivilege, which only administrators hold — this isn't a
+ * run-level thing (LeastPrivilege doesn't help), it's specifically a
+ * restriction on the *trigger type* itself. A standard, non-admin Windows
+ * account gets a flat "Access is denied" trying to create it.
+ *
+ * Instead: a small self-restarting PowerShell supervisor, launched via a
+ * shortcut placed in the current user's own Startup folder
+ * (%APPDATA%\...\Startup). Windows runs everything in that folder
+ * automatically at logon — it's a pure per-user filesystem operation with
+ * no privilege requirements at all. The supervisor loop approximates a
+ * Scheduled Task's RestartOnFailure by just re-launching jivam --server-only
+ * a few seconds after any exit, and records its own PID so
+ * start/stop/restart/status have something to act on (taskkill /T to stop
+ * the whole tree, since Windows has no launchctl-style service registry to
+ * query).
  */
-async function winRegisterTask(jivamBinPath: string): Promise<void> {
+async function winSetupStartupService(jivamBinPath: string): Promise<void> {
   const { exec } = await import('child_process')
   const { promisify } = await import('util')
   const execAsync = promisify(exec)
+
+  const serviceDir = winServiceDir()
+  fs.mkdirSync(serviceDir, { recursive: true })
+  const jivamHome = path.join(os.homedir(), '.jivam')
+  fs.mkdirSync(jivamHome, { recursive: true })
+  const logPath = path.join(jivamHome, 'jivam.log')
+  const ps1Path = winServicePs1Path()
+  const vbsPath = winServiceVbsPath()
+  const pidPath = winServicePidPath()
 
   const isQuotedCmd = jivamBinPath.startsWith('"')
   const [command, ...restArgs] = isQuotedCmd
     ? jivamBinPath.split('" "').map(s => s.replace(/^"|"$/g, ''))
     : [jivamBinPath]
-  const args = [...restArgs, '--server-only'].join(' ')
+  const psQuote = (s: string) => `'${s.replace(/'/g, "''")}'`
+  const psArgs = [...restArgs, '--server-only'].map(psQuote).join(' ')
 
-  const taskXml = `<?xml version="1.0" encoding="UTF-16"?>
-<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
-  <Triggers>
-    <LogonTrigger>
-      <Enabled>true</Enabled>
-    </LogonTrigger>
-  </Triggers>
-  <Principals>
-    <Principal id="Author">
-      <LogonType>InteractiveToken</LogonType>
-      <RunLevel>LeastPrivilege</RunLevel>
-    </Principal>
-  </Principals>
-  <Settings>
-    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
-    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
-    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
-    <StartWhenAvailable>true</StartWhenAvailable>
-    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
-    <Hidden>true</Hidden>
-    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
-    <RestartOnFailure>
-      <Interval>PT1M</Interval>
-      <Count>999</Count>
-    </RestartOnFailure>
-  </Settings>
-  <Actions Context="Author">
-    <Exec>
-      <Command>${command}</Command>
-      <Arguments>${args}</Arguments>
-    </Exec>
-  </Actions>
-</Task>
+  const ps1 = `
+$pidPath = ${psQuote(pidPath)}
+$PID | Out-File -FilePath $pidPath -Encoding ascii -Force
+$logPath = ${psQuote(logPath)}
+while ($true) {
+  "$(Get-Date -Format o): starting jivam server" | Out-File -Append -FilePath $logPath
+  & ${psQuote(command)} ${psArgs} *>> $logPath
+  "$(Get-Date -Format o): jivam server exited — restarting in 5s" | Out-File -Append -FilePath $logPath
+  Start-Sleep -Seconds 5
+}
+`.trim()
+  fs.writeFileSync(ps1Path, ps1)
+
+  const vbs = `Set oShell = CreateObject("WScript.Shell")
+oShell.Run "powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File " & Chr(34) & "${ps1Path.replace(/\\/g, '\\\\')}" & Chr(34), 0, False
 `
-  const xmlPath = path.join(os.tmpdir(), 'jivam-task.xml')
-  // Task Scheduler XML must be UTF-16LE with BOM
-  fs.writeFileSync(xmlPath, Buffer.concat([Buffer.from([0xFF, 0xFE]), Buffer.from(taskXml, 'utf16le')]))
+  fs.writeFileSync(vbsPath, vbs)
+
+  // Startup-folder shortcut — Windows launches this automatically at every
+  // logon. Same CreateShortcut approach used for the Desktop/Start Menu app
+  // shortcuts elsewhere in this file — a per-user COM call, no elevation.
+  const shortcutPath = winStartupShortcutPath()
+  const shortcutPs = `
+$ws = New-Object -ComObject WScript.Shell
+$s = $ws.CreateShortcut('${shortcutPath.replace(/\\/g, '\\\\')}')
+$s.TargetPath = 'wscript.exe'
+$s.Arguments = '//B "${vbsPath.replace(/\\/g, '\\\\')}"'
+$s.WorkingDirectory = '${serviceDir.replace(/\\/g, '\\\\')}'
+$s.Description = 'Jivam background server'
+$s.Save()
+`.trim()
   try {
-    await execAsync(`schtasks /Create /TN "${WIN_TASK_NAME}" /XML "${xmlPath}" /F`)
-  } finally {
-    fs.rmSync(xmlPath, { force: true })
+    fs.mkdirSync(path.dirname(shortcutPath), { recursive: true })
+    await execAsync(`powershell -NoProfile -NonInteractive -Command "${shortcutPs.replace(/"/g, '\\"').replace(/\n/g, '; ')}"`)
+  } catch (err) {
+    console.warn('Could not create Startup shortcut:', err)
+  }
+}
+
+function winReadServicePid(): number | null {
+  try {
+    const raw = fs.readFileSync(winServicePidPath(), 'utf-8').trim()
+    const pid = parseInt(raw, 10)
+    return Number.isFinite(pid) && pid > 0 ? pid : null
+  } catch {
+    return null
+  }
+}
+
+async function winIsProcessAlive(pid: number): Promise<boolean> {
+  const { exec } = await import('child_process')
+  const { promisify } = await import('util')
+  const execAsync = promisify(exec)
+  try {
+    const { stdout } = await execAsync(`tasklist /FI "PID eq ${pid}" /FO CSV /NH`)
+    return stdout.includes(String(pid))
+  } catch {
+    return false
   }
 }
 
@@ -575,37 +731,50 @@ async function winServiceControl(action: 'start' | 'stop' | 'restart' | 'status'
   const { promisify } = await import('util')
   const execAsync = promisify(exec)
 
-  try {
-    await execAsync(`schtasks /Query /TN "${WIN_TASK_NAME}"`)
-  } catch {
+  const vbsPath = winServiceVbsPath()
+  if (!fs.existsSync(vbsPath)) {
     console.log('Jivam background service is not installed. Run: jivam --install')
     return
   }
 
-  if (action === 'start' || action === 'restart') {
-    if (action === 'restart') {
-      try { await execAsync(`schtasks /End /TN "${WIN_TASK_NAME}"`) } catch {}
-      await new Promise(resolve => setTimeout(resolve, 1000))
-    }
+  const startSupervisor = async () => {
     try {
-      await execAsync(`schtasks /Run /TN "${WIN_TASK_NAME}"`)
-      console.log(`Jivam background service ${action === 'restart' ? 'restarted' : 'started'}.`)
+      await execAsync(`wscript.exe //B "${vbsPath}"`)
     } catch (err) {
-      console.error(`Failed to ${action} service:`, err)
+      console.error('Failed to start service:', err)
     }
+  }
+
+  const stopSupervisor = async () => {
+    const pid = winReadServicePid()
+    if (pid && await winIsProcessAlive(pid)) {
+      // /T kills the whole process tree — the supervisor AND the jivam
+      // server process it spawned — /F forces it.
+      try { await execAsync(`taskkill /PID ${pid} /T /F`) } catch {}
+    }
+  }
+
+  if (action === 'start') {
+    const pid = winReadServicePid()
+    if (pid && await winIsProcessAlive(pid)) {
+      console.log('Jivam background service is already running.')
+      return
+    }
+    await startSupervisor()
+    console.log('Jivam background service started.')
   } else if (action === 'stop') {
-    try {
-      await execAsync(`schtasks /End /TN "${WIN_TASK_NAME}"`)
-      console.log('Jivam background service stopped.')
-    } catch {
-      console.warn('Service was not running (or already stopped).')
-    }
+    await stopSupervisor()
+    console.log('Jivam background service stopped.')
+  } else if (action === 'restart') {
+    await stopSupervisor()
+    await new Promise(resolve => setTimeout(resolve, 1000))
+    await startSupervisor()
+    console.log('Jivam background service restarted.')
   } else if (action === 'status') {
-    try {
-      const { stdout } = await execAsync(`schtasks /Query /TN "${WIN_TASK_NAME}" /FO LIST /V`)
-      const statusMatch = stdout.match(/Status:\s*(.+)/)
-      console.log(statusMatch ? `Jivam background service status: ${statusMatch[1].trim()}` : 'Jivam background service is registered.')
-    } catch {
+    const pid = winReadServicePid()
+    if (pid && await winIsProcessAlive(pid)) {
+      console.log(`Jivam background service is running. Supervisor PID: ${pid}`)
+    } else {
       console.log('Jivam background service is not running.')
     }
   }
@@ -615,31 +784,17 @@ async function winServiceControl(action: 'start' | 'stop' | 'restart' | 'status'
 // jivam --install  (Windows)
 // Registers a Scheduled Task so the server runs persistently in the
 // background (started at logon, restarted automatically on failure), then
-// creates Desktop + Start Menu shortcuts that just open the browser — no
-// server-start logic needed there anymore since the task keeps it alive.
+// guides the user through installing Jivam as an Edge app — the real,
+// single-instance kind, not a `--app=` window sharing Edge's own identity.
+// Only falls back to a plain shortcut wrapper if that doesn't complete.
 // ---------------------------------------------------------------------------
 async function runInstallWindows(): Promise<void> {
-  const { exec } = await import('child_process')
-  const { promisify } = await import('util')
-  const execAsync = promisify(exec)
-
-  const localAppData = process.env.LOCALAPPDATA ?? path.join(os.homedir(), 'AppData', 'Local')
-  const installDir = path.join(localAppData, 'Jivam')
-  const batPath = path.join(installDir, 'jivam-launcher.bat')
-  const vbsPath = path.join(installDir, 'jivam-launcher.vbs')
-  const icoPath = path.join(installDir, 'Jivam.ico')
-  const desktopPath = path.join(os.homedir(), 'Desktop', 'Jivam.lnk')
-  const startMenuDir = path.join(localAppData, 'Microsoft', 'Windows', 'Start Menu', 'Programs')
-  const startMenuPath = path.join(startMenuDir, 'Jivam.lnk')
-
-  fs.mkdirSync(installDir, { recursive: true })
-
   const url = `http://localhost:${PORT}`
 
-  // ── 1. Resolve the jivam binary and register the background task ─────────
+  // ── 1. Resolve the jivam binary and set up the background service ─────────
   console.log('Setting up the Jivam background service...')
   const jivamBinPath = await winFindJivamBin()
-  await winRegisterTask(jivamBinPath)
+  await winSetupStartupService(jivamBinPath)
   await winServiceControl('restart')
 
   // ── 2. Wait for the server to come up ──────────────────────────────────────
@@ -657,19 +812,48 @@ async function runInstallWindows(): Promise<void> {
     console.log('Jivam server is running.')
   }
 
-  // ── 3. Shortcut launcher — just opens the browser (server is already up) ──
-  const batScript = `@echo off
-set URL=${url}
-set CHROME=%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe
-set EDGE=%ProgramFiles(x86)%\\Microsoft\\Edge\\Application\\msedge.exe
+  // ── 3. Guide the user through installing Jivam as an Edge app ─────────────
+  console.log('Setting up Jivam as an Edge app...')
+  const pwaShortcut = await installEdgeAppGuide(url)
 
-if exist "%CHROME%" (
-  start "" "%CHROME%" --app=%URL% --disable-extensions
-) else if exist "%EDGE%" (
-  start "" "%EDGE%" --app=%URL% --disable-extensions
-) else (
-  start "" %URL%
-)
+  if (pwaShortcut) {
+    console.log(`\nDone! Jivam is installed as an app: ${pwaShortcut}`)
+  } else {
+    await winCreateFallbackWrapper(url)
+    console.log('\nDone! Double-click the Jivam icon on your Desktop to launch.')
+  }
+  console.log('The server runs continuously in the background — manage it with:')
+  console.log('  jivam stop      jivam start      jivam restart      jivam status')
+  process.exit(0)
+}
+
+/**
+ * Fallback for when installEdgeAppGuide doesn't complete in time (or Edge
+ * isn't found at all): a Desktop + Start Menu shortcut that just opens a
+ * plain Edge tab. No --app mode and no Chrome/Brave fallback chain here —
+ * Edge ships by default on every Windows install, so there's nothing to
+ * fall back further to.
+ */
+async function winCreateFallbackWrapper(url: string): Promise<void> {
+  const { exec } = await import('child_process')
+  const { promisify } = await import('util')
+  const execAsync = promisify(exec)
+
+  const localAppData = process.env.LOCALAPPDATA ?? path.join(os.homedir(), 'AppData', 'Local')
+  const installDir = path.join(localAppData, 'Jivam')
+  const batPath = path.join(installDir, 'jivam-launcher.bat')
+  const vbsPath = path.join(installDir, 'jivam-launcher.vbs')
+  const icoPath = path.join(installDir, 'Jivam.ico')
+  const desktopPath = path.join(os.homedir(), 'Desktop', 'Jivam.lnk')
+  const startMenuDir = path.join(localAppData, 'Microsoft', 'Windows', 'Start Menu', 'Programs')
+  const startMenuPath = path.join(startMenuDir, 'Jivam.lnk')
+
+  fs.mkdirSync(installDir, { recursive: true })
+
+  // ── Shortcut launcher — just opens Edge (server is already up) ────────────
+  const batScript = `@echo off
+set URL=${url}?installGuide=edge-app
+start "" msedge "%URL%"
 `
 
   // ── VBScript wrapper — runs the .bat silently (no terminal window) ─────────
@@ -736,11 +920,6 @@ $s.Save()
   } catch (err) {
     console.warn('Could not create shortcuts:', err)
   }
-
-  console.log('\nDone! Double-click the Jivam icon on your Desktop to launch.')
-  console.log('The server runs continuously in the background — manage it with:')
-  console.log('  jivam stop      jivam start      jivam restart      jivam status')
-  process.exit(0)
 }
 
 const __dirname_cjs = __dirname
@@ -862,18 +1041,36 @@ async function openAppWindow(url: string): Promise<void> {
       } catch {}
     }
   } else if (process.platform === 'win32') {
-    const winBrowsers = [
-      ['msedge', [`--app=${url}`]],
-      ['chrome', [`--app=${url}`]],
-      ['brave', [`--app=${url}`]],
-    ] as Array<[string, string[]]>
-    for (const [browser, args] of winBrowsers) {
+    // If Jivam was previously installed as a real Edge app, launch that
+    // shortcut directly rather than opening a browser tab.
+    const existingShortcut = findEdgePwaShortcut(0)
+    if (existingShortcut) {
       try {
-        execFile(`start ${browser}`, args, { shell: true })
+        await execAsync(`start "" "${existingShortcut}"`)
+        console.log(`Launched Edge app: ${existingShortcut}`)
         return
       } catch {}
     }
-    // PowerShell fallback
+
+    // No PWA installed yet — open a plain Edge tab with the in-page install
+    // walkthrough (see AddToDockGuide in src/App.tsx). Edge ships by default
+    // on every Windows install, so there's no Chrome/Brave fallback chain
+    // here, and no --app= mode (that shares Edge's own window identity
+    // rather than being a real, single-instance app).
+    try {
+      const edgePaths = [
+        path.join(process.env['ProgramFiles'] ?? 'C:\\Program Files', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+        path.join(process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+      ]
+      const edgePath = edgePaths.find(p => fs.existsSync(p))
+      if (edgePath) {
+        execFile(edgePath, [`${url}/?installGuide=edge-app`])
+        console.log('Opened in Edge — follow the on-screen instructions to install Jivam as an app.')
+        return
+      }
+    } catch {}
+
+    // Last resort: default browser, whatever it is.
     try {
       await execAsync(`start "" "${url}"`)
       return

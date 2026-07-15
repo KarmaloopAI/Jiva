@@ -73,6 +73,16 @@ export function createCodeRouter(codeRunner: CodeRunner) {
     }
   })
 
+  router.post('/switch-model', async (req, res) => {
+    const { model } = req.body as { model: string }
+    try {
+      await codeRunner.switchModel(model)
+      res.json({ success: true })
+    } catch (err) {
+      res.json({ success: false, error: err instanceof Error ? err.message : String(err) })
+    }
+  })
+
   router.get('/mcp-for-code', (_req, res) => {
     try {
       const config = readConfig()

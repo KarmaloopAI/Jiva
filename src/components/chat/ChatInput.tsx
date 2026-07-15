@@ -22,6 +22,9 @@ export function ChatInput() {
   const [processedAttachments, setProcessedAttachments] = useState<ProcessedAttachment[]>([])
   const [isProcessingFiles, setIsProcessingFiles] = useState(false)
   const [isMultimodalEnabled, setIsMultimodalEnabled] = useState(false)
+  const [modelOptions, setModelOptions] = useState<string[]>([])
+  const [selectedModel, setSelectedModel] = useState('')
+  const [loadingModels, setLoadingModels] = useState(false)
   const settingsRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const {
@@ -31,18 +34,34 @@ export function ChatInput() {
     addErrorMessage,
     isThinking,
   } = useChatStore()
-  const { sendMessage, connectionStatus, deepRun, setDeepRun, maxIterations, setMaxIterations } = useJivaStore()
+  const { sendMessage, connectionStatus, deepRun, setDeepRun, maxIterations, setMaxIterations, switchModel, switchingModel } = useJivaStore()
   const { activePersonaName, personas } = usePersonaStore()
 
   const isConnected = connectionStatus === 'connected'
 
-  // Check multimodal capability on mount
+  // Check multimodal capability + seed the current model on mount
   useEffect(() => {
     window.electron.config.read().then((config) => {
-      const cfg = config as { models?: { multimodal?: unknown } } | null
+      const cfg = config as { models?: { multimodal?: unknown; reasoning?: { defaultModel?: string; model?: string } } } | null
       setIsMultimodalEnabled(!!cfg?.models?.multimodal)
+      const current = cfg?.models?.reasoning?.defaultModel ?? cfg?.models?.reasoning?.model
+      if (current) setSelectedModel(current)
     }).catch(() => {})
   }, [])
+
+  const fetchModelOptions = useCallback(() => {
+    if (modelOptions.length > 0 || loadingModels) return
+    setLoadingModels(true)
+    window.electron.config.listModels().then((result) => {
+      setModelOptions(result.success ? result.models : [])
+    }).catch(() => setModelOptions([])).finally(() => setLoadingModels(false))
+  }, [modelOptions.length, loadingModels])
+
+  const handleModelChange = useCallback(async (model: string) => {
+    if (!model || model === selectedModel) return
+    setSelectedModel(model)
+    await switchModel(model)
+  }, [selectedModel, switchModel])
 
   // Auto-resize textarea
   useEffect(() => {
@@ -63,6 +82,11 @@ export function ChatInput() {
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [settingsOpen])
+
+  // Fetch available models the first time the popover is opened
+  useEffect(() => {
+    if (settingsOpen) fetchModelOptions()
+  }, [settingsOpen, fetchModelOptions])
 
   const handleStop = useCallback(() => {
     window.electron.jiva.stopMessage()
@@ -280,7 +304,7 @@ export function ChatInput() {
 
           {settingsOpen && (
             <div
-              className="absolute bottom-10 right-0 z-50 rounded-xl p-3 w-[220px]"
+              className="absolute bottom-10 right-0 z-50 rounded-xl p-3 w-[260px]"
               style={{
                 background: 'var(--topbar-bg)',
                 border: '1px solid var(--topbar-border)',
@@ -288,6 +312,32 @@ export function ChatInput() {
                 backdropFilter: 'blur(12px)',
               }}
             >
+              {/* Model */}
+              <div className="flex items-center justify-between mb-1.5">
+                <p className="text-[10px] font-medium text-[var(--text-subtle)] uppercase tracking-wide">Model</p>
+                {switchingModel && <span className="text-[10px] text-[var(--accent)]">Switching…</span>}
+              </div>
+              <select
+                value={selectedModel}
+                onChange={(e) => handleModelChange(e.target.value)}
+                disabled={switchingModel}
+                className="w-full mb-3 rounded-lg text-xs"
+                style={{
+                  background: 'var(--input-bg)',
+                  border: '1px solid var(--input-border)',
+                  color: 'var(--text)',
+                  padding: '6px 8px',
+                }}
+              >
+                {selectedModel && !modelOptions.includes(selectedModel) && (
+                  <option value={selectedModel}>{selectedModel}</option>
+                )}
+                {modelOptions.length === 0 && (
+                  <option value="" disabled>{loadingModels ? 'Loading models…' : 'No models found'}</option>
+                )}
+                {modelOptions.map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
+
               {/* Max Iterations */}
               <p className="text-[10px] font-medium text-[var(--text-subtle)] mb-1.5 uppercase tracking-wide">Max Iterations</p>
               <div className="flex gap-1.5 mb-3">

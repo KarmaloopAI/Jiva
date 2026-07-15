@@ -59,11 +59,19 @@ fi
 
 if command -v node &>/dev/null; then
   NODE_VER="$(node --version)"
-  MAJOR="${NODE_VER//[^0-9.]*/}"
+  # Strip the leading "v" and any prerelease/build suffix, keep just the major
+  # number. (A previous version of this used a glob substitution here —
+  # `${NODE_VER//[^0-9.]*/}` — which looks like a regex but isn't: in bash
+  # glob patterns `*` is a standalone wildcard, not a quantifier on the
+  # preceding class, so `[^0-9.]*` matched "any non-digit char followed by
+  # literally anything" and wiped the whole string. MAJOR always came out
+  # empty, and an empty string in `[ -lt ]` numeric context evaluates as 0 —
+  # so it thought Node was too old and tried to reinstall/upgrade even when
+  # e.g. v24 was already present.)
+  MAJOR="${NODE_VER#v}"
   MAJOR="${MAJOR%%.*}"
-  MAJOR="${MAJOR//v/}"
-  if [ "${MAJOR:-0}" -lt 18 ]; then
-    warn "Node.js $NODE_VER is too old (need ≥18). Upgrading..."
+  if [ "${MAJOR:-0}" -lt 20 ]; then
+    warn "Node.js $NODE_VER is too old (need ≥20). Upgrading..."
     [[ "$OS" == "Darwin" ]] && install_node_mac || install_node_linux
   else
     ok "Node.js $NODE_VER"
