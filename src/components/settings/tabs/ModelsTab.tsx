@@ -123,6 +123,18 @@ export function ModelsTab() {
     }
     await window.electron.config.write(updated)
     setConfig(updated)
+
+    // Saving here only updates the config file — any chat/code session
+    // that's already running keeps using the model it was initialized
+    // with until something triggers a reinit. Fire the same switchModel
+    // reinit-and-reload used by the in-chat model dropdown so the change
+    // takes effect immediately instead of silently waiting for the next
+    // conversation/session restart.
+    if (rModel.trim()) {
+      window.electron.jiva.switchModel(rModel).catch(() => {})
+      window.electron.code.switchModel(rModel).catch(() => {})
+    }
+
     setSaving(false)
     setSaved(true)
     setTimeout(() => setSaved(false), 2500)

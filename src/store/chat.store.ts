@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { ChatMessage, AttachedFile } from '../types/chat'
 import type { AgentWork } from '../types/jiva'
+import { extractThinking } from '../lib/strip-thinking'
 
 function generateId(): string {
   return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`
@@ -53,15 +54,17 @@ export const useChatStore = create<ChatStore>((set) => ({
   },
 
   addAgentResponse: (content, agentWork, durationMs, brainCommentary) => {
+    const { thinking, content: visibleContent } = extractThinking(content)
     const msg: ChatMessage = {
       id: generateId(),
       role: 'agent',
-      content,
+      content: visibleContent,
       timestamp: new Date(),
       status: 'complete',
       agentWork: { ...agentWork, durationMs },
       workExpanded: false,
       brainCommentary: brainCommentary && brainCommentary.length > 0 ? brainCommentary : undefined,
+      thinking: thinking ?? undefined,
     }
     set((s) => ({
       messages: [...s.messages, msg],
