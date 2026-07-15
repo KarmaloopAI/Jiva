@@ -90,8 +90,11 @@ router.get('/models', async (req, res) => {
     if (!response.ok) {
       return res.json({ success: false, error: `${response.status} ${response.statusText}`, models: [] })
     }
-    const body = await response.json() as { data?: Array<{ id: string }> }
-    const models = (body.data ?? []).map(m => m.id).sort()
+    const body = await response.json() as { data?: Array<{ id: string }> } | Array<{ id: string }>
+    // Most OpenAI-compatible providers wrap the list as `{ data: [...] }`,
+    // but Together AI returns a bare array — accept either shape.
+    const list = Array.isArray(body) ? body : (body.data ?? [])
+    const models = list.map(m => m.id).sort()
     return res.json({ success: true, models })
   } catch (err) {
     return res.json({ success: false, error: err instanceof Error ? err.message : String(err), models: [] })

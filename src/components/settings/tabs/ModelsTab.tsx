@@ -87,10 +87,13 @@ export function ModelsTab() {
     }
   }, [rEndpoint, rApiKey])
 
-  // Fetch once existing endpoint/key are loaded, so the dropdown is
-  // populated without requiring a manual click first.
+  // Refetch whenever the endpoint/key change — including after switching
+  // providers via the picker above, which previously left the old
+  // provider's model list showing because this effect only ran once
+  // (guarded by `modelOptions.length === 0`, which was already non-empty).
   useEffect(() => {
-    if (rEndpoint.trim() && rApiKey.trim() && modelOptions.length === 0) {
+    setModelOptions([])
+    if (rEndpoint.trim() && rApiKey.trim()) {
       fetchModels()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
