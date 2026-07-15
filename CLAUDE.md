@@ -106,6 +106,20 @@ transport.
 
 ## Hard-won findings (don't rediscover these)
 
+**Dynamic model switching is a reinit+reload, not a live setter — jiva-core
+doesn't expose one.** `ModelOrchestrator` (jiva-core) holds its
+`reasoningModel` as a private field with no public setter, so there's no way
+to hot-swap the model inside an already-running `DualAgent`/`CodeAgent`
+session without a jiva-core change. `JivaRunner.switchModel()` /
+`CodeRunner.switchModel()` work around this by: persisting the new
+`defaultModel` to Jivam's own config, capturing the current conversation id,
+tearing down and re-initializing the runner (which builds a fresh
+`ModelClient` with the new model name), then reloading the captured
+conversation so history survives the swap. This is why `CodeRunner` now
+caches `lastWorkspaceDir`/`lastMcpServerNames` as instance fields —
+`initialize()` itself never retained them, but a reinit needs to reuse the
+exact same workspace/MCP servers the session was already running with.
+
 **`code-runner.ts` used to read model config from the wrong place entirely —
 watch for this pattern reappearing.** `jiva-runner.ts` (chat mode) has always
 deliberately read the reasoning model config from Jivam's own
