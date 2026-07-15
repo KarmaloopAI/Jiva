@@ -1,6 +1,6 @@
 {
   "name": "jivamai",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Jivam - Desktop UI for the Jiva autonomous AI agent",
   "main": "dist-server/index.js",
   "bin": {
