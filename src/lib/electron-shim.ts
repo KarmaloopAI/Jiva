@@ -137,7 +137,7 @@ const electronShim = {
     read: () => get('/config'),
     write: (config: unknown) => post('/config', config),
     getPath: () => get<string>('/config/path'),
-    setupProvider: (args: { provider: 'sarvam' | 'krutrim' | 'groq' | 'openai-compatible'; apiKey: string; customEndpoint?: string; customModel?: string }) =>
+    setupProvider: (args: { provider: 'sarvam' | 'krutrim' | 'groq' | 'openai-compatible'; apiKey: string; customEndpoint?: string; customModel?: string; hasVision?: boolean }) =>
       post<{ success: boolean; error?: string }>('/config/setup-provider', args),
   },
 

@@ -71,6 +71,7 @@ interface ElectronAPI {
       apiKey: string
       customEndpoint?: string
       customModel?: string
+      hasVision?: boolean
     }) => Promise<{ success: boolean; error?: string }>
   }
   personas: {

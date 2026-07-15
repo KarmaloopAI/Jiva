@@ -10,6 +10,9 @@ interface ModelConfig {
   defaultModel?: string
   model?: string           // legacy alias — prefer defaultModel
   useHarmonyFormat?: boolean
+  defaultMaxTokens?: number
+  maxRequestsPerMinute?: number
+  hasVision?: boolean
 }
 
 interface JivaConfig {
@@ -32,6 +35,9 @@ export function ModelsTab() {
   const [rModel, setRModel] = useState('')
   const [rProvider, setRProvider] = useState('')
   const [rHarmony, setRHarmony] = useState(false)
+  const [rMaxTokens, setRMaxTokens] = useState('')
+  const [rRateLimit, setRRateLimit] = useState('')
+  const [rHasVision, setRHasVision] = useState(false)
 
   // Multimodal model fields
   const [mEnabled, setMEnabled] = useState(false)
@@ -50,6 +56,9 @@ export function ModelsTab() {
         setRModel(c.models.reasoning.defaultModel ?? c.models.reasoning.model ?? '')
         setRProvider(c.models.reasoning.provider ?? '')
         setRHarmony(c.models.reasoning.useHarmonyFormat ?? false)
+        setRMaxTokens(c.models.reasoning.defaultMaxTokens != null ? String(c.models.reasoning.defaultMaxTokens) : '')
+        setRRateLimit(c.models.reasoning.maxRequestsPerMinute != null ? String(c.models.reasoning.maxRequestsPerMinute) : '')
+        setRHasVision(c.models.reasoning.hasVision ?? false)
       }
       if (c?.models?.multimodal) {
         setMEnabled(true)
@@ -75,6 +84,9 @@ export function ModelsTab() {
           apiKey: rApiKey,
           defaultModel: rModel,
           useHarmonyFormat: rHarmony,
+          defaultMaxTokens: rMaxTokens.trim() ? Number(rMaxTokens) : undefined,
+          maxRequestsPerMinute: rRateLimit.trim() ? Number(rRateLimit) : undefined,
+          hasVision: rHasVision,
         },
         multimodal: mEnabled
           ? { endpoint: mEndpoint, apiKey: mApiKey, defaultModel: mModel }
@@ -212,6 +224,30 @@ export function ModelsTab() {
               placeholder="Meta-Llama-3.1-405B-Instruct"
             />
           </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label style={labelStyle}>Max output tokens (optional)</label>
+              <input
+                style={inputStyle}
+                type="number"
+                min={1}
+                value={rMaxTokens}
+                onChange={(e) => setRMaxTokens(e.target.value)}
+                placeholder="e.g. 4096 for Sarvam"
+              />
+            </div>
+            <div>
+              <label style={labelStyle}>Rate limit — requests/min (optional)</label>
+              <input
+                style={inputStyle}
+                type="number"
+                min={1}
+                value={rRateLimit}
+                onChange={(e) => setRRateLimit(e.target.value)}
+                placeholder="e.g. 40 for Sarvam"
+              />
+            </div>
+          </div>
           <div className="flex items-center gap-2 pt-1">
             <input
               type="checkbox"
@@ -222,6 +258,18 @@ export function ModelsTab() {
             />
             <label htmlFor="harmony" className="text-xs text-[var(--text-muted)] cursor-pointer">
               Use Harmony format (Krutrim-specific)
+            </label>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="hasVision"
+              checked={rHasVision}
+              onChange={(e) => setRHasVision(e.target.checked)}
+              className="accent-purple-500"
+            />
+            <label htmlFor="hasVision" className="text-xs text-[var(--text-muted)] cursor-pointer">
+              This model supports vision (image input) natively
             </label>
           </div>
         </div>

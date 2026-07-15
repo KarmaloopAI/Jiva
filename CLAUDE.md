@@ -106,6 +106,28 @@ transport.
 
 ## Hard-won findings (don't rediscover these)
 
+**`code-runner.ts` used to read model config from the wrong place entirely —
+watch for this pattern reappearing.** `jiva-runner.ts` (chat mode) has always
+deliberately read the reasoning model config from Jivam's own
+`~/.jivam/config.json` via `readConfig()` (see the comment right above where
+it does this) — never from jiva-core's own internal `configManager`
+singleton, which is populated by jiva-core's *own* CLI setup wizard (`jiva
+setup`/`jiva config`), a config file a Jivam-only user (who never touches the
+`jiva` CLI directly) would never have populated. `code-runner.ts` (code mode)
+didn't follow this pattern — it called jiva-core's own
+`configManager.getReasoningModel()` and `configManager.validateConfig()`
+directly, silently reading a completely different, likely-empty config file.
+This meant every field the Jivam UI writes (`defaultMaxTokens`,
+`reasoningEffortStrategy`, `maxRequestsPerMinute`, `hasVision`, whatever
+comes next) worked in Chat mode but had **zero effect in Code mode** — not
+because of a passthrough bug, but because Code mode wasn't even looking at
+the file those settings were saved to. Fixed by making `code-runner.ts`
+mirror `jiva-runner.ts` exactly: `readConfig()` from `./config-manager`, same
+`apiKey` presence check, same field passthrough into `createKrutrimModel()`.
+If a future jiva-core integration point (a new mode, a new agent type) reads
+model config, make sure it goes through Jivam's own `readConfig()` — never
+jiva-core's `configManager` singleton, which Jivam does not keep in sync.
+
 **Chrome `--app=URL` cannot give a real single-instance Dock/taskbar icon.**
 It runs inside the normal Chrome process/bundle ID, so the OS can't
 distinguish it from a regular browser window — clicking the "app" window's
