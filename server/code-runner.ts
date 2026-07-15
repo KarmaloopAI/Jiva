@@ -5,7 +5,7 @@ import os from 'os'
 import path from 'path'
 import { pathToFileURL } from 'url'
 import { writeDirective } from './directive-manager'
-import { readConfig } from './config-manager'
+import { readConfig, writeConfig } from './config-manager'
 import * as harness from './harness'
 import type { Completer } from './harness'
 
@@ -64,6 +64,10 @@ export class CodeRunner extends EventEmitter {
   private ready = false
   private deepRun = false
   private maxIterations = 50
+  // Cached so switchModel() can re-initialize with the same workspace/MCP
+  // servers — initialize() itself doesn't retain these as instance state.
+  private lastWorkspaceDir: string | null = null
+  private lastMcpServerNames: string[] | undefined = undefined
 
   isReady(): boolean {
     return this.ready
@@ -107,6 +111,8 @@ export class CodeRunner extends EventEmitter {
   async initialize(workspaceDir: string, mcpServerNames?: string[], opts?: { deepRun?: boolean; maxIterations?: number }): Promise<void> {
     this.deepRun = opts?.deepRun ?? false
     this.maxIterations = opts?.maxIterations ?? 50
+    this.lastWorkspaceDir = workspaceDir
+    this.lastMcpServerNames = mcpServerNames
 
     const entry = resolveJivaCoreEntryPath()
     console.log(`[CodeRunner] Loading jiva-core from: ${entry}`)
@@ -398,6 +404,36 @@ export class CodeRunner extends EventEmitter {
   stop(): void {
     if (this.agent) {
       (this.agent as { stop(): void }).stop()
+    }
+  }
+
+  /**
+   * Switch the reasoning model's defaultModel for dynamic mid-session model
+   * selection. Same approach as JivaRunner.switchModel: jiva-core's
+   * ModelOrchestrator has no live setter for its reasoning model, so this
+   * persists the new choice and re-initializes with the same
+   * workspace/MCP servers/settings, then reloads the current conversation
+   * (if any) so history survives the swap.
+   */
+  async switchModel(model: string): Promise<void> {
+    if (!this.lastWorkspaceDir) {
+      throw new Error('CodeRunner not initialized')
+    }
+    const conversationId = this.getConversationId()
+
+    const cfg = readConfig()
+    if (cfg?.models?.reasoning) {
+      cfg.models.reasoning.defaultModel = model
+      writeConfig(cfg)
+    }
+
+    const workspaceDir = this.lastWorkspaceDir
+    const mcpServerNames = this.lastMcpServerNames
+    await this.cleanup()
+    await this.initialize(workspaceDir, mcpServerNames, { deepRun: this.deepRun, maxIterations: this.maxIterations })
+
+    if (conversationId) {
+      await (this.agent as { loadConversation(id: string): Promise<void> }).loadConversation(conversationId)
     }
   }
 

@@ -36,6 +36,7 @@ const CodeUserMessage = memo(function CodeUserMessage({ message }: { message: Co
 
 const CodeAgentMessage = memo(function CodeAgentMessage({ message }: { message: CodeMessage }) {
   const { toggleWorkPanel } = useCodeStore()
+  const [thinkingExpanded, setThinkingExpanded] = useState(false)
   const hasBrain = (message.brainCommentary?.length ?? 0) > 0
   const hasTools = (message.events?.length ?? 0) > 0
   const hasWork = hasBrain || hasTools
@@ -53,6 +54,26 @@ const CodeAgentMessage = memo(function CodeAgentMessage({ message }: { message: 
       </div>
 
       <div className="flex-1 min-w-0">
+        {message.thinking && (
+          <div className="mb-1.5 ml-1">
+            <button
+              onClick={() => setThinkingExpanded((v) => !v)}
+              className="flex items-center gap-1.5 text-xs text-[var(--text-subtle)] hover:text-[var(--accent)] transition-colors"
+            >
+              <Brain size={12} />
+              {thinkingExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+              {thinkingExpanded ? 'Hide thinking' : 'Show thinking'}
+            </button>
+            {thinkingExpanded && (
+              <div
+                className="mt-1.5 rounded-lg px-3 py-2 text-xs italic leading-relaxed text-[var(--text-subtle)] whitespace-pre-wrap"
+                style={{ background: 'var(--bg-secondary)', border: '1px solid var(--card-border)' }}
+              >
+                {message.thinking}
+              </div>
+            )}
+          </div>
+        )}
         <div className="py-1">
           <MarkdownRenderer content={message.content} />
         </div>
@@ -259,9 +280,14 @@ function MessageArea() {
 export function CodeChatView() {
   const [value, setValue] = useState('')
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [modelOptions, setModelOptions] = useState<string[]>([])
+  const [loadingModels, setLoadingModels] = useState(false)
   const settingsRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const { isThinking, sendMessage, clearSession, codeWorkspaceDir, deepRun, setDeepRun, maxIterations, setMaxIterations } = useCodeStore()
+  const {
+    isThinking, sendMessage, clearSession, codeWorkspaceDir, deepRun, setDeepRun, maxIterations, setMaxIterations,
+    currentModel, switchModel, switchingModel,
+  } = useCodeStore()
   const { refresh: refreshGit } = useGitStore()
   const { isCloudMode } = useAuthStore()
 
@@ -318,6 +344,32 @@ export function CodeChatView() {
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [settingsOpen])
+
+  // Seed the current model from config on mount
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  useEffect(() => {
+    window.electron.config.read().then((config) => {
+      const cfg = config as { models?: { reasoning?: { defaultModel?: string; model?: string } } } | null
+      const current = cfg?.models?.reasoning?.defaultModel ?? cfg?.models?.reasoning?.model
+      if (current) useCodeStore.setState({ currentModel: current })
+    }).catch(() => {})
+  }, [])
+
+  // Fetch available models the first time the popover is opened
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  useEffect(() => {
+    if (!settingsOpen || modelOptions.length > 0 || loadingModels) return
+    setLoadingModels(true)
+    window.electron.config.listModels().then((result) => {
+      setModelOptions(result.success ? result.models : [])
+    }).catch(() => setModelOptions([])).finally(() => setLoadingModels(false))
+  }, [settingsOpen, modelOptions.length, loadingModels])
+
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  const handleModelChange = useCallback(async (model: string) => {
+    if (!model || model === currentModel) return
+    await switchModel(model)
+  }, [currentModel, switchModel])
 
   // eslint-disable-next-line react-hooks/rules-of-hooks
   const handleStop = useCallback(() => {
@@ -425,7 +477,7 @@ export function CodeChatView() {
 
             {settingsOpen && (
               <div
-                className="absolute bottom-10 right-0 z-50 rounded-xl p-3 w-[220px]"
+                className="absolute bottom-10 right-0 z-50 rounded-xl p-3 w-[260px]"
                 style={{
                   background: 'var(--topbar-bg)',
                   border: '1px solid var(--topbar-border)',
@@ -433,6 +485,31 @@ export function CodeChatView() {
                   backdropFilter: 'blur(12px)',
                 }}
               >
+                <div className="flex items-center justify-between mb-1.5">
+                  <p className="text-[10px] font-medium text-[var(--text-subtle)] uppercase tracking-wide">Model</p>
+                  {switchingModel && <span className="text-[10px] text-[var(--accent-blue)]">Switching…</span>}
+                </div>
+                <select
+                  value={currentModel ?? ''}
+                  onChange={(e) => handleModelChange(e.target.value)}
+                  disabled={switchingModel}
+                  className="w-full mb-3 rounded-lg text-xs"
+                  style={{
+                    background: 'var(--input-bg)',
+                    border: '1px solid var(--input-border)',
+                    color: 'var(--text)',
+                    padding: '6px 8px',
+                  }}
+                >
+                  {currentModel && !modelOptions.includes(currentModel) && (
+                    <option value={currentModel}>{currentModel}</option>
+                  )}
+                  {modelOptions.length === 0 && (
+                    <option value="" disabled>{loadingModels ? 'Loading models…' : 'No models found'}</option>
+                  )}
+                  {modelOptions.map((m) => <option key={m} value={m}>{m}</option>)}
+                </select>
+
                 <p className="text-[10px] font-medium text-[var(--text-subtle)] mb-1.5 uppercase tracking-wide">Max Iterations</p>
                 <div className="flex gap-1.5 mb-3">
                   {([10, 50, 100] as const).map((val) => {

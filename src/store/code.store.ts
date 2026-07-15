@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { CodeLogEvent } from '../types/electron'
+import { extractThinking } from '../lib/strip-thinking'
 
 // Map jiva-core log messages to user-friendly rotating action labels
 function logToAction(message: string): string | null {
@@ -57,6 +58,7 @@ export interface CodeMessage {
   events?: CodeEvent[]          // tool / warn / error events
   brainCommentary?: string[]    // brain thought narration (Deep Run)
   workExpanded?: boolean
+  thinking?: string             // <think> content extracted from raw model output
 }
 
 interface CodeStore {
@@ -74,8 +76,11 @@ interface CodeStore {
   activeMcpServers: string[]
   deepRun: boolean
   maxIterations: number
+  currentModel: string | null
+  switchingModel: boolean
   setDeepRun: (value: boolean) => void
   setMaxIterations: (value: 10 | 50 | 100) => void
+  switchModel: (model: string) => Promise<{ success: boolean; error?: string }>
   startSession: (dir: string, mcpServers?: string[], opts?: { deepRun?: boolean; maxIterations?: number }) => Promise<{ success: boolean; error?: string }>
   loadConversation: (id: string) => Promise<void>
 
@@ -100,9 +105,22 @@ export const useCodeStore = create<CodeStore>((set, get) => ({
   activeMcpServers: [],
   deepRun: true,
   maxIterations: 50,
+  currentModel: null,
+  switchingModel: false,
 
   setDeepRun: (value) => set({ deepRun: value }),
   setMaxIterations: (value) => set({ maxIterations: value }),
+
+  switchModel: async (model: string) => {
+    set({ switchingModel: true })
+    try {
+      const result = await window.electron.code.switchModel(model)
+      if (result.success) set({ currentModel: model })
+      return result
+    } finally {
+      set({ switchingModel: false })
+    }
+  },
 
   toggleWorkPanel: (id) => set(state => ({
     messages: state.messages.map(m =>
@@ -199,15 +217,19 @@ export const useCodeStore = create<CodeStore>((set, get) => ({
       const brainEvents = turnEvents.filter(e => e.type === 'brain')
       const toolEvents  = turnEvents.filter(e => e.type !== 'brain')
 
+      const rawContent = response.success && response.content
+        ? response.content
+        : response.error ?? 'An error occurred.'
+      const { thinking, content: visibleContent } = extractThinking(rawContent)
+
       const agentMsg: CodeMessage = {
         id: `agent-${Date.now()}`,
         role: 'agent',
-        content: response.success && response.content
-          ? response.content
-          : response.error ?? 'An error occurred.',
+        content: visibleContent,
         timestamp: new Date(),
         events: toolEvents.length > 0 ? toolEvents : undefined,
         brainCommentary: brainEvents.length > 0 ? brainEvents.map(e => e.detail) : undefined,
+        thinking: thinking ?? undefined,
       }
 
       set(state => ({
@@ -261,17 +283,20 @@ export const useCodeStore = create<CodeStore>((set, get) => ({
     if (!raw) return
 
     const messages: CodeMessage[] = (raw.messages ?? []).map((m, i) => {
-      const content = typeof m.content === 'string'
+      const rawContent = typeof m.content === 'string'
         ? m.content
         : (m.content as Array<{ type: string; text?: string }>)
             .filter((p) => p.type === 'text' && p.text)
             .map((p) => p.text!)
             .join('\n') || ''
+      const role: 'user' | 'agent' = m.role === 'user' ? 'user' : 'agent'
+      const { thinking, content } = role === 'agent' ? extractThinking(rawContent) : { thinking: null, content: rawContent }
       return {
         id: `loaded-${i}`,
-        role: m.role === 'user' ? 'user' : 'agent',
+        role,
         content,
         timestamp: new Date(),
+        thinking: thinking ?? undefined,
       }
     })
 
@@ -338,6 +363,7 @@ export const useCodeStore = create<CodeStore>((set, get) => ({
       activeMcpServers: [],
       deepRun: true,
       maxIterations: 50,
+      currentModel: null,
     })
   },
 }))
