@@ -149,3 +149,5 @@ vite.config.ts.timestamp-*
 # Others
 .claude/
 .playwright-mcp/
+.agents/
+skills-lock.json

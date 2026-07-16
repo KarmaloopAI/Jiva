@@ -10,6 +10,17 @@ export interface GitFile {
   file: string
 }
 
+// Mirrors server/updater.ts's UpdateStatus — kept as a plain duplicate
+// rather than a shared import, matching this codebase's existing
+// client/server type boundary pattern (e.g. CodeLogEvent above).
+export type UpdateStatus =
+  | { state: 'idle'; currentVersion?: string }
+  | { state: 'checking'; currentVersion?: string }
+  | { state: 'available'; latestVersion: string; currentVersion?: string }
+  | { state: 'installing'; currentVersion?: string }
+  | { state: 'restarting'; currentVersion?: string }
+  | { state: 'error'; message: string; currentVersion?: string }
+
 import type { PersonaInfo } from './persona'
 import type { JivaRunResult } from './jiva'
 
@@ -151,12 +162,10 @@ interface ElectronAPI {
     }>
   }
   updater: {
-    check: () => Promise<void>
-    quitAndInstall: () => Promise<void>
-    onAvailable: (cb: (info: { version: string; releaseNotes: string | null }) => void) => void
-    onProgress: (cb: (percent: number) => void) => void
-    onReady: (cb: () => void) => void
-    onNotAvailable: (cb: () => void) => void
+    getStatus: () => Promise<UpdateStatus>
+    check: () => Promise<UpdateStatus>
+    apply: () => Promise<{ success: boolean; error?: string }>
+    onStatus: (cb: (status: UpdateStatus) => void) => void
   }
   cloud: {
     openWindow: () => Promise<void>

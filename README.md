@@ -1,28 +1,28 @@
 # Jivam
 
-Jivam is the desktop UI for [Jiva](https://github.com/karmaloop-ai/jiva), the autonomous AI agent. It runs as a local web server (`localhost:7842`) served from an npm package — no Electron, no code signing, no app store required.
+Jivam is the desktop UI for [Jiva](https://github.com/KarmaloopAI/Jiva), the autonomous AI agent. It runs as a local web server (`localhost:7842`) served from an npm package — no Electron, no code signing, no app store required.
 
-Install once with a single command and get a native app experience: a clean, address-bar-free window pinned to your Dock (macOS) or Desktop (Windows), with automatic background updates on every launch.
+Install once with a single command and get a native app experience: a clean, address-bar-free window pinned to your Dock (macOS, via Safari's native "Add to Dock") or Start Menu (Windows, via Edge's "Install this site as an app"), with a background service that's already running by the time you click the icon.
 
 ## Quick Install
 
 **macOS / Linux**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/karmaloop-ai/jivam/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/KarmaloopAI/Jivam/main/scripts/install.sh | bash
 ```
 
 **Windows** (PowerShell)
 ```powershell
-irm https://raw.githubusercontent.com/karmaloop-ai/jivam/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/KarmaloopAI/Jivam/main/scripts/install.ps1 | iex
 ```
 
 The installer will:
-1. Install Node.js (via nvm on Mac/Linux, winget on Windows) if not already present
-2. Recommend installing Google Chrome for the best app-window experience
-3. Install `jivam` and `jiva-core` globally via npm
-4. Create a native app launcher and add it to your Dock / Desktop
+1. Install Node.js 20+ if not already present (via nvm on Mac/Linux; via winget, or a no-admin portable install if that's not available, on Windows)
+2. Install `jivamai` and `jiva-core` globally via npm
+3. Set up Jivam as a persistent background service (a macOS LaunchAgent, or a Startup-folder entry on Windows — no admin rights needed either way)
+4. Open Safari (macOS) or Edge (Windows) with an on-screen walkthrough for the one manual step — adding Jivam to your Dock / installing it as an app
 
-After installation, click the **Jivam** icon to launch. The server starts automatically.
+After that, click the **Jivam** icon to launch — the server is already running in the background, so there's no wait.
 
 ## Manual Install
 
@@ -31,19 +31,22 @@ If you prefer to install manually:
 ```bash
 npm install -g jivamai jiva-core
 
-# Create the native app launcher + add to Dock/Desktop
+# Set up the background service + Dock/Start Menu icon
 jivam --install
 
 # Or just run directly in the terminal
 jivam
 ```
 
+`jivam` also supports `--version`, `--help`, and `start`/`stop`/`restart`/`status` for managing the background service.
+
 ## How it works
 
-- `jivam` starts an Express server on `localhost:7842` and opens the UI in a Chrome `--app` window (no address bar, no tabs — looks and feels like a native app)
-- On macOS, `jivam --install` creates `~/Applications/Jivam.app` — a self-contained shell wrapper that starts the server if not running, waits for it to be ready, then opens the browser window
-- On Windows, it creates a silent VBScript launcher with Desktop and Start Menu shortcuts
-- Each launch checks for updates to `jivam` and `jiva-core` in the background (at most once per day), so you always stay current without any manual intervention
+- `jivam` starts an Express server on `localhost:7842` and serves the UI — a real web app, no bundled browser
+- On macOS, `jivam --install` guides you through Safari's native "Add to Dock" (Sonoma+), which creates a genuinely separate, single-instance `.app` bundle — not a `--app=` window sharing a browser's own identity
+- On Windows, it guides you through Edge's "Install this site as an app," with Desktop/Start Menu shortcuts as a fallback if that isn't completed
+- The server runs as a persistent background service (started at login, auto-restarted on crash) so it's already up by the time any icon is clicked
+- Jivam checks for updates in the background and shows a non-intrusive banner when one's available — nothing is installed until you click Update
 
 ## Features
 
@@ -51,10 +54,9 @@ jivam
 - Deep Run mode for complex multi-step tasks
 - File attachments with automatic format conversion
 - MCP (Model Context Protocol) server management
-- One-click provider setup (Sarvam, Krutrim, Groq, OpenAI-compatible)
+- One-click provider setup (Sarvam, Krutrim, Groq, Together AI, OpenAI-compatible), with a live model picker and mid-session model switching
 - Persona management and customizable settings
 - Cloud mode for remote Jiva instances
-- Works with any Chromium browser (Chrome, Edge, Brave) for the app-window experience
 
 ## Development
 
@@ -85,9 +87,9 @@ Requires an `NPM_TOKEN` secret set in the repository's GitHub Actions settings.
 
 ## Requirements
 
-- Node.js 18+
+- Node.js 20+
 - [jiva-core](https://www.npmjs.com/package/jiva-core) (installed automatically by the install scripts)
-- Google Chrome, Microsoft Edge, or Brave for the app-window experience (Safari works but without the frameless window)
+- macOS 12+ or Windows 10/11 (or Linux, without the Dock/Start Menu app step)
 
 ## License
 

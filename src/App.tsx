@@ -8,6 +8,8 @@ import { useJivaStore } from './store/jiva.store'
 import { usePersonaStore } from './store/persona.store'
 import { useSettingsStore } from './store/settings.store'
 import { useAuthStore } from './store/auth.store'
+import { useUpdaterStore } from './store/updater.store'
+import { UpdateModal, UpdateBanner } from './components/UpdateModal'
 import { logoUrl } from './lib/logo'
 
 type SetupChecks = {
@@ -403,88 +405,6 @@ function AddToDockGuide() {
   )
 }
 
-function UpdateBanner() {
-  const [updateInfo, setUpdateInfo] = useState<{ version: string } | null>(null)
-  const [progress, setProgress] = useState<number | null>(null)
-  const [updateReady, setUpdateReady] = useState(false)
-  const [dismissed, setDismissed] = useState(false)
-
-  const isMac = window.electron?.platform === 'darwin'
-
-  useEffect(() => {
-    if (!window.electron?.updater) return
-    window.electron.updater.onAvailable((info) => setUpdateInfo(info))
-    window.electron.updater.onProgress((pct) => setProgress(pct))
-    window.electron.updater.onReady(() => {
-      setProgress(null)
-      setUpdateReady(true)
-    })
-  }, [])
-
-  if (dismissed || (!updateInfo && !updateReady)) return null
-
-  const isDownloading = progress !== null && !updateReady
-
-  return (
-    <motion.div
-      initial={{ y: -48, opacity: 0 }}
-      animate={{ y: 0, opacity: 1 }}
-      exit={{ y: -48, opacity: 0 }}
-      className="fixed top-0 left-0 right-0 z-50 text-sm"
-      style={{
-        background: 'linear-gradient(90deg, rgba(139,92,246,0.18), rgba(59,130,246,0.14))',
-        borderBottom: '1px solid rgba(139,92,246,0.25)',
-        backdropFilter: 'blur(12px)',
-      }}
-    >
-      <div
-        className="flex items-center justify-between gap-3 py-2.5 pr-4"
-        style={{ paddingLeft: isMac ? '80px' : '16px' }}
-      >
-        <div className="flex items-center gap-2 text-[var(--text-muted)] min-w-0">
-          <Download size={13} className="text-[var(--accent)] shrink-0" />
-          {updateReady ? (
-            isMac
-              ? <span>v{updateInfo?.version} ready — click to install</span>
-              : <span>v{updateInfo?.version} ready — restart to install</span>
-          ) : isDownloading ? (
-            <span>Downloading v{updateInfo?.version}… {progress}%</span>
-          ) : (
-            <span>v{updateInfo?.version} available — downloading…</span>
-          )}
-        </div>
-
-        <div className="flex items-center gap-2 shrink-0">
-          {updateReady && (
-            <button
-              onClick={() => window.electron.updater.quitAndInstall()}
-              className="text-xs font-medium px-3 py-1 rounded-md bg-[var(--accent)] text-white hover:opacity-90 transition-opacity"
-            >
-              {isMac ? 'Open in Finder' : 'Restart & Install'}
-            </button>
-          )}
-          {!updateReady && isDownloading && (
-            <div className="w-20 h-1 rounded-full overflow-hidden bg-[var(--accent)]/20">
-              <motion.div
-                className="h-full rounded-full bg-[var(--accent)]"
-                initial={{ width: 0 }}
-                animate={{ width: `${progress}%` }}
-                transition={{ ease: 'linear', duration: 0.3 }}
-              />
-            </div>
-          )}
-          <button
-            onClick={() => setDismissed(true)}
-            className="text-[var(--text-subtle)] hover:text-[var(--text-muted)] transition-colors"
-          >
-            <X size={13} />
-          </button>
-        </div>
-      </div>
-    </motion.div>
-  )
-}
-
 function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('chat')
   const [showSplash, setShowSplash] = useState(true)
@@ -528,6 +448,7 @@ function App() {
     // Register phase update listener (once)
     initPhaseListener()
     initJivaLogListener()
+    useUpdaterStore.getState().init()
   }, [setTheme, setServerStatus, initPhaseListener, initJivaLogListener])
 
   // Restore cloud session from localStorage (before preflight)
@@ -616,6 +537,7 @@ function App() {
           <InstallModal key="install-modal" />
           <UpdateBanner key="update-banner" />
         </AnimatePresence>
+        <UpdateModal />
 
         <AnimatePresence>
           {showSplash && <SplashScreen status={serverStatus} />}

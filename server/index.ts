@@ -6,7 +6,7 @@ import http from 'http'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
-import { initWebSocketServer, broadcast } from './ws'
+import { initWebSocketServer } from './ws'
 import { JivaRunner } from './jiva-runner'
 import { CodeRunner } from './code-runner'
 import { CloudRunner } from './cloud-runner'
@@ -23,6 +23,8 @@ import { createMcpRouter } from './routes/mcp'
 import { createCodeRouter } from './routes/code'
 import { createFilesRouter } from './routes/files'
 import { createCloudRouter } from './routes/cloud'
+import systemRouter from './routes/system'
+import { scheduleUpdateChecks, getCurrentVersion } from './updater'
 
 const PORT = parseInt(process.env.JIVAM_PORT ?? '7842', 10)
 const IS_DEV = process.env.NODE_ENV === 'development'
@@ -39,28 +41,30 @@ function findSafariWebAppBundle(sinceMs: number): string | null {
   // directly into ~/Applications/, depending on macOS version — and when a
   // same-named bundle already exists there (e.g. our own fallback wrapper,
   // or a previous install), it overwrites it IN PLACE rather than picking a
-  // new name. So identify by Info.plist content (not "is this a new
-  // directory entry") and only accept it if its Info.plist was written
-  // after `sinceMs`, so we don't false-positive on an unrelated older bundle.
+  // new name. Safari always names the bundle after the page title ("Jivam"),
+  // so check those exact two paths directly rather than scanning every .app
+  // and pattern-matching Info.plist content — that content check (looking
+  // for the literal substrings `com.apple.Safari.WebApp` and
+  // `<string>Jivam</string>`) was fragile in practice and produced false
+  // negatives on real Safari-written plists (exact formatting/whitespace
+  // varies by macOS version), so a real Dock install went undetected even
+  // though the .app bundle plainly existed on disk. Only accept it if its
+  // Info.plist was written after `sinceMs`, so we don't false-positive on an
+  // unrelated older bundle (e.g. our own fallback wrapper from a previous
+  // run, before Safari overwrites it in place).
   const searchDirs = [
     path.join(os.homedir(), 'Applications', 'Safari Apps'),
     path.join(os.homedir(), 'Applications'),
   ]
   for (const dir of searchDirs) {
-    if (!fs.existsSync(dir)) continue
-    const entries = fs.readdirSync(dir).filter(f => f.endsWith('.app'))
-    for (const entry of entries) {
-      const plistPath = path.join(dir, entry, 'Contents', 'Info.plist')
-      if (!fs.existsSync(plistPath)) continue
-      try {
-        const stat = fs.statSync(plistPath)
-        if (stat.mtimeMs < sinceMs) continue
-        const plistContent = fs.readFileSync(plistPath, 'utf-8')
-        if (plistContent.includes('com.apple.Safari.WebApp') && plistContent.includes('<string>Jivam</string>')) {
-          return path.join(dir, entry)
-        }
-      } catch {}
-    }
+    const appPath = path.join(dir, 'Jivam.app')
+    const plistPath = path.join(appPath, 'Contents', 'Info.plist')
+    if (!fs.existsSync(plistPath)) continue
+    try {
+      const stat = fs.statSync(plistPath)
+      if (stat.mtimeMs < sinceMs) continue
+      return appPath
+    } catch {}
   }
   return null
 }
@@ -410,98 +414,6 @@ async function macServiceControl(action: 'start' | 'stop' | 'restart' | 'status'
 // background (started at login, restarted automatically if it crashes),
 // then installs Jivam as a genuine Safari web app for a native Dock icon.
 // ---------------------------------------------------------------------------
-/**
- * Creates a minimal fallback .app wrapper that just opens Chrome/Edge/Brave
- * in --app= mode (or Safari as a last resort). No server-start logic is
- * needed here anymore — the LaunchAgent guarantees the server is already
- * running — so this is much simpler than the old wrapper.
- */
-async function macCreateFallbackWrapper(): Promise<string> {
-  const { exec } = await import('child_process')
-  const { promisify } = await import('util')
-  const execAsync = promisify(exec)
-
-  const appPath = path.join(os.homedir(), 'Applications', 'Jivam.app')
-  const macOSDir = path.join(appPath, 'Contents', 'MacOS')
-  const resourcesDir = path.join(appPath, 'Contents', 'Resources')
-  fs.mkdirSync(macOSDir, { recursive: true })
-  fs.mkdirSync(resourcesDir, { recursive: true })
-
-  const url = `http://localhost:${PORT}`
-  // Safari first (Jivam's preferred macOS browser — see openAppWindow/
-  // installSafariAddToDock); Chrome/Edge/Brave only as a fallback for
-  // users who don't have Safari available or have overridden the choice.
-  const launcherScript = `#!/bin/bash
-URL="${url}?installGuide=safari-dock"
-CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-EDGE="/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"
-BRAVE="/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"
-
-if osascript -e "tell application \\"Safari\\" to open location \\"$URL\\"" -e "tell application \\"Safari\\" to activate" 2>/dev/null; then
-  :
-elif [ -f "$CHROME" ]; then
-  "$CHROME" --app="${url}" --disable-extensions &
-elif [ -f "$EDGE" ]; then
-  "$EDGE" --app="${url}" --disable-extensions &
-elif [ -f "$BRAVE" ]; then
-  "$BRAVE" --app="${url}" --disable-extensions &
-fi
-`
-  fs.writeFileSync(path.join(macOSDir, 'jivam-launcher'), launcherScript, { mode: 0o755 })
-
-  const infoPlist = `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>CFBundleExecutable</key>
-  <string>jivam-launcher</string>
-  <key>CFBundleIdentifier</key>
-  <string>ai.karmaloop.jivam</string>
-  <key>CFBundleName</key>
-  <string>Jivam</string>
-  <key>CFBundleDisplayName</key>
-  <string>Jivam</string>
-  <key>CFBundleIconFile</key>
-  <string>Jivam</string>
-  <key>CFBundleVersion</key>
-  <string>1</string>
-  <key>CFBundlePackageType</key>
-  <string>APPL</string>
-  <key>LSUIElement</key>
-  <false/>
-</dict>
-</plist>
-`
-  fs.writeFileSync(path.join(appPath, 'Contents', 'Info.plist'), infoPlist)
-
-  // Convert PNG → .icns via sips + iconutil
-  const iconSrcCandidates = [
-    path.join(__dirname, '..', 'dist', 'icon-512.png'),
-    path.join(__dirname, '..', 'public', 'icon-512.png'),
-  ]
-  const iconSrc = iconSrcCandidates.find(p => fs.existsSync(p))
-  if (iconSrc) {
-    try {
-      const iconsetDir = path.join(os.tmpdir(), 'Jivam.iconset')
-      fs.mkdirSync(iconsetDir, { recursive: true })
-      const sizes: Array<[number, string]> = [
-        [16, 'icon_16x16.png'], [32, 'icon_16x16@2x.png'], [32, 'icon_32x32.png'],
-        [64, 'icon_32x32@2x.png'], [128, 'icon_128x128.png'], [256, 'icon_128x128@2x.png'],
-        [256, 'icon_256x256.png'], [512, 'icon_256x256@2x.png'], [512, 'icon_512x512.png'],
-      ]
-      for (const [size, name] of sizes) {
-        await execAsync(`sips -z ${size} ${size} "${iconSrc}" --out "${path.join(iconsetDir, name)}"`)
-      }
-      await execAsync(`iconutil -c icns "${iconsetDir}" --output "${path.join(resourcesDir, 'Jivam.icns')}"`)
-      fs.rmSync(iconsetDir, { recursive: true, force: true })
-    } catch (err) {
-      console.warn('Could not convert icon (sips/iconutil failed):', err)
-    }
-  }
-
-  return appPath
-}
-
 async function macAddToDock(appPath: string): Promise<void> {
   const { exec } = await import('child_process')
   const { promisify } = await import('util')
@@ -560,15 +472,24 @@ async function runInstall(): Promise<void> {
   }
 
   // ── 3. Install as a genuine Safari web app (best experience) ──────────────
+  // No Chrome/Edge/Brave --app fallback here on purpose — those share the
+  // browser's own bundle ID rather than getting a real, single-instance Dock
+  // icon (see CLAUDE.md), so a lesser wrapper isn't worth creating. If the
+  // user doesn't complete the two-click Add to Dock flow within the polling
+  // window, the background service is already running regardless — they can
+  // finish it later in Safari, or just re-run `jivam --install`.
   console.log('Setting up Jivam as a Safari web app...')
   const pwaAppPath = await installSafariAddToDock(url)
 
-  // ── 4. Add the resulting app to the Dock, falling back to a plain wrapper ──
-  const appToAdd = pwaAppPath ?? await macCreateFallbackWrapper()
-  await macAddToDock(appToAdd)
-
-  console.log('\nDone! Click the Jivam icon in your Dock to launch.')
-  console.log('The server runs continuously in the background — manage it with:')
+  if (pwaAppPath) {
+    await macAddToDock(pwaAppPath)
+    console.log('\nDone! Click the Jivam icon in your Dock to launch.')
+  } else {
+    console.log('\nJivam is running in the background, but Add to Dock wasn\'t completed.')
+    console.log(`You can still use Jivam at ${url}, or finish adding it to your Dock any time:`)
+    console.log('  File > Add to Dock… in Safari\'s menu bar — or just run `jivam --install` again.')
+  }
+  console.log('\nThe server runs continuously in the background — manage it with:')
   console.log('  jivam stop      jivam start      jivam restart      jivam status')
   process.exit(0)
 }
@@ -945,24 +866,12 @@ app.use('/api/mcp', createMcpRouter(jivaRunner))
 app.use('/api/code', createCodeRouter(codeRunner))
 app.use('/api/files', createFilesRouter(jivaRunner))
 app.use('/api/cloud', createCloudRouter(cloudRunner))
-
-// `jivam --install` runs as a separate one-off CLI process from the
-// persistent background server, so it can't call ws.ts's broadcast()
-// directly — it hits this endpoint instead once it detects the Safari
-// "Add to Dock" bundle, and the server (which owns the WebSocket
-// connections) relays the news to any open tab showing AddToDockGuide.
-app.post('/api/system/pwa-installed', (_req, res) => {
-  broadcast('jivam:pwa-installed', {})
-  res.json({ success: true })
-})
+app.use('/api/system', systemRouter)
 
 // Platform + version endpoints for the frontend shim
 app.get('/api/platform', (_req, res) => res.json(process.platform))
 app.get('/api/version', (_req, res) => {
-  try {
-    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname_cjs, '..', 'package.json'), 'utf-8')) as { version: string }
-    res.json(pkg.version)
-  } catch { res.json('0.0.0') }
+  res.json(getCurrentVersion())
 })
 
 // Serve built frontend in production
@@ -1104,53 +1013,64 @@ async function openAppWindow(url: string): Promise<void> {
   }
 }
 
-/**
- * Checks once a day whether newer jivamai/jiva-core versions are published.
- * If so, runs the update then exits — the OS-level service manager
- * (launchd KeepAlive on macOS, Scheduled Task RestartOnFailure on Windows)
- * brings the process back up running the new code. Only active in
- * --server-only mode (the persistent background instance).
- */
-function scheduleUpdateCheck(): void {
-  const DAY_MS = 24 * 60 * 60 * 1000
-
-  const check = async () => {
-    try {
-      const { exec } = await import('child_process')
-      const { promisify } = await import('util')
-      const execAsync = promisify(exec)
-
-      const currentPkg = JSON.parse(
-        fs.readFileSync(path.join(__dirname_cjs, '..', 'package.json'), 'utf-8'),
-      ) as { version: string }
-      const { stdout } = await execAsync('npm view jivamai version')
-      const latest = stdout.trim()
-
-      if (latest && latest !== currentPkg.version) {
-        console.log(`Update available: jivamai ${currentPkg.version} → ${latest}. Updating...`)
-        await execAsync('npm install -g jivamai jiva-core')
-        console.log('Update installed — restarting to pick it up.')
-        process.exit(1) // non-zero so Windows RestartOnFailure also triggers; macOS KeepAlive restarts regardless
-        return
-      }
-    } catch (err) {
-      console.warn('Update check failed (probably offline):', err)
-    }
-    setTimeout(check, DAY_MS)
-  }
-
-  // First check after 24h — the install script already updates at install time
-  setTimeout(check, DAY_MS)
-}
 
 // ---------------------------------------------------------------------------
 // CLI dispatch
 // ---------------------------------------------------------------------------
-const cliSubcommand = process.argv[2]
+function printHelp(): void {
+  console.log(`Jivam ${getCurrentVersion()} — desktop UI for Jiva, the autonomous AI agent
+
+Usage:
+  jivam                    Launch Jivam — opens the UI, starting it first if it isn't already running
+  jivam --install          Set up Jivam as a background service with a Dock / Start Menu icon
+  jivam start              Start the background service
+  jivam stop               Stop the background service
+  jivam restart            Restart the background service
+  jivam status             Show whether the background service is running
+  jivam --server-only      Run the server in the foreground (used internally by the background service)
+  jivam --version, -v      Print the installed version
+  jivam --help, -h         Show this help
+
+https://jivamai.com`)
+}
+
+async function isServerAlreadyRunning(): Promise<boolean> {
+  try {
+    const res = await fetch(`http://localhost:${PORT}/api/version`, { signal: AbortSignal.timeout(1500) })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
+const cliArgs = process.argv.slice(2)
+const cliSubcommand = cliArgs[0]
 const isServiceAction = cliSubcommand === 'start' || cliSubcommand === 'stop'
   || cliSubcommand === 'restart' || cliSubcommand === 'status'
+const KNOWN_FLAGS = new Set(['--install', '--server-only', '--version', '-v', '--help', '-h'])
 
-if (process.argv.includes('--install')) {
+if (cliArgs.includes('--version') || cliArgs.includes('-v')) {
+  console.log(getCurrentVersion())
+  process.exit(0)
+}
+
+if (cliArgs.includes('--help') || cliArgs.includes('-h')) {
+  printHelp()
+  process.exit(0)
+}
+
+// Anything that isn't a recognized command used to fall straight through to
+// server.listen() below and crash with an unhandled EADDRINUSE exception
+// whenever the background service was already running on the port — which
+// is also exactly what happened for a bare `jivam` invocation with no flags
+// at all, since there was no "is it already running?" check of any kind.
+if (cliSubcommand && !isServiceAction && !KNOWN_FLAGS.has(cliSubcommand)) {
+  console.error(`Unknown option: ${cliSubcommand}\n`)
+  printHelp()
+  process.exit(1)
+}
+
+if (cliArgs.includes('--install')) {
   const installFn = process.platform === 'win32' ? runInstallWindows : runInstall
   installFn().catch(err => { console.error(err); process.exit(1) })
 } else if (isServiceAction) {
@@ -1160,32 +1080,73 @@ if (process.argv.includes('--install')) {
     .catch(err => { console.error(err); process.exit(1) })
 } else {
 
-const isServerOnly = process.argv.includes('--server-only')
+const isServerOnly = cliArgs.includes('--server-only')
 
-const server = http.createServer(app)
-initWebSocketServer(server)
+function startForegroundServer(): void {
+  const server = http.createServer(app)
+  initWebSocketServer(server)
 
-server.listen(PORT, '127.0.0.1', async () => {
-  const url = `http://localhost:${PORT}`
-  console.log(`Jivam server running at ${url}`)
+  // Defensive net for the rare TOCTOU race (the already-running check below
+  // and this listen() aren't atomic) — fail with a clear message instead of
+  // an unhandled exception blowing up the WebSocketServer too.
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`Jivam is already running on port ${PORT}. Run \`jivam status\` to check, or just open ${`http://localhost:${PORT}`} in your browser.`)
+      process.exit(1)
+    }
+    throw err
+  })
 
-  if (!IS_DEV && !isServerOnly) {
-    await openAppWindow(url)
+  server.listen(PORT, '127.0.0.1', async () => {
+    const url = `http://localhost:${PORT}`
+    console.log(`Jivam server running at ${url}`)
+
+    if (!IS_DEV && !isServerOnly) {
+      await openAppWindow(url)
+    }
+    if (isServerOnly) {
+      scheduleUpdateChecks()
+    }
+  })
+
+  // Graceful shutdown
+  async function shutdown() {
+    await jivaRunner.cleanup()
+    await codeRunner.cleanup()
+    server.close()
+    process.exit(0)
   }
-  if (isServerOnly) {
-    scheduleUpdateCheck()
-  }
-})
 
-// Graceful shutdown
-async function shutdown() {
-  await jivaRunner.cleanup()
-  await codeRunner.cleanup()
-  server.close()
-  process.exit(0)
+  process.on('SIGINT', shutdown)
+  process.on('SIGTERM', shutdown)
 }
 
-process.on('SIGINT', shutdown)
-process.on('SIGTERM', shutdown)
+if (isServerOnly || IS_DEV) {
+  // --server-only IS the persistent background process (the LaunchAgent /
+  // Startup-folder supervisor always invokes it this way) — always bind
+  // directly; the EADDRINUSE handler above covers the rare collision case.
+  // Dev mode (`npm run dev`) also always binds directly, matching its
+  // previous behavior.
+  startForegroundServer()
+} else {
+  // Bare `jivam` (no flags) — don't blindly try to bind the port. If the
+  // background service is already running, do that would crash exactly like
+  // above; instead, just report status and bring up the UI after a short
+  // beat so there's time to read it. Only start a fresh foreground server if
+  // nothing is listening yet (e.g. the user never ran `jivam --install` and
+  // is launching it directly).
+  isServerAlreadyRunning().then(async (running) => {
+    if (running) {
+      const url = `http://localhost:${PORT}`
+      console.log(`Jivam v${getCurrentVersion()} is already running at ${url}`)
+      console.log('Opening Jivam in 5 seconds...')
+      await new Promise(resolve => setTimeout(resolve, 5000))
+      await openAppWindow(url)
+      process.exit(0)
+    } else {
+      startForegroundServer()
+    }
+  })
+}
 
 } // end of non-install/non-service-action block
