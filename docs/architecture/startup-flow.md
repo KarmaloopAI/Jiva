@@ -11,17 +11,31 @@ why both exist.
 
 **File:** `server/index.ts` (module top-level, dispatched via `bin/jivam.js`)
 
-1. CLI arg dispatch at the bottom of `server/index.ts` checks `process.argv`
-   for `--install`, `start`/`stop`/`restart`/`status`, or `--server-only`. With
-   none of those, it falls through to the default path below.
+1. CLI arg dispatch at the bottom of `server/index.ts` handles
+   `--version`/`-v` and `--help`/`-h` immediately (no server involved at
+   all), rejects anything else that isn't `--install`,
+   `start`/`stop`/`restart`/`status`, or `--server-only` with an "Unknown
+   option" error, and otherwise falls through to the default path below.
 2. Express app is created, all routes mounted (`server/routes/*.ts`), static
    `dist/` serving configured for production.
-3. `server.listen(PORT, '127.0.0.1', ...)` starts the HTTP+WebSocket server.
+3. For a bare `jivam` invocation specifically (no flags, not dev mode): first
+   checks whether the background service is already answering on the port
+   (`GET /api/version`). If so, it reports that status and calls
+   `openAppWindow(url)` after a 5s beat **without** calling
+   `server.listen()` — binding again would crash with `EADDRINUSE`, which
+   used to happen unconditionally for any argv that wasn't a recognized
+   flag. Only if nothing's listening yet does it proceed to
+   `server.listen(PORT, '127.0.0.1', ...)` to start the HTTP+WebSocket server
+   itself (this is also always the path for `--server-only` and dev mode).
 4. In production (`!IS_DEV`), `openAppWindow(url)` is called — tries, in
    order: an already-installed Safari web app bundle
    (`~/Applications/Jivam.app` or `~/Applications/Safari Apps/Jivam.app`),
-   then Chrome/Edge/Brave `--app=` mode, then plain Safari via `osascript`,
-   then the OS default browser (`open` npm package) as a last resort.
+   then plain Safari via `osascript`, then Chrome/Edge/Brave `--app=` mode
+   (only if Safari itself failed or was explicitly overridden via
+   `JIVAM_BROWSER`), then the OS default browser (`open` npm package) as a
+   last resort. Note this is a different fallback chain from `jivam
+   --install`'s, which has no Chrome/Edge/Brave step at all — see
+   [native-install.md](native-install.md).
 5. `SIGINT`/`SIGTERM` trigger `shutdown()`: `jivaRunner.cleanup()`,
    `codeRunner.cleanup()`, `server.close()`.
 

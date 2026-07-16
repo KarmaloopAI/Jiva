@@ -31,12 +31,29 @@ fi
 # ── 2. Node.js ───────────────────────────────────────────────────────────────
 header "Step 1 of 3 — Node.js"
 
+# nvm refuses `nvm use`/`nvm install` outright if ~/.npmrc pins a `prefix`
+# and/or `globalconfig` (common if the user previously ran a manual
+# `npm config set prefix ...`, e.g. from a Homebrew Node setup, or already
+# has another version manager configured) — it dies with "nvm_die_on_prefix"
+# before installing anything. Strip those two keys first so nvm can actually
+# manage the Node version instead of getting stuck on this. Back up the
+# original file rather than deleting anything outright.
+sanitize_npmrc_for_nvm() {
+  if [ -f "$HOME/.npmrc" ] && grep -qE '^(prefix|globalconfig)[[:space:]]*=' "$HOME/.npmrc" 2>/dev/null; then
+    warn "Removing prefix/globalconfig from ~/.npmrc (incompatible with nvm) — backed up to ~/.npmrc.bak"
+    sed -i.bak -E '/^(prefix|globalconfig)[[:space:]]*=/d' "$HOME/.npmrc"
+  fi
+}
+
 install_node_mac() {
   log "Installing Node.js via nvm..."
   export NVM_DIR="$HOME/.nvm"
-  curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+  if [ ! -s "$NVM_DIR/nvm.sh" ]; then
+    curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+  fi
   # shellcheck source=/dev/null
   [ -s "$NVM_DIR/nvm.sh" ] && source "$NVM_DIR/nvm.sh"
+  sanitize_npmrc_for_nvm
   nvm install --lts
   nvm use --lts
   nvm alias default node
@@ -45,39 +62,44 @@ install_node_mac() {
 install_node_linux() {
   log "Installing Node.js via nvm..."
   export NVM_DIR="$HOME/.nvm"
-  curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+  if [ ! -s "$NVM_DIR/nvm.sh" ]; then
+    curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+  fi
   [ -s "$NVM_DIR/nvm.sh" ] && source "$NVM_DIR/nvm.sh"
+  sanitize_npmrc_for_nvm
   nvm install --lts
   nvm use --lts
 }
 
-# Load nvm if it exists but isn't in PATH yet
-if [ -s "$HOME/.nvm/nvm.sh" ]; then
-  export NVM_DIR="$HOME/.nvm"
-  source "$NVM_DIR/nvm.sh"
-fi
+# Look for a suitable Node.js on the *plain* PATH first, before touching nvm
+# at all. This used to source ~/.nvm/nvm.sh unconditionally up front, which
+# on a machine with nvm installed but no default alias/version "in use" yet
+# can leave `node` resolving to nothing (or an old shell default) even though
+# a perfectly good Node.js is already installed and reachable — tripping the
+# "too old" branch and dragging in nvm's install/upgrade path (and its
+# prefix/globalconfig error) for a machine that didn't need any of it.
+node_major_version() {
+  local ver
+  ver="$(node --version 2>/dev/null)" || { echo 0; return; }
+  local major="${ver#v}"
+  major="${major%%.*}"
+  echo "${major:-0}"
+}
 
+NODE_READY=false
 if command -v node &>/dev/null; then
-  NODE_VER="$(node --version)"
-  # Strip the leading "v" and any prerelease/build suffix, keep just the major
-  # number. (A previous version of this used a glob substitution here —
-  # `${NODE_VER//[^0-9.]*/}` — which looks like a regex but isn't: in bash
-  # glob patterns `*` is a standalone wildcard, not a quantifier on the
-  # preceding class, so `[^0-9.]*` matched "any non-digit char followed by
-  # literally anything" and wiped the whole string. MAJOR always came out
-  # empty, and an empty string in `[ -lt ]` numeric context evaluates as 0 —
-  # so it thought Node was too old and tried to reinstall/upgrade even when
-  # e.g. v24 was already present.)
-  MAJOR="${NODE_VER#v}"
-  MAJOR="${MAJOR%%.*}"
-  if [ "${MAJOR:-0}" -lt 20 ]; then
-    warn "Node.js $NODE_VER is too old (need ≥20). Upgrading..."
-    [[ "$OS" == "Darwin" ]] && install_node_mac || install_node_linux
+  MAJOR="$(node_major_version)"
+  if [ "$MAJOR" -ge 20 ]; then
+    ok "Node.js $(node --version) already installed — skipping Node setup"
+    NODE_READY=true
   else
-    ok "Node.js $NODE_VER"
+    warn "Node.js $(node --version 2>/dev/null || echo '(unknown)') is too old (need ≥20). Upgrading..."
   fi
 else
   warn "Node.js not found. Installing..."
+fi
+
+if [ "$NODE_READY" = false ]; then
   [[ "$OS" == "Darwin" ]] && install_node_mac || install_node_linux
 fi
 

@@ -348,6 +348,123 @@ their own; fixing the orchestrator's routing was the single correct
 integration point. If a future agent class is added, keep this pattern: agents
 should never special-case vision — that belongs in the orchestrator.
 
+**Bash glob-vs-nvm-error install.sh bug, round two: don't source nvm.sh (or
+touch `~/.npmrc`) unless Node is actually missing/too old.** `install.sh`
+used to unconditionally `source ~/.nvm/nvm.sh` (if present) *before* checking
+whether an already-installed Node satisfied the `>=20` requirement. On a
+machine with nvm installed but no default alias/version ever explicitly
+"used" in that shell, this can leave `node --version` resolving to nothing or
+an unexpected value even when a perfectly good Node is on the plain PATH —
+tripping the "too old" branch and dragging in nvm's install/upgrade path for
+a machine that didn't need any of it. Worse, nvm's own `nvm use`/`nvm
+install` refuse outright (`nvm_die_on_prefix`) if `~/.npmrc` pins a `prefix`
+and/or `globalconfig` key — common for anyone who's ever run `npm config set
+prefix ...` manually (e.g. old Homebrew Node setups) — so a machine in that
+state got stuck on an nvm error message instead of just proceeding. Fixed by
+checking Node on the **plain PATH first**, before sourcing nvm.sh at all,
+and only falling into the nvm path if genuinely needed; when it is needed,
+`sanitize_npmrc_for_nvm()` now strips `prefix`/`globalconfig` from
+`~/.npmrc` first (backing up to `~/.npmrc.bak`) so nvm can actually do its
+job instead of dying on it.
+
+**`findSafariWebAppBundle()`'s Info.plist content-matching was the actual
+bug behind "jivam --install doesn't detect a real Dock install."** It
+scanned every `.app` in the two candidate directories and pattern-matched
+the raw plist XML for the literal substrings `com.apple.Safari.WebApp` and
+`<string>Jivam</string>` — which is fragile against real-world formatting/
+whitespace variance across macOS versions, and produced false negatives
+even when `~/Applications/Jivam.app` plainly existed and was freshly
+written. Safari always names the bundle after the page title ("Jivam"), so
+the fix is simpler than the thing it replaced: check the two exact known
+paths (`~/Applications/Safari Apps/Jivam.app`, `~/Applications/Jivam.app`)
+directly, still gated on `Info.plist` mtime freshness (not existence alone)
+to avoid false-positiving on a stale bundle from a previous run. If this
+kind of "scan and pattern-match file content" detection shows up again for
+some other OS-written artifact, prefer matching a known exact path first.
+
+**The Chrome/Edge/Brave `--app=` fallback wrapper is gone from `jivam
+--install` entirely — don't reintroduce it.** `macCreateFallbackWrapper()`
+used to create a `~/Applications/Jivam.app` wrapper that tried Safari first,
+then fell back to Chrome/Edge/Brave `--app=` mode, if Safari's Add to Dock
+polling timed out. Removed outright: those windows share the browser's own
+bundle ID rather than getting a real, single-instance Dock icon (see the
+Chrome `--app=` finding above), so a lesser wrapper was never worth
+creating. `runInstall()` now just skips adding anything to the Dock on a
+timeout, and tells the user the background service is already running and
+reachable directly, with Add to Dock completable whenever they're ready (or
+by re-running `jivam --install`). This does *not* touch `openAppWindow()`'s
+separate, general-launch Chrome/Edge/Brave fallback (used only if Safari's
+own `osascript` call itself throws, which is rare) — that's a different code
+path from the install-time wrapper and wasn't part of this fix.
+
+**`jivam`'s CLI dispatch used to fall through to `server.listen()` for
+literally anything that wasn't `--install`/a service action — including a
+bare `jivam` with no flags at all.** This crashed with an unhandled
+`EADDRINUSE` exception (and took the WebSocketServer down with it, per its
+own error event) whenever the background service was already running on the
+port — which is the common case for anyone who'd already run `jivam
+--install`. Fixed with a proper first-class CLI: `--version`/`-v` and
+`--help`/`-h` short-circuit immediately; anything else unrecognized prints
+an error + usage and exits 1 instead of reaching `server.listen()` at all;
+and a bare `jivam` invocation specifically checks `GET /api/version` first —
+if something's already listening, it reports status and opens the browser
+after a 5s beat without trying to bind the port again, only falling through
+to actually starting a foreground server if nothing answered. `--server-only`
+and dev mode (`npm run dev`) still always bind directly (that IS the
+canonical persistent-service invocation), now backed by a `server.on('error',
+...)` handler that turns any remaining `EADDRINUSE` race into a clean error
+message instead of an unhandled exception.
+
+**The updater is real now — npm-registry-based, detect-silently/apply-only-
+on-click, not the old scheduleUpdateCheck().** The old `scheduleUpdateCheck()`
+in `server/index.ts` shelled out to `npm view jivamai version` once a day
+and, if newer, silently ran `npm install -g jivamai jiva-core` and killed the
+process with zero visibility to the user — no banner, no confirmation, no
+indication anything happened besides a brief restart. Replaced with
+`server/updater.ts`: `checkForUpdate()` hits
+`registry.npmjs.org/jivamai/latest` directly (no `npm view` shell-out) and
+only ever broadcasts an `idle`/`available` status over WebSocket — it never
+installs anything itself. Actually applying an update requires an explicit
+frontend call to `POST /api/system/update-apply`, gated behind a user
+clicking "Update" in the UI (`UpdateBanner`/`UpdateModal` in
+`src/components/UpdateModal.tsx`, backed by `src/store/updater.store.ts`).
+`applyUpdate()` spawns `npm install -g jivamai jiva-core` as a **detached**
+child process — deliberately not run in-process, since a running process's
+own script files can be locked on Windows in ways POSIX isn't, so
+overwriting them out from under the very process executing them isn't worth
+the risk — and once that child exits 0, broadcasts `restarting` and calls
+`process.exit(0)`, letting the OS-level supervisor (launchd `KeepAlive` /
+the Windows PowerShell loop) bring the process back up on the new code. The
+frontend must not treat the WebSocket disconnect that follows as an error:
+`updater.store.ts` transitions to a `reconnecting` phase and quietly polls
+`GET /api/version` (silently swallowing failures — that's the expected state
+while the server restarts) until it gets an answer, then shows a cancellable
+"reloading in 3s" countdown before calling `window.location.reload()`. If a
+future change touches this flow, keep the detect/apply split — silently
+auto-applying was the actual UX problem being fixed, not just a missing
+progress bar.
+
+**Removed the entire dead `electron/` source tree, `electron-builder.yml`,
+and five stale devDependencies (`electron`, `electron-builder`,
+`vite-plugin-electron`, `vite-plugin-electron-renderer`, and the
+`dependencies`-listed `electron-updater`).** These were genuine leftovers
+from before the Electron→PWA migration — confirmed via grep that nothing in
+`server/`, `src/`, or any Vite config imported from `electron/` or
+referenced `electron-updater`, and `package.json`'s `main`/`scripts` fields
+point entirely at `dist-server/index.js`. The most consequential piece
+living in there was `electron/updater.ts` (real `electron-updater`
+`autoUpdater` wiring) — its API shape (`onAvailable`/`onProgress`/`onReady`/
+`quitAndInstall`) is what `src/lib/electron-shim.ts`'s `updater` object and
+`AboutTab.tsx`/`App.tsx`'s old `UpdateBanner` were still typed against, as a
+permanently-unresolvable stub (`check: () => Promise.resolve()`, no-op
+`onAvailable`/etc.) — meaning "Check for Updates" silently did nothing and
+the update banner could never appear. Replaced by the real updater described
+above. If you ever see `window.electron.updater` typed with
+Electron-`autoUpdater`-shaped methods again, that's this exact regression
+reappearing — the correct shape is `getStatus`/`check`/`apply`/`onStatus`
+against `UpdateStatus` (defined in `src/types/electron.d.ts`, mirrored from
+`server/updater.ts`).
+
 ## npm publishing gotchas
 
 - Publishing requires either 2FA-with-OTP on every `npm publish`, or a

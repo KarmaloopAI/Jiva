@@ -246,11 +246,12 @@ const electronShim = {
   },
 
   updater: {
-    check: () => Promise.resolve(),
-    quitAndInstall: () => Promise.resolve(),
-    onAvailable: (_cb: unknown) => {},
-    onProgress: (_cb: unknown) => {},
-    onReady: (_cb: unknown) => {},
+    getStatus: () => get('/system/update-status'),
+    check: () => post('/system/update-check'),
+    apply: () => post<{ success: boolean; error?: string }>('/system/update-apply'),
+    onStatus: (cb: (status: unknown) => void) => {
+      on('jivam:update-status', (status: unknown) => cb(status))
+    },
   },
 
   cloud: {

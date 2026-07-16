@@ -1,38 +1,35 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { RefreshCw, CheckCircle2, ExternalLink, Loader2 } from 'lucide-react'
 import { Button } from '../../ui/Button'
 import { logoUrl } from '../../../lib/logo'
-
-type UpdateCheckState = 'idle' | 'checking' | 'up-to-date' | 'unavailable'
+import { useUpdaterStore } from '../../../store/updater.store'
 
 export function AboutTab() {
   const [version, setVersion] = useState<string>('…')
-  const [checkState, setCheckState] = useState<UpdateCheckState>('idle')
+  const { phase, latestVersion, checkForUpdate, openModal } = useUpdaterStore()
+  const [justChecked, setJustChecked] = useState(false)
+  const wasCheckingRef = useRef(false)
 
   useEffect(() => {
     window.electron?.app?.getVersion().then(setVersion).catch(() => {})
   }, [])
 
-  // Listen for updater events so the button reflects result even if triggered elsewhere
+  // "Up to date" flashes briefly right after a check that found nothing —
+  // detected by watching for a checking → idle transition, since 'idle' is
+  // also the resting state the rest of the time.
   useEffect(() => {
-    if (!window.electron?.updater) return
-    window.electron.updater.onAvailable(() => setCheckState('idle')) // banner takes over
-    window.electron.updater.onNotAvailable(() => {
-      setCheckState('up-to-date')
-      setTimeout(() => setCheckState('idle'), 4000)
-    })
-  }, [])
-
-  const handleCheckUpdates = useCallback(async () => {
-    setCheckState('checking')
-    try {
-      await window.electron.updater.check()
-      // result comes via onAvailable / onNotAvailable listeners
-    } catch {
-      setCheckState('unavailable')
-      setTimeout(() => setCheckState('idle'), 4000)
+    if (phase === 'checking') {
+      wasCheckingRef.current = true
+    } else if (phase === 'idle' && wasCheckingRef.current) {
+      wasCheckingRef.current = false
+      setJustChecked(true)
+      setTimeout(() => setJustChecked(false), 4000)
     }
-  }, [])
+  }, [phase])
+
+  const handleCheckUpdates = useCallback(() => {
+    checkForUpdate()
+  }, [checkForUpdate])
 
   return (
     <div className="max-w-md mx-auto flex flex-col items-center text-center pt-8 pb-4 gap-6">
@@ -78,23 +75,32 @@ export function AboutTab() {
 
       {/* Check for updates */}
       <div className="flex flex-col items-center gap-2 w-full">
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={handleCheckUpdates}
-          disabled={checkState === 'checking'}
-          className="flex items-center gap-2 min-w-[160px] justify-center"
-        >
-          {checkState === 'checking' ? (
-            <><Loader2 size={13} className="animate-spin" /> Checking…</>
-          ) : checkState === 'up-to-date' ? (
-            <><CheckCircle2 size={13} className="text-green-500" /> Up to date</>
-          ) : (
-            <><RefreshCw size={13} /> Check for Updates</>
-          )}
-        </Button>
-        {checkState === 'unavailable' && (
-          <p className="text-xs text-[var(--text-subtle)]">Not available in development mode</p>
+        {phase === 'available' ? (
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={openModal}
+            className="flex items-center gap-2 min-w-[160px] justify-center"
+            style={{ borderColor: 'var(--accent)' }}
+          >
+            <RefreshCw size={13} className="text-[var(--accent)]" /> Update to v{latestVersion}
+          </Button>
+        ) : (
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={handleCheckUpdates}
+            disabled={phase === 'checking'}
+            className="flex items-center gap-2 min-w-[160px] justify-center"
+          >
+            {phase === 'checking' ? (
+              <><Loader2 size={13} className="animate-spin" /> Checking…</>
+            ) : justChecked ? (
+              <><CheckCircle2 size={13} className="text-green-500" /> Up to date</>
+            ) : (
+              <><RefreshCw size={13} /> Check for Updates</>
+            )}
+          </Button>
         )}
       </div>
 
