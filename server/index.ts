@@ -148,7 +148,7 @@ async function installSafariAddToDock(url: string): Promise<string | null> {
     const { stdout: versionOut } = await execAsync('sw_vers -productVersion')
     const majorVersion = parseInt(versionOut.trim().split('.')[0] ?? '0', 10)
     if (majorVersion < 14) {
-      console.warn('Safari Add to Dock requires macOS Sonoma (14) or later — falling back to --app mode.')
+      console.warn('Safari Add to Dock requires macOS Sonoma (14) or later — skipping.')
       return null
     }
 
@@ -160,7 +160,7 @@ async function installSafariAddToDock(url: string): Promise<string | null> {
         `osascript -e 'tell application "Safari" to open location "${guideUrl}"' -e 'tell application "Safari" to activate'`,
       )
     } catch (err) {
-      console.warn('Could not open Safari automatically — falling back to --app mode:', err)
+      console.warn('Could not open Safari automatically:', err)
       return null
     }
 
@@ -182,10 +182,10 @@ async function installSafariAddToDock(url: string): Promise<string | null> {
       }
     }
 
-    console.warn('No Dock install detected within 2 minutes — falling back to --app mode. Run `jivam --install` again anytime to retry.')
+    console.warn('No Dock install detected within 2 minutes. Run `jivam --install` again anytime to retry.')
     return null
   } catch (err) {
-    console.warn('Safari Add to Dock setup failed, falling back to --app mode:', err)
+    console.warn('Safari Add to Dock setup failed:', err)
     return null
   }
 }

@@ -465,6 +465,65 @@ reappearing — the correct shape is `getStatus`/`check`/`apply`/`onStatus`
 against `UpdateStatus` (defined in `src/types/electron.d.ts`, mirrored from
 `server/updater.ts`).
 
+**`AddToDockGuide`/`InstallModal` were unreadable in light mode — always
+check whether a "fixed dark" component is leaking theme-variable text
+colors.** Both modals render on a hardcoded dark background
+(`background: 'var(--bg-card, #1a1a2e)'` — note `--bg-card` is never
+actually defined anywhere in `index.css`, so this **always** resolves to
+the `#1a1a2e` fallback, regardless of theme, by design — it's meant to look
+like native dark OS chrome). But the emphasized words ("File", "Add",
+"Install", "Jivam") were styled `text-[var(--text)]`, a genuinely
+theme-dependent CSS variable. In dark theme `--text` is light — fine. In
+**light theme — the default for any user whose OS reports
+`prefers-color-scheme: light`** — `--text` is `#1E1B4B` (near-black indigo),
+rendered against the always-dark `#1a1a2e` background: unreadable. Fixed by
+replacing every theme-variable text color inside these two components
+(`text-[var(--text)]`, `text-[var(--text-muted)]`, `text-[var(--text-subtle)]`)
+with fixed light values (`text-white`, `text-white/60`, `text-white/40`,
+etc.) — matching the pattern `SafariFileMenuMockup`/`EdgeInstallMockup`
+already used correctly. If you add new copy to either modal, never use a
+`var(--text*)` class there — hardcode a light color instead, since the
+modal's own background can never become light-mode-compatible without
+undermining the "looks like a native OS menu" illusion these are going for.
+
+**Also added a max-height safeguard (`max-h-[90vh] overflow-y-auto`) to
+both modals** — neither had one, so on a short viewport (a small external
+monitor, or just a modest window height) the modal could render taller than
+the screen with no way to scroll to the confirm/dismiss button. Verified by
+resizing to 1024×500: without the fix the content (~920px) would have
+overflowed off-screen; with it, the modal caps at 90vh and scrolls
+internally.
+
+**`AddToDockGuide`'s platform selection now cross-checks `/api/platform`,
+not just the URL param.** The `?installGuide=safari-dock`/`edge-app` query
+param is set server-side by whichever of `runInstall()`/`runInstallWindows()`
+(or `openAppWindow()`'s platform branches) is actually running — which
+branches on Node's own `process.platform`, so in theory it's always correct
+by construction. A report came in of Windows showing Safari's File-menu
+walkthrough anyway; exhaustive review of every server-side code path that
+constructs that URL turned up nothing wrong, so the likely explanation is a
+stale/very-old npm-installed version predating the Edge-guide feature
+entirely (see the note below about unreleased fixes) rather than a live bug.
+Added a belt-and-suspenders fix regardless: `AddToDockGuide` now also fetches
+`/api/platform` and, once resolved, lets it override the URL-param-derived
+guide kind (`win32` → `edge-app`, `darwin` → `safari-dock`) — so this class
+of mismatch literally cannot happen client-side going forward, independent
+of whatever caused the original report.
+
+**Reminder: fixes on `develop` don't reach real users until a release is
+cut.** Both the "flaky Safari Add-to-Dock detection on some Macs" report and
+the "Windows shows Safari instructions" report were investigated at length
+before realizing the most likely explanation for each is simply that `npm`'s
+published `latest` tag (what `npm install -g jivamai` actually installs) can
+be several fixes behind whatever's on `develop` — e.g. the
+`findSafariWebAppBundle()` Info.plist-matching fix earlier in this file was
+committed to `develop` well before this note but, as of this writing, has
+never shipped in a stable release. Before spending a lot of effort chasing a
+"user reports X is broken" bug by re-deriving root causes from scratch,
+check `npm view jivamai version` / `dist-tags` against what commit that
+version actually corresponds to on `main` — the bug may already be fixed and
+just waiting on a release.
+
 ## npm publishing gotchas
 
 - Publishing requires either 2FA-with-OTP on every `npm publish`, or a
