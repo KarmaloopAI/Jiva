@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion'
-import { Loader2, CheckCircle2, AlertTriangle, Download, X } from 'lucide-react'
+import { Loader2, CheckCircle2, AlertTriangle, X } from 'lucide-react'
 import { useUpdaterStore } from '../store/updater.store'
 import { logoUrl } from '../lib/logo'
 
@@ -179,40 +179,5 @@ export function UpdateModal() {
         </motion.div>
       </motion.div>
     </AnimatePresence>
-  )
-}
-
-export function UpdateBanner() {
-  const { phase, latestVersion, openModal, dismissBanner } = useUpdaterStore()
-
-  if (phase !== 'available') return null
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: -8 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -8 }}
-      className="fixed bottom-4 right-4 z-40 flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-sm shadow-lg"
-      style={{
-        background: 'var(--bg-card, #1a1a2e)',
-        border: '1px solid rgba(139,92,246,0.3)',
-        backdropFilter: 'blur(12px)',
-      }}
-    >
-      <Download size={14} className="text-[var(--accent)] shrink-0" />
-      <span className="text-[var(--text-muted)]">Jivam v{latestVersion} is available</span>
-      <button
-        onClick={openModal}
-        className="text-xs font-medium px-3 py-1 rounded-md bg-[var(--accent)] text-white hover:opacity-90 transition-opacity shrink-0"
-      >
-        Update
-      </button>
-      <button
-        onClick={dismissBanner}
-        className="text-[var(--text-subtle)] hover:text-[var(--text-muted)] transition-colors shrink-0"
-      >
-        <X size={13} />
-      </button>
-    </motion.div>
   )
 }

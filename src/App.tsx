@@ -9,7 +9,7 @@ import { usePersonaStore } from './store/persona.store'
 import { useSettingsStore } from './store/settings.store'
 import { useAuthStore } from './store/auth.store'
 import { useUpdaterStore } from './store/updater.store'
-import { UpdateModal, UpdateBanner } from './components/UpdateModal'
+import { UpdateModal } from './components/UpdateModal'
 import { logoUrl } from './lib/logo'
 
 type SetupChecks = {
@@ -550,7 +550,6 @@ function App() {
 
         <AnimatePresence>
           <InstallModal key="install-modal" />
-          <UpdateBanner key="update-banner" />
         </AnimatePresence>
         <UpdateModal />
 

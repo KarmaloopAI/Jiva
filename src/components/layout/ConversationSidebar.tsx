@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useConversationStore } from '../../store/conversation.store'
 import { useChatStore } from '../../store/chat.store'
 import { useCodeStore } from '../../store/code.store'
+import { UpdateSidebarNotice } from './UpdateSidebarNotice'
 import type { ActiveTab } from '../../App'
 
 function formatRelativeDate(ts: number): string {
@@ -89,7 +90,7 @@ export function ConversationSidebar({ isCollapsed, width, activeTab }: Conversat
           animate={{ width, opacity: 1 }}
           exit={{ width: 0, opacity: 0 }}
           transition={{ type: 'spring', damping: 28, stiffness: 300 }}
-          className="flex-shrink-0 h-full flex flex-col overflow-hidden"
+          className="flex-shrink-0 h-full flex flex-col overflow-hidden relative"
           style={{
             background: 'var(--sidebar-bg)',
             borderRight: '1px solid var(--card-border)',
@@ -189,6 +190,8 @@ export function ConversationSidebar({ isCollapsed, width, activeTab }: Conversat
               </div>
             ))}
           </div>
+
+          <UpdateSidebarNotice />
         </motion.aside>
       )}
     </AnimatePresence>
