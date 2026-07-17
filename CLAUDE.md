@@ -562,6 +562,64 @@ broken UI. Confirmed encouragingly during testing: a real user's own
 already-configured `~/.jivam/config.json` independently used the exact same
 `html-to-markdown-mcp` and `@playwright/mcp@latest` packages.
 
+**Code-mode conversation switching didn't update the git panel — two stores
+that never talked to each other.** `git.store.ts`'s `workspaceDir` (which
+`GitPanel.tsx`/`refresh()` actually read from) is a completely separate piece
+of state from `code.store.ts`'s `codeWorkspaceDir` — the only place that ever
+called `useGitStore.getState().setWorkspaceDir(...)` was
+`WorkspacePickerView.tsx`'s `handleStart()`, i.e. only when a *brand new*
+session started. `code.store.ts`'s `loadConversation()` (restoring a
+previously-saved conversation, potentially with an entirely different
+`workspace` in its metadata) set `codeWorkspaceDir` correctly but never
+touched `git.store`, so the git panel kept showing whatever workspace was
+last active. Compounding it: `CodePage.tsx`'s `useEffect(() => {
+checkIsRepo() }, [isSessionStarted])` only refires on a `false→true` edge —
+switching between two conversations that were both already inside an active
+session leaves `isSessionStarted` at `true` the whole time, so even a correct
+`git.store` sync wouldn't have been picked up by that effect. Fixed by having
+`loadConversation()` call `useGitStore.getState().setWorkspaceDir(workspace)`
++ `checkIsRepo()` directly, right after resolving the restored workspace, in
+both the v0.3.50+ success path and the pre-v0.3.50 fallback path — not
+relying on `CodePage.tsx`'s effect at all. If another cross-store workspace
+dependency shows up later, default to having the action that changes the
+workspace push the update everywhere it needs to go, rather than relying on
+a `useEffect` keyed off a boolean that doesn't change on every workspace
+change.
+
+**Auto-updater silently "succeeded" while leaving the old version running —
+root cause was an unpinned `npm install -g jivamai` racing the registry's
+`latest` dist-tag propagation.** A real report: clicking Update right after
+a fresh release showed the normal installing→restarting flow, the server
+came back up, and the UI treated that as done — except the server was still
+running the *old* version, with no error anywhere. Manually running `npm i
+-g jivamai` a bit later worked fine, and retrying the exact same in-app flow
+after that also worked — the only thing that differed between the failing
+and succeeding attempts was elapsed wall-clock time since the publish. This
+is a known npm characteristic: a specific version's tarball becomes
+available essentially as soon as it's published, but the mutable `latest`
+dist-tag pointer that a bare (unpinned) `npm install -g jivamai` resolves
+against can lag behind across the registry's CDN/cache layers for a short
+window right after publish — so `npm install -g jivamai` run in that window
+can silently resolve back to the previous version and still exit 0 (npm
+treats "already satisfies the resolved spec" as success, not a no-op error).
+Fixed on two levels: (1) `applyUpdate()` in `server/updater.ts` now pins the
+install to the *exact* version `checkForUpdate()` already confirmed exists
+(`jivamai@${targetVersion}`) instead of a bare `jivamai`, sidestepping
+dist-tag propagation entirely; (2) as defense-in-depth against any other way
+this class of bug could recur, it now also reads back the actually-installed
+version from disk (`getGlobalPackageVersion()`, via `npm root -g` + reading
+that package's own `package.json` — deliberately not another registry call)
+and reports a real error instead of declaring success if it doesn't match
+the target. The frontend (`updater.store.ts`'s `startReconnectPolling()`)
+had the same blind spot from the other end — it treated *any* successful
+`/api/version` response after the restart as proof the update worked, never
+comparing the returned version against `latestVersion`. Now fixed there too:
+a version mismatch after reconnecting surfaces the `error` phase (a real,
+readable message in `UpdateModal`) instead of silently reloading into the
+same old version. If you touch this flow again, keep both checks — the
+backend fix prevents the common cause, the frontend fix prevents *this
+category* of failure from ever being silent again, regardless of cause.
+
 ## npm publishing gotchas
 
 - Publishing requires either 2FA-with-OTP on every `npm publish`, or a

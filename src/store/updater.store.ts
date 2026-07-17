@@ -34,6 +34,14 @@ function clearTimers(): void {
 // always-available endpoint until the server answers again, then counts
 // down to a reload rather than talking to the (possibly still-settling)
 // backend any further than that.
+//
+// The server answering is not by itself proof the update worked — a real
+// case surfaced where `npm install` silently reinstalled the *old* version
+// (a registry "latest" dist-tag propagation lag right after a fresh
+// publish) and the process came back on the same version it started with,
+// with no error anywhere. So this now compares the version the server comes
+// back on against the version the update was actually targeting, and treats
+// a mismatch as a failed update rather than a completed one.
 function startReconnectPolling(set: (partial: Partial<UpdaterStore>) => void): void {
   clearTimers()
   const startedAt = Date.now()
@@ -53,6 +61,17 @@ function startReconnectPolling(set: (partial: Partial<UpdaterStore>) => void): v
       if (!res.ok) return
       const newVersion = await res.json().catch(() => null) as string | null
       clearTimers()
+
+      const { latestVersion } = useUpdaterStore.getState()
+      if (latestVersion && newVersion && newVersion !== latestVersion) {
+        set({
+          phase: 'error',
+          currentVersion: newVersion,
+          errorMessage: `Jivam restarted, but it's still running v${newVersion} instead of v${latestVersion}. Try again in a minute — this usually means npm's registry hadn't fully caught up with the new release yet.`,
+        })
+        return
+      }
+
       set({ phase: 'reload-ready', reloadCountdown: 3, ...(newVersion ? { currentVersion: newVersion } : {}) })
       startReloadCountdown()
     } catch {

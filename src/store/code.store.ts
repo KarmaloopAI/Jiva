@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { CodeLogEvent } from '../types/electron'
 import { extractThinking } from '../lib/strip-thinking'
+import { useGitStore } from './git.store'
 
 // Map jiva-core log messages to user-friendly rotating action labels
 function logToAction(message: string): string | null {
@@ -307,7 +308,19 @@ export const useCodeStore = create<CodeStore>((set, get) => ({
 
     const result = await window.electron.code.restoreConversation(id)
 
+    // The git panel keys off its own store's workspaceDir, which only ever
+    // gets set from WorkspacePickerView when a session first starts — it
+    // never heard about a restored conversation potentially pointing at a
+    // different workspace. Sync it here so the git panel refreshes to match
+    // whichever workspace this conversation actually restored into.
+    const syncGitWorkspace = (dir: string | null) => {
+      const gitStore = useGitStore.getState()
+      gitStore.setWorkspaceDir(dir ?? '')
+      if (dir) gitStore.checkIsRepo()
+    }
+
     if (result.success) {
+      const workspace = result.workspace ?? raw.metadata?.workspace ?? null
       set({
         messages,
         isThinking: false,
@@ -316,11 +329,12 @@ export const useCodeStore = create<CodeStore>((set, get) => ({
         pendingEvents: [],
         liveEvents: [],
         isSessionStarted: true,
-        codeWorkspaceDir: result.workspace ?? raw.metadata?.workspace ?? null,
+        codeWorkspaceDir: workspace,
         activeMcpServers: result.mcpServers ?? [],
         maxIterations: result.maxIterations ?? 50,
         deepRun: result.harness === 'deep-run',
       })
+      syncGitWorkspace(workspace)
       return
     }
 
@@ -344,6 +358,7 @@ export const useCodeStore = create<CodeStore>((set, get) => ({
       codeWorkspaceDir: workspace,
       activeMcpServers: mcpServers,
     })
+    syncGitWorkspace(workspace)
   },
 
   clearSession: async () => {

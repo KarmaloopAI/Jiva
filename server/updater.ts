@@ -103,36 +103,83 @@ export function scheduleUpdateChecks(): void {
 }
 
 /**
+ * Reads the version actually written to disk by the most recent `npm install
+ * -g`, straight from the global node_modules — no registry involved, so this
+ * is ground truth for "what's installed right now," unlike a fresh registry
+ * fetch (which is exactly what falsely-reported success as a "latest" dist-tag
+ * propagation lag, see the comment on applyUpdate below).
+ */
+async function getGlobalPackageVersion(pkgName: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    const child = spawn('npm', ['root', '-g'], { shell: process.platform === 'win32' })
+    let out = ''
+    child.stdout.on('data', (d) => { out += d })
+    child.on('error', () => resolve(null))
+    child.on('close', () => {
+      try {
+        const pkgJsonPath = path.join(out.trim(), pkgName, 'package.json')
+        const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf-8')) as { version?: string }
+        resolve(pkg.version ?? null)
+      } catch {
+        resolve(null)
+      }
+    })
+  })
+}
+
+/**
  * Applies the update the user asked for: spawns a detached "updater process"
- * that runs `npm install -g jivamai jiva-core`, independent of this process.
- * Once it exits successfully, this (still-running) process broadcasts
- * 'restarting' and exits — the OS-level service supervisor (launchd
- * KeepAlive on macOS, the self-restarting PowerShell loop on Windows) brings
- * the process back up running the newly-installed code.
+ * that runs `npm install -g jivamai@<exact target version> jiva-core`,
+ * independent of this process. Once it exits successfully, this
+ * (still-running) process broadcasts 'restarting' and exits — the OS-level
+ * service supervisor (launchd KeepAlive on macOS, the self-restarting
+ * PowerShell loop on Windows) brings the process back up running the
+ * newly-installed code.
  *
  * Deliberately a separate child process rather than running npm install
  * in-process: on Windows, a running process's own script files can be
  * locked in ways POSIX doesn't have, so overwriting them out from under the
  * very process that's executing them is the kind of thing worth not risking.
  * A detached child sidesteps that entirely.
+ *
+ * Two hard-won details here, found by tracing a real report of "update said
+ * it worked, but the server came back on the old version with no error":
+ *
+ * 1. The install is pinned to the exact version `checkForUpdate()` already
+ *    confirmed exists (`jivamai@${targetVersion}`), not a bare `jivamai`
+ *    (which resolves through the registry's *mutable* `latest` dist-tag).
+ *    Right after a fresh publish, a specific version's tarball is available
+ *    well before the `latest` pointer has finished propagating across the
+ *    registry's CDN/cache layers — so a bare `npm install -g jivamai` run in
+ *    that window can silently resolve back to the *previous* version, exit
+ *    0 (npm considers "already satisfies the resolved spec" a success, not
+ *    a no-op error), and report nothing wrong. Asking for the exact version
+ *    number sidesteps dist-tag propagation entirely.
+ * 2. Even with that pin, this now verifies the version actually on disk
+ *    afterward (`getGlobalPackageVersion`) instead of trusting exit code 0
+ *    alone — belt-and-suspenders against any other way npm could exit clean
+ *    without the package actually changing.
  */
 export async function applyUpdate(): Promise<{ success: boolean; error?: string }> {
   if (status.state === 'installing' || status.state === 'restarting') {
     return { success: false, error: 'An update is already in progress.' }
   }
 
+  const targetVersion = latestKnownVersion
   setStatus({ state: 'installing' })
 
   const jivamHome = path.join(os.homedir(), '.jivam')
   fs.mkdirSync(jivamHome, { recursive: true })
   const logPath = path.join(jivamHome, 'update.log')
   const logFd = fs.openSync(logPath, 'a')
-  fs.writeSync(logFd, `\n--- ${new Date().toISOString()}: starting update ---\n`)
+  fs.writeSync(logFd, `\n--- ${new Date().toISOString()}: starting update (target ${targetVersion ?? 'unknown, unpinned'}) ---\n`)
+
+  const jivamaiSpec = targetVersion ? `jivamai@${targetVersion}` : 'jivamai'
 
   return new Promise((resolve) => {
     let child
     try {
-      child = spawn('npm', ['install', '-g', 'jivamai', 'jiva-core'], {
+      child = spawn('npm', ['install', '-g', jivamaiSpec, 'jiva-core'], {
         detached: true,
         stdio: ['ignore', logFd, logFd],
         shell: process.platform === 'win32',
@@ -152,18 +199,31 @@ export async function applyUpdate(): Promise<{ success: boolean; error?: string 
     })
 
     child.on('exit', (code) => {
-      fs.closeSync(logFd)
-      if (code === 0) {
+      if (code !== 0) {
+        fs.closeSync(logFd)
+        const message = `Update failed (npm install exited with code ${code}). See ${logPath}`
+        setStatus({ state: 'error', message })
+        resolve({ success: false, error: message })
+        return
+      }
+
+      void getGlobalPackageVersion('jivamai').then((installedVersion) => {
+        if (targetVersion && installedVersion && installedVersion !== targetVersion) {
+          fs.writeSync(logFd, `npm install exited 0 but installed version is ${installedVersion}, expected ${targetVersion} — likely a registry "latest" propagation lag.\n`)
+          fs.closeSync(logFd)
+          const message = `Update reported success, but ${installedVersion} is installed instead of ${targetVersion}. This usually means npm's registry hadn't fully caught up yet — wait a minute and try again.`
+          setStatus({ state: 'error', message })
+          resolve({ success: false, error: message })
+          return
+        }
+
+        fs.closeSync(logFd)
         setStatus({ state: 'restarting' })
         resolve({ success: true })
         // Give the WebSocket broadcast a moment to actually flush to
         // clients before this process (and its WS connections) die.
         setTimeout(() => process.exit(0), 500)
-      } else {
-        const message = `Update failed (npm install exited with code ${code}). See ${logPath}`
-        setStatus({ state: 'error', message })
-        resolve({ success: false, error: message })
-      }
+      })
     })
 
     child.unref()
