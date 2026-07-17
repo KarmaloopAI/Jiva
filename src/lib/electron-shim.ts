@@ -74,6 +74,14 @@ async function pickAndUploadFiles(includeImages: boolean): Promise<string[]> {
     const input = document.createElement('input')
     input.type = 'file'
     input.multiple = true
+    // WebKit — especially inside an installed Safari "Add to Dock" web app,
+    // which runs in a stricter process than a regular tab — can silently
+    // refuse to open the native picker for a file input that was never
+    // attached to the document. Keep it in the DOM (visually hidden) for
+    // the picker's lifetime instead of calling .click() on a detached node.
+    input.style.position = 'fixed'
+    input.style.top = '-1000px'
+    input.style.left = '-1000px'
     const imageExts = '.png,.jpg,.jpeg,.gif,.webp,.bmp'
     const docExts = '.pdf,.docx'
     const textExts = '.txt,.md,.markdown,.rst,.log,.js,.jsx,.ts,.tsx,.mjs,.cjs,.py,.rb,.go,.rs,.java,.kt,.swift,.c,.cpp,.cc,.h,.hpp,.cs,.css,.scss,.sass,.less,.html,.htm,.xml,.svg,.json,.jsonc,.yaml,.yml,.toml,.ini,.cfg,.conf,.sh,.bash,.zsh,.ps1,.bat,.sql,.graphql,.proto,.vue,.svelte,.astro'
@@ -81,8 +89,28 @@ async function pickAndUploadFiles(includeImages: boolean): Promise<string[]> {
       ? `${imageExts},${docExts},${textExts}`
       : `${docExts},${textExts}`
 
+    const cleanup = () => {
+      input.remove()
+      window.removeEventListener('focus', onWindowFocus)
+    }
+
+    // The `change` event never fires if the user cancels the dialog, which
+    // would otherwise leak the input and leave the caller's promise
+    // unresolved forever. A window focus event fires reliably when the
+    // native dialog closes either way, so use it (after a short delay, to
+    // let `change` win the race when a file really was picked) as a
+    // cancel-safe fallback.
+    const onWindowFocus = () => {
+      setTimeout(() => {
+        if (!document.body.contains(input)) return
+        cleanup()
+        resolve([])
+      }, 300)
+    }
+    window.addEventListener('focus', onWindowFocus)
+
     input.onchange = async () => {
-      if (!input.files?.length) return resolve([])
+      if (!input.files?.length) { cleanup(); return resolve([]) }
       try {
         const files = Array.from(input.files)
         const encoded = await Promise.all(files.map(async f => {
@@ -95,12 +123,15 @@ async function pickAndUploadFiles(includeImages: boolean): Promise<string[]> {
         )
         // Store results by a synthetic key for files.convert() to retrieve
         results.forEach(r => uploadedFiles.set(r.name, r))
+        cleanup()
         resolve(results.map(r => `__uploaded__${r.name}`))
       } catch {
+        cleanup()
         resolve([])
       }
     }
 
+    document.body.appendChild(input)
     input.click()
   })
 }

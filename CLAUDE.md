@@ -524,6 +524,44 @@ check `npm view jivamai version` / `dist-tags` against what commit that
 version actually corresponds to on `main` — the bug may already be fixed and
 just waiting on a release.
 
+**File-attach picker "never opens" was a real bug, confirmed by the exact
+report — a detached `<input type=file>` doesn't reliably open the native
+picker in WebKit.** `pickAndUploadFiles()` in `src/lib/electron-shim.ts`
+created the input with `document.createElement('input')` and called
+`.click()` on it directly, without ever appending it to the document. This
+apparently worked in some contexts but silently did nothing in others —
+confirmed the exact reported symptom (click does nothing, no dialog) traces
+to this, since installed Safari "Add to Dock" web-app windows run in a
+stricter WebKit process (`com.apple.Safari.WebApp.<uuid>`) than a regular
+tab. Fixed by appending the input to `document.body` (visually hidden via
+fixed positioning off-screen) before calling `.click()`, and removing it
+afterward. Also added a `window` `focus` event listener as a cancel-safe
+fallback: the input's own `change` event never fires if the user dismisses
+the dialog without picking a file, which would otherwise leave the
+`pickAndUploadFiles()` promise unresolved forever (and, on a second attempt,
+never trip `isProcessingFiles`'s guard either, since that flag is only ever
+set *after* a successful pick — worth remembering if this area gets touched
+again). If you ever add another programmatic file/native-dialog trigger,
+default to attaching the triggering element to the DOM first — don't assume
+a detached element's `.click()` is safe across browser engines.
+
+**MCP onboarding wizard (`McpOnboardingModal.tsx`) fires once, gated by
+`localStorage['jivam-mcp-onboarding-seen']`, watching `useChatStore`'s
+`messages` for the first `role: 'agent', status: 'complete'` entry.** This
+means it also fires for existing users on their next message after
+upgrading to the version that shipped it (no way to distinguish "genuinely
+new user" from "existing user, flag never set" without server-side account
+state, which Jivam's local-only architecture doesn't have) — treated as an
+acceptable one-time "hey, here's how to level up" tip either way, not a bug.
+The three MCP servers it offers (`tavily-mcp`, `html-to-markdown-mcp`,
+`@playwright/mcp@latest --browser chrome`) were verified against the
+maintainers' own docs before wiring up `window.electron.mcp.addServer()`
+calls — worth re-verifying if any of these ever need to change, since a
+wrong package name here means real `npx -y <package>` execution, not just a
+broken UI. Confirmed encouragingly during testing: a real user's own
+already-configured `~/.jivam/config.json` independently used the exact same
+`html-to-markdown-mcp` and `@playwright/mcp@latest` packages.
+
 ## npm publishing gotchas
 
 - Publishing requires either 2FA-with-OTP on every `npm publish`, or a
