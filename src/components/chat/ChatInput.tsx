@@ -15,6 +15,15 @@ import { usePersonaStore } from '../../store/persona.store'
 import { useConversationStore } from '../../store/conversation.store'
 import type { AttachedFile } from '../../types/chat'
 
+const MODEL_CHIP_MAX_LEN = 22
+
+// Provider-qualified model names ("qwen/qwen3.6-27b") are too long for a
+// status chip — show just the model itself, truncated if it's still long.
+function shortModelName(model: string): string {
+  const short = model.includes('/') ? (model.split('/').pop() || model) : model
+  return short.length > MODEL_CHIP_MAX_LEN ? `${short.slice(0, MODEL_CHIP_MAX_LEN - 1)}…` : short
+}
+
 export function ChatInput() {
   const [value, setValue] = useState('')
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -407,6 +416,32 @@ export function ChatInput() {
           )}
         </button>
       </div>
+
+      {(deepRun || selectedModel) && (
+        <button
+          onClick={() => setSettingsOpen(true)}
+          className="flex items-center justify-center gap-1.5 mt-2 mx-auto"
+        >
+          {deepRun && (
+            <span
+              className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-medium"
+              style={{ background: 'rgba(139,92,246,0.1)', color: 'var(--accent)', border: '1px solid rgba(139,92,246,0.2)' }}
+            >
+              <Zap size={9} />
+              Deep Run
+            </span>
+          )}
+          {selectedModel && (
+            <span
+              title={selectedModel}
+              className="inline-flex items-center text-[10px] px-2 py-0.5 rounded-full"
+              style={{ background: 'var(--bg-secondary)', color: 'var(--text-subtle)', border: '1px solid var(--card-border)' }}
+            >
+              {shortModelName(selectedModel)}
+            </span>
+          )}
+        </button>
+      )}
 
       <p className="text-center text-[10px] text-[var(--text-subtle)] mt-2">
         Jivam can make mistakes. Verify important information.
