@@ -115,7 +115,7 @@ function InstallModal() {
         animate={{ scale: 1, opacity: 1, y: 0 }}
         exit={{ scale: 0.95, opacity: 0, y: 12 }}
         transition={{ type: 'spring', stiffness: 300, damping: 28 }}
-        className="relative max-w-md w-full rounded-2xl p-8 text-center shadow-2xl"
+        className="relative max-w-md w-full max-h-[90vh] overflow-y-auto rounded-2xl p-8 text-center shadow-2xl"
         style={{
           background: 'var(--bg-card, #1a1a2e)',
           border: '1px solid rgba(139,92,246,0.25)',
@@ -124,7 +124,7 @@ function InstallModal() {
       >
         <button
           onClick={handleDismiss}
-          className="absolute top-4 right-4 text-[var(--text-subtle)] hover:text-[var(--text-muted)] transition-colors"
+          className="absolute top-4 right-4 text-white/40 hover:text-white/70 transition-colors"
         >
           <X size={16} />
         </button>
@@ -136,7 +136,7 @@ function InstallModal() {
         </div>
 
         <h2 className="text-xl font-semibold gradient-text mb-2">Install Jivam as an App</h2>
-        <p className="text-sm text-[var(--text-muted)] mb-6 leading-relaxed">
+        <p className="text-sm text-white/60 mb-6 leading-relaxed">
           Get a clean, distraction-free window with a Dock icon — no browser chrome, no address bar.
         </p>
 
@@ -144,14 +144,14 @@ function InstallModal() {
         <div className="text-left space-y-3 mb-7">
           <div className="flex gap-3 items-start">
             <span className="mt-0.5 shrink-0 w-5 h-5 rounded-full bg-[var(--accent)] text-white text-xs flex items-center justify-center font-semibold">1</span>
-            <p className="text-sm text-[var(--text-muted)]">
+            <p className="text-sm text-white/60">
               Run <code className="px-1.5 py-0.5 rounded text-xs" style={{ background: 'rgba(139,92,246,0.15)', color: 'var(--accent)' }}>jivam --install</code> in your terminal to create the app and add it to your Dock automatically.
             </p>
           </div>
           <div className="flex gap-3 items-start">
             <span className="mt-0.5 shrink-0 w-5 h-5 rounded-full bg-[var(--accent)] text-white text-xs flex items-center justify-center font-semibold">2</span>
-            <p className="text-sm text-[var(--text-muted)]">
-              Click the <strong className="text-[var(--text)]">Jivam</strong> icon in your Dock — it starts the server and opens automatically.
+            <p className="text-sm text-white/60">
+              Click the <strong className="text-white">Jivam</strong> icon in your Dock — it starts the server and opens automatically.
             </p>
           </div>
         </div>
@@ -160,7 +160,7 @@ function InstallModal() {
           <button
             onClick={handleDismiss}
             className="flex-1 py-2.5 rounded-xl text-sm font-medium transition-all"
-            style={{ background: 'rgba(139,92,246,0.12)', color: 'var(--text-muted)' }}
+            style={{ background: 'rgba(139,92,246,0.12)', color: 'rgba(255,255,255,0.7)' }}
           >
             Later
           </button>
@@ -289,10 +289,10 @@ const INSTALL_GUIDE_COPY: Record<InstallGuideKind, {
     destination: 'Dock',
     successBody: "Jivam is now a real app on your Mac. You can close this tab and launch it from the Dock from now on.",
     menuIntro: (
-      <>In the Safari menu bar at the top of your screen, click <strong className="text-[var(--text)]">File</strong>, then:</>
+      <>In the Safari menu bar at the top of your screen, click <strong className="text-white">File</strong>, then:</>
     ),
     confirmBody: (
-      <>Safari will ask you to confirm — click <strong className="text-[var(--text)]">Add</strong> and
+      <>Safari will ask you to confirm — click <strong className="text-white">Add</strong> and
         this page will update automatically once Jivam appears in your Dock.</>
     ),
   },
@@ -303,7 +303,7 @@ const INSTALL_GUIDE_COPY: Record<InstallGuideKind, {
       <>In Edge's address bar, click the install icon:</>
     ),
     confirmBody: (
-      <>Edge will ask you to confirm — click <strong className="text-[var(--text)]">Install</strong> and
+      <>Edge will ask you to confirm — click <strong className="text-white">Install</strong> and
         this page will update automatically once Jivam is installed.</>
     ),
   },
@@ -312,12 +312,27 @@ const INSTALL_GUIDE_COPY: Record<InstallGuideKind, {
 function AddToDockGuide() {
   const [dismissed, setDismissed] = useState(false)
   const [installed, setInstalled] = useState(false)
+  const [platform, setPlatform] = useState<string | null>(null)
   const isStandalone = window.matchMedia('(display-mode: standalone)').matches
-  const guideKind = getInstallGuideParam()
+  const urlGuideKind = getInstallGuideParam()
 
   useEffect(() => {
     window.electron?.onPwaInstalled?.(() => setInstalled(true))
   }, [])
+
+  // The URL param (set server-side by `jivam --install`/openAppWindow, both
+  // of which branch on process.platform) should already be correct, but
+  // cross-check against the platform the server itself reports once that
+  // resolves — so a stale/incorrect param can never show Safari's File-menu
+  // walkthrough on Windows, or Edge's install-icon walkthrough on macOS.
+  useEffect(() => {
+    fetch('/api/platform').then(r => r.json()).then(setPlatform).catch(() => {})
+  }, [])
+
+  const guideKind: InstallGuideKind | null =
+    platform === 'win32' ? 'edge-app' :
+    platform === 'darwin' ? 'safari-dock' :
+    urlGuideKind
 
   if (dismissed || isStandalone || !guideKind) return null
   const copy = INSTALL_GUIDE_COPY[guideKind]
@@ -341,7 +356,7 @@ function AddToDockGuide() {
         initial={{ scale: 0.95, opacity: 0, y: 12 }}
         animate={{ scale: 1, opacity: 1, y: 0 }}
         transition={{ type: 'spring', stiffness: 300, damping: 28 }}
-        className="relative max-w-xl w-full rounded-2xl p-9 text-center shadow-2xl"
+        className="relative max-w-xl w-full max-h-[90vh] overflow-y-auto rounded-2xl p-9 text-center shadow-2xl"
         style={{
           background: 'var(--bg-card, #1a1a2e)',
           border: '1px solid rgba(139,92,246,0.25)',
@@ -349,7 +364,7 @@ function AddToDockGuide() {
       >
         <button
           onClick={handleDismiss}
-          className="absolute top-4 right-4 text-[var(--text-subtle)] hover:text-[var(--text-muted)] transition-colors"
+          className="absolute top-4 right-4 text-white/40 hover:text-white/70 transition-colors"
         >
           <X size={18} />
         </button>
@@ -361,7 +376,7 @@ function AddToDockGuide() {
               <CheckCircle2 size={40} style={{ color: '#22c55e' }} />
             </div>
             <h2 className="text-2xl font-semibold gradient-text mb-2">Added to your {copy.destination}!</h2>
-            <p className="text-sm text-[var(--text-muted)] mb-7 leading-relaxed">
+            <p className="text-sm text-white/60 mb-7 leading-relaxed">
               {copy.successBody}
             </p>
             <button
@@ -380,7 +395,7 @@ function AddToDockGuide() {
             </div>
 
             <h2 className="text-2xl font-semibold gradient-text mb-2">One click to finish</h2>
-            <p className="text-sm text-[var(--text-muted)] mb-6 leading-relaxed max-w-md mx-auto">
+            <p className="text-sm text-white/60 mb-6 leading-relaxed max-w-md mx-auto">
               Install Jivam as a real app — its own window and icon, no browser chrome.
             </p>
 
@@ -388,14 +403,14 @@ function AddToDockGuide() {
               className="rounded-xl p-5 mb-5 text-left"
               style={{ background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.2)' }}
             >
-              <div className="flex items-center gap-2 text-xs text-[var(--text-subtle)] mb-4 justify-center">
+              <div className="flex items-center gap-2 text-xs text-white/50 mb-4 justify-center">
                 <MenuIcon size={13} />
                 <span>{copy.menuIntro}</span>
               </div>
               {guideKind === 'safari-dock' ? <SafariFileMenuMockup /> : <EdgeInstallMockup />}
             </div>
 
-            <p className="text-xs text-[var(--text-subtle)] leading-relaxed">
+            <p className="text-xs text-white/50 leading-relaxed">
               {copy.confirmBody}
             </p>
           </>
