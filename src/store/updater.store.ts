@@ -16,7 +16,6 @@ interface UpdaterStore {
   applyUpdate: () => Promise<void>
   openModal: () => void
   closeModal: () => void
-  dismissBanner: () => void
   cancelReload: () => void
 }
 
@@ -97,13 +96,7 @@ function startReloadCountdown(): void {
   }, 1000)
 }
 
-// `respectDismiss` suppresses re-surfacing the banner for a version the user
-// already dismissed — used for passive status arrivals (initial getStatus on
-// mount, WebSocket broadcasts from the periodic background check). An
-// explicit user-initiated check (the About tab's "Check for Updates") always
-// shows the real result regardless, since dismissing the passive banner
-// shouldn't block a check the user asked for directly.
-function applyStatus(set: (partial: Partial<UpdaterStore>) => void, status: UpdateStatus, respectDismiss = true): void {
+function applyStatus(set: (partial: Partial<UpdaterStore>) => void, status: UpdateStatus): void {
   if ('currentVersion' in status && status.currentVersion) {
     set({ currentVersion: status.currentVersion })
   }
@@ -115,11 +108,7 @@ function applyStatus(set: (partial: Partial<UpdaterStore>) => void, status: Upda
       set({ phase: 'checking' })
       break
     case 'available':
-      if (respectDismiss && localStorage.getItem('jivam-update-dismissed') === status.latestVersion) {
-        set({ phase: 'idle', latestVersion: status.latestVersion })
-      } else {
-        set({ phase: 'available', latestVersion: status.latestVersion })
-      }
+      set({ phase: 'available', latestVersion: status.latestVersion })
       break
     case 'installing':
       set({ phase: 'installing' })
@@ -135,7 +124,7 @@ function applyStatus(set: (partial: Partial<UpdaterStore>) => void, status: Upda
   }
 }
 
-export const useUpdaterStore = create<UpdaterStore>((set, get) => ({
+export const useUpdaterStore = create<UpdaterStore>((set) => ({
   phase: 'idle',
   currentVersion: null,
   latestVersion: null,
@@ -155,7 +144,7 @@ export const useUpdaterStore = create<UpdaterStore>((set, get) => ({
     if (!window.electron?.updater) return
     try {
       const status = await window.electron.updater.check()
-      applyStatus(set, status, false)
+      applyStatus(set, status)
     } catch {
       set({ phase: 'idle' })
     }
@@ -178,12 +167,6 @@ export const useUpdaterStore = create<UpdaterStore>((set, get) => ({
 
   openModal: () => set({ modalOpen: true }),
   closeModal: () => set({ modalOpen: false }),
-
-  dismissBanner: () => {
-    const { latestVersion } = get()
-    if (latestVersion) localStorage.setItem('jivam-update-dismissed', latestVersion)
-    set({ phase: 'idle' })
-  },
 
   cancelReload: () => {
     clearTimers()

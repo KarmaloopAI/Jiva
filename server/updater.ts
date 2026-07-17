@@ -95,11 +95,11 @@ export async function checkForUpdate(): Promise<UpdateStatus> {
   return status
 }
 
-/** Checks once shortly after startup, then every 6 hours. Caller decides when this runs (only in --server-only mode). */
+/** Checks once shortly after startup, then every hour. Caller decides when this runs (only in --server-only mode). */
 export function scheduleUpdateChecks(): void {
-  const SIX_HOURS_MS = 6 * 60 * 60 * 1000
+  const ONE_HOUR_MS = 60 * 60 * 1000
   setTimeout(() => { void checkForUpdate() }, 30_000)
-  setInterval(() => { void checkForUpdate() }, SIX_HOURS_MS)
+  setInterval(() => { void checkForUpdate() }, ONE_HOUR_MS)
 }
 
 /**
