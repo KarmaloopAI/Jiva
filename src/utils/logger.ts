@@ -139,3 +139,37 @@ class Logger {
 }
 
 export const logger = Logger.getInstance();
+
+const MAX_STRING_VALUE_LEN = 500;
+const MAX_TOTAL_LEN = 2000;
+
+/**
+ * Renders tool-call arguments for a log line — a single-line JSON blob,
+ * safe to append after a "Tool: <name>" message. Per-string-value
+ * truncation (500 chars) is deliberately more generous than the 200-char
+ * precedent used elsewhere for token-budget-constrained summaries (see
+ * code/agent.ts) since this is a human-inspects-on-demand view, not a
+ * context-compaction one. An overall-length cap is a second safety net for
+ * future tools with deeply nested schemas (today's built-in tools are all
+ * flat/top-level).
+ */
+export function formatToolCallArgs(args: Record<string, unknown>): string {
+  const shortened: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(args)) {
+    if (typeof value === 'string' && value.length > MAX_STRING_VALUE_LEN) {
+      shortened[key] = `${value.slice(0, MAX_STRING_VALUE_LEN)}...(${value.length - MAX_STRING_VALUE_LEN} more chars)`;
+    } else {
+      shortened[key] = value;
+    }
+  }
+  let json: string;
+  try {
+    json = JSON.stringify(shortened);
+  } catch {
+    return '{}';
+  }
+  if (json.length > MAX_TOTAL_LEN) {
+    json = `${json.slice(0, MAX_TOTAL_LEN)}..."}`;
+  }
+  return json;
+}
