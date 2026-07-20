@@ -1,15 +1,21 @@
 import { memo, useEffect, useRef, useState, useCallback } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Send, StopCircle, Terminal, FolderCode, Bug, Wrench, RotateCcw, SlidersHorizontal, Zap, Monitor, ChevronDown, ChevronUp, Brain } from 'lucide-react'
+import { Send, StopCircle, Terminal, FolderCode, Bug, Wrench, RotateCcw, SlidersHorizontal, Zap, Monitor, ChevronDown, ChevronUp, Brain, FileText, Image, X } from 'lucide-react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { useCodeStore } from '../../store/code.store'
 import { useGitStore } from '../../store/git.store'
 import { useAuthStore } from '../../store/auth.store'
+import type { ProcessedAttachment } from '../../store/jiva.store'
 import { CodeActivityIndicator } from './CodeActivityIndicator'
 import { CodeEventCard } from './CodeEventCard'
 import { MarkdownRenderer } from '../markdown/MarkdownRenderer'
+import { AgentStatusRow } from '../ui/AgentStatusRow'
+import { extractImageFromClipboard } from '../../lib/paste-image'
+import { handleSmartKeydown } from '../../lib/smart-textarea'
+import { FileMentionPopover } from './FileMentionPopover'
 import { logoUrl } from '../../lib/logo'
 import type { CodeMessage } from '../../store/code.store'
+import type { AttachedFile } from '../../types/chat'
 
 const EXAMPLE_PROMPTS = [
   { Icon: Bug, text: 'Find and fix the bug causing tests to fail' },
@@ -35,7 +41,7 @@ const CodeUserMessage = memo(function CodeUserMessage({ message }: { message: Co
 })
 
 const CodeAgentMessage = memo(function CodeAgentMessage({ message }: { message: CodeMessage }) {
-  const { toggleWorkPanel } = useCodeStore()
+  const { toggleWorkPanel, toggleEventExpanded } = useCodeStore()
   const [thinkingExpanded, setThinkingExpanded] = useState(false)
   const hasBrain = (message.brainCommentary?.length ?? 0) > 0
   const hasTools = (message.events?.length ?? 0) > 0
@@ -138,7 +144,11 @@ const CodeAgentMessage = memo(function CodeAgentMessage({ message }: { message: 
                         </div>
                         <div className="flex flex-col gap-1">
                           {message.events!.map((evt) => (
-                            <CodeEventCard key={evt.id} event={evt} />
+                            <CodeEventCard
+                              key={evt.id}
+                              event={evt}
+                              onToggle={() => toggleEventExpanded(message.id, evt.id)}
+                            />
                           ))}
                         </div>
                       </div>
@@ -282,6 +292,14 @@ export function CodeChatView() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [modelOptions, setModelOptions] = useState<string[]>([])
   const [loadingModels, setLoadingModels] = useState(false)
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([])
+  const [processedAttachments, setProcessedAttachments] = useState<ProcessedAttachment[]>([])
+  const [isMultimodalEnabled, setIsMultimodalEnabled] = useState(false)
+  const [mentionFiles, setMentionFiles] = useState<string[]>([])
+  const [mentionOpen, setMentionOpen] = useState(false)
+  const [mentionQuery, setMentionQuery] = useState('')
+  const [mentionIndex, setMentionIndex] = useState(0)
+  const [mentionAnchor, setMentionAnchor] = useState(-1)
   const settingsRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const {
@@ -332,6 +350,14 @@ export function CodeChatView() {
     el.style.height = Math.min(el.scrollHeight, 200) + 'px'
   }, [value])
 
+  // Cache the repo's file list for @-mention — fetched once per workspace,
+  // not re-fetched per keystroke.
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  useEffect(() => {
+    if (!codeWorkspaceDir) { setMentionFiles([]); return }
+    window.electron.git.listFiles(codeWorkspaceDir).then(setMentionFiles).catch(() => setMentionFiles([]))
+  }, [codeWorkspaceDir])
+
   // Close settings popover on outside click
   // eslint-disable-next-line react-hooks/rules-of-hooks
   useEffect(() => {
@@ -345,13 +371,14 @@ export function CodeChatView() {
     return () => document.removeEventListener('mousedown', handler)
   }, [settingsOpen])
 
-  // Seed the current model from config on mount
+  // Seed the current model + multimodal capability from config on mount
   // eslint-disable-next-line react-hooks/rules-of-hooks
   useEffect(() => {
     window.electron.config.read().then((config) => {
-      const cfg = config as { models?: { reasoning?: { defaultModel?: string; model?: string } } } | null
+      const cfg = config as { models?: { multimodal?: unknown; reasoning?: { defaultModel?: string; model?: string } } } | null
       const current = cfg?.models?.reasoning?.defaultModel ?? cfg?.models?.reasoning?.model
       if (current) useCodeStore.setState({ currentModel: current })
+      setIsMultimodalEnabled(!!cfg?.models?.multimodal)
     }).catch(() => {})
   }, [])
 
@@ -383,16 +410,102 @@ export function CodeChatView() {
   }, [clearSession])
 
   // eslint-disable-next-line react-hooks/rules-of-hooks
+  const handlePaste = useCallback(async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const result = await extractImageFromClipboard(e.clipboardData, isMultimodalEnabled)
+    if (!result) return // no image in the clipboard — let default text paste proceed
+    e.preventDefault()
+    setAttachedFiles(prev => [...prev, result.file])
+    setProcessedAttachments(prev => [...prev, result.processed])
+  }, [isMultimodalEnabled])
+
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  const removeAttachment = useCallback((index: number) => {
+    setAttachedFiles(prev => prev.filter((_, i) => i !== index))
+    setProcessedAttachments(prev => prev.filter((_, i) => i !== index))
+  }, [])
+
+  // eslint-disable-next-line react-hooks/rules-of-hooks
   const handleSend = useCallback(async () => {
     const text = value.trim()
-    if (!text || isThinking) return
+    if ((!text && processedAttachments.length === 0) || isThinking) return
+
+    let prompt = text
+    if (processedAttachments.length > 0) {
+      const fileBlocks = processedAttachments
+        .map(a => `### ${a.name}\n${a.markdown}`)
+        .join('\n\n')
+      prompt = `<attached-files>\n${fileBlocks}\n</attached-files>\n\n${text}`
+    }
+
     setValue('')
-    await sendMessage(text)
+    setAttachedFiles([])
+    setProcessedAttachments([])
+    await sendMessage(prompt)
     refreshGit()
-  }, [value, isThinking, sendMessage, refreshGit])
+  }, [value, processedAttachments, isThinking, sendMessage, refreshGit])
+
+  const filteredMentionFiles = mentionOpen
+    ? mentionFiles.filter(f => f.toLowerCase().includes(mentionQuery.toLowerCase())).slice(0, 50)
+    : []
+
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  const handleChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const newValue = e.target.value
+    setValue(newValue)
+    const cursor = e.target.selectionStart
+    const match = /@(\S*)$/.exec(newValue.slice(0, cursor))
+    if (match) {
+      setMentionAnchor(cursor - match[0].length)
+      setMentionQuery(match[1])
+      setMentionIndex(0)
+      setMentionOpen(true)
+    } else {
+      setMentionOpen(false)
+    }
+  }, [])
+
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  const selectMention = useCallback((file: string) => {
+    const before = value.slice(0, mentionAnchor)
+    const after = value.slice(mentionAnchor + 1 + mentionQuery.length)
+    const newValue = `${before}@${file} ${after}`
+    const newPos = mentionAnchor + 1 + file.length + 1
+
+    const el = textareaRef.current
+    if (el) {
+      el.value = newValue
+      el.focus()
+      el.setSelectionRange(newPos, newPos)
+    }
+    setValue(newValue)
+    setMentionOpen(false)
+  }, [value, mentionAnchor, mentionQuery])
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (mentionOpen && filteredMentionFiles.length > 0) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); setMentionIndex(i => (i + 1) % filteredMentionFiles.length); return }
+      if (e.key === 'ArrowUp') { e.preventDefault(); setMentionIndex(i => (i - 1 + filteredMentionFiles.length) % filteredMentionFiles.length); return }
+      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); selectMention(filteredMentionFiles[mentionIndex]); return }
+      if (e.key === 'Escape') { e.preventDefault(); setMentionOpen(false); return }
+    }
+
+    if (e.key === 'Enter' && e.shiftKey) return // default newline insertion
+
+    const el = e.currentTarget
+    const smart = handleSmartKeydown(e.key, value, el.selectionStart, el.selectionEnd)
+    if (smart) {
+      e.preventDefault()
+      // Set the DOM value + cursor synchronously first — React re-rendering
+      // with an already-matching value won't reset the cursor, whereas
+      // waiting for the render (even via requestAnimationFrame) races it
+      // and loses the cursor position to the end of the text.
+      el.value = smart.value
+      el.setSelectionRange(smart.cursorPos, smart.cursorPos)
+      setValue(smart.value)
+      return
+    }
+
+    if (e.key === 'Enter') {
       e.preventDefault()
       handleSend()
     }
@@ -441,19 +554,55 @@ export function CodeChatView() {
           backdropFilter: 'blur(12px)',
         }}
       >
+        {/* Attached file chips */}
+        {attachedFiles.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            {attachedFiles.map((file, i) => (
+              <span
+                key={`${file.name}-${i}`}
+                className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-lg"
+                style={{
+                  background: 'rgba(59,130,246,0.08)',
+                  color: 'var(--text-subtle)',
+                  border: '1px solid rgba(59,130,246,0.2)',
+                }}
+              >
+                {file.category === 'image'
+                  ? <Image size={11} className="flex-shrink-0" style={{ color: 'var(--accent-blue)' }} />
+                  : <FileText size={11} className="flex-shrink-0" style={{ color: 'var(--accent-blue)' }} />
+                }
+                <span className="max-w-[140px] truncate">{file.name}</span>
+                <button
+                  onClick={() => removeAttachment(i)}
+                  className="ml-0.5 rounded-full flex-shrink-0 hover:opacity-70 transition-opacity"
+                  style={{ color: 'var(--text-subtle)' }}
+                >
+                  <X size={10} />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+
         <div
-          className="flex items-end gap-3 rounded-2xl px-4 py-3"
+          className="relative flex items-end gap-3 rounded-2xl px-4 py-3"
           style={{
             background: 'var(--input-bg)',
             border: '1.5px solid var(--input-border)',
             boxShadow: '0 2px 12px rgba(59,130,246,0.06)',
           }}
         >
+          <FileMentionPopover
+            files={filteredMentionFiles}
+            selectedIndex={mentionIndex}
+            onSelect={selectMention}
+          />
           <textarea
             ref={textareaRef}
             value={value}
-            onChange={(e) => setValue(e.target.value)}
+            onChange={handleChange}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             placeholder={isThinking ? 'Agent is working...' : 'Describe what to build or fix... (Shift+Enter for new line)'}
             disabled={isThinking}
             rows={1}
@@ -557,12 +706,12 @@ export function CodeChatView() {
 
           <button
             onClick={isThinking ? handleStop : handleSend}
-            disabled={isThinking ? false : !value.trim()}
+            disabled={isThinking ? false : !value.trim() && processedAttachments.length === 0}
             className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-all disabled:opacity-30 disabled:cursor-not-allowed"
             style={{
               background: isThinking
                 ? 'var(--bg-secondary)'
-                : value.trim()
+                : (value.trim() || processedAttachments.length > 0)
                   ? 'linear-gradient(135deg, #3B82F6, #8B5CF6)'
                   : 'var(--bg-secondary)',
             }}
@@ -572,15 +721,19 @@ export function CodeChatView() {
             ) : (
               <Send
                 size={14}
-                className={value.trim() ? 'text-white' : 'text-[var(--text-subtle)]'}
+                className={(value.trim() || processedAttachments.length > 0) ? 'text-white' : 'text-[var(--text-subtle)]'}
               />
             )}
           </button>
         </div>
 
-        <p className="text-center text-[10px] text-[var(--text-subtle)] mt-2">
-          Code Agent operates directly in your workspace. Review changes before committing.
-        </p>
+        <AgentStatusRow
+          disclaimer="Code Agent operates directly in your workspace. Review changes before committing."
+          deepRun={deepRun}
+          model={currentModel}
+          maxIterations={maxIterations}
+          onOpenSettings={() => setSettingsOpen(true)}
+        />
       </div>
     </div>
   )

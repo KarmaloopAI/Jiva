@@ -144,6 +144,7 @@ interface ElectronAPI {
     diffFile: (dir: string, file: string, status?: string) => Promise<string | null>
     initRepo: (dir: string) => Promise<{ success: boolean; error?: string }>
     branchInfo: (dir: string) => Promise<{ branch: string; ahead: number; behind: number } | null>
+    listFiles: (dir: string) => Promise<string[]>
   }
   directive: {
     get: () => Promise<string>
@@ -185,6 +186,14 @@ interface ElectronAPI {
       error?: string
     }>
     describeImage: (dataUri: string) => Promise<{ success: boolean; description?: string; error?: string }>
+    uploadAndConvert: (files: Array<{ name: string; data: string; mimeType: string }>) => Promise<Array<{
+      name: string
+      category: 'text' | 'pdf' | 'docx' | 'image' | 'unsupported'
+      markdown: string
+      mimeType?: string
+      dataUri?: string
+      error?: string
+    }>>
   }
 }
 

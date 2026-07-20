@@ -620,6 +620,33 @@ same old version. If you touch this flow again, keep both checks — the
 backend fix prevents the common cause, the frontend fix prevents *this
 category* of failure from ever being silent again, regardless of cause.
 
+**The chat-input status row (disclaimer + Deep Run + model/max-iterations
+chip) is one shared component, not two duplicated blocks — keep it that
+way.** `ChatInput.tsx` (chat mode) and `CodeChatView.tsx` (code mode) both
+show the same trio below their input: a small disclaimer on the left, and on
+the right a "Deep Run" pill plus a merged model-name/max-iterations chip
+with a diagonal accent-purple split. This started as copy-pasted, near-
+identical JSX (written for chat mode first, then hand-carried into code mode
+as a separate follow-up request) — the risk of that pattern showed up
+immediately: a cosmetic tweak ("black → dark purple" → "actually, match the
+Deep Run chip's accent color") landed in `ChatInput.tsx` and had to be
+manually reapplied to `CodeChatView.tsx` afterward, which is exactly the
+drift this file exists to warn about. Fixed by extracting the whole row into
+`src/components/ui/AgentStatusRow.tsx` — a single component taking
+`disclaimer`, `deepRun`, `model`, `maxIterations`, and `onOpenSettings`
+props — with both `ChatInput.tsx` and `CodeChatView.tsx` now rendering it
+with mode-specific copy/state instead of owning their own copy of the JSX.
+If asked to change how this row looks or behaves, change it once in
+`AgentStatusRow.tsx`; there should never again be two copies of it to keep
+in sync by hand. More generally: chat mode and code mode share a lot of
+input-area UI shape (the settings popover, the model/max-iterations picker,
+the send button) that's still duplicated between the two files as of this
+writing — if a future request touches one of those shared pieces, consider
+extracting it the same way rather than manually re-applying the same edit
+twice. (Note: this repo has no separate `AGENTS.md` — this file *is* the
+cross-session working-notes file, for Claude/Codex/any other agent working
+here; put long-term notes like this one here.)
+
 ## npm publishing gotchas
 
 - Publishing requires either 2FA-with-OTP on every `npm publish`, or a

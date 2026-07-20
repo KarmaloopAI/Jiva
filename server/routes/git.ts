@@ -65,6 +65,20 @@ router.post('/init-repo', (req, res) => {
   }
 })
 
+// Flat list of tracked + untracked-but-not-gitignored files, for the
+// code-mode @-mention picker. Purely a UI convenience — the selected path
+// is just inserted as text into the prompt; CodeAgent's own read_file tool
+// fetches the content if the model decides it's relevant.
+router.get('/list-files', (req, res) => {
+  const dir = req.query.dir as string
+  try {
+    const tracked = execFileSync('git', ['ls-files'], { cwd: dir, timeout: 5000 }).toString()
+    const untracked = execFileSync('git', ['ls-files', '--others', '--exclude-standard'], { cwd: dir, timeout: 5000 }).toString()
+    const files = [...new Set([...tracked.split('\n'), ...untracked.split('\n')].filter(Boolean))]
+    res.json(files.slice(0, 5000)) // defensive cap for pathological repos
+  } catch { res.json([]) }
+})
+
 router.get('/branch-info', (req, res) => {
   const dir = req.query.dir as string
   try {
