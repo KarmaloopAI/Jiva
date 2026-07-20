@@ -306,3 +306,17 @@ body {
   border-top: 1px solid var(--card-border);
   margin: 1em 0;
 }
+
+/* AgentStatusRow: the disclaimer + Deep Run/model chips share one line and
+   can overflow the input's own width (not the viewport) once the git panel
+   or sidebar eats into it — a container query, not a media query, since
+   what matters is the row's own available space. The chips are the
+   actionable part, so the disclaimer is what gives way. */
+.status-row-shrink {
+  container-type: inline-size;
+}
+@container (max-width: 480px) {
+  .status-row-disclaimer {
+    display: none;
+  }
+}

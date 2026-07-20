@@ -44,11 +44,28 @@ function eventLabel(event: CodeLogEvent): string {
   return clean.length > 80 ? clean.slice(0, 77) + '...' : clean
 }
 
+// jiva-core now appends a JSON blob of tool args after the bare "Tool: <name>"
+// message (e.g. `Tool: read_file {"path":"src/index.ts","offset":0}`). Older
+// jiva-core versions (or the doom-loop/error messages that share the "Tool:"
+// prefix) won't match — degrade to no params rather than throwing, so the
+// event still renders as a plain, non-expandable card.
+function parseToolCall(message: string): Record<string, unknown> | null {
+  const m = /^Tool: \S+\s+(\{.*\})$/.exec(message)
+  if (!m) return null
+  try {
+    return JSON.parse(m[1]) as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
+
 export interface CodeEvent {
   id: string
   type: 'tool' | 'warn' | 'error' | 'brain'
   detail: string
   timestamp: string
+  params?: Record<string, unknown>
+  expanded?: boolean
 }
 
 export interface CodeMessage {
@@ -87,6 +104,7 @@ interface CodeStore {
 
   sendMessage: (content: string) => Promise<void>
   toggleWorkPanel: (id: string) => void
+  toggleEventExpanded: (messageId: string, eventId: string) => void
   initLogListener: () => void
   clearSession: () => Promise<void>
 }
@@ -129,6 +147,17 @@ export const useCodeStore = create<CodeStore>((set, get) => ({
     ),
   })),
 
+  toggleEventExpanded: (messageId, eventId) => set(state => ({
+    messages: state.messages.map(m =>
+      m.id !== messageId ? m : {
+        ...m,
+        events: m.events?.map(e =>
+          e.id === eventId ? { ...e, expanded: !e.expanded } : e
+        ),
+      }
+    ),
+  })),
+
   initLogListener: () => {
     if (logListenerRegistered || !window.electron?.code?.onCodeLog) return
     logListenerRegistered = true
@@ -158,11 +187,13 @@ export const useCodeStore = create<CodeStore>((set, get) => ({
 
       // Accumulate important events for the current turn's event list
       if (isImportantEvent(event)) {
+        const params = parseToolCall(event.message)
         const entry: CodeEvent = {
           id: `${Date.now()}-${Math.random()}`,
           type: event.level === 'info' ? 'tool' : event.level,
           detail: eventLabel(event),
           timestamp: event.timestamp,
+          ...(params ? { params } : {}),
         }
         set(state => ({
           pendingEvents: [...state.pendingEvents, entry],

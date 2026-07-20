@@ -13,30 +13,10 @@ import { useChatStore } from '../../store/chat.store'
 import { useJivaStore, type ProcessedAttachment } from '../../store/jiva.store'
 import { usePersonaStore } from '../../store/persona.store'
 import { useConversationStore } from '../../store/conversation.store'
+import { AgentStatusRow } from '../ui/AgentStatusRow'
+import { extractImageFromClipboard } from '../../lib/paste-image'
+import { handleSmartKeydown } from '../../lib/smart-textarea'
 import type { AttachedFile } from '../../types/chat'
-
-const MODEL_CHIP_MAX_LEN = 22
-
-// Provider-qualified model names ("qwen/qwen3.6-27b") are too long for a
-// status chip — show just the model itself, truncated if it's still long.
-function shortModelName(model: string): string {
-  const short = model.includes('/') ? (model.split('/').pop() || model) : model
-  return short.length > MODEL_CHIP_MAX_LEN ? `${short.slice(0, MODEL_CHIP_MAX_LEN - 1)}…` : short
-}
-
-function maxIterationsLabel(n: number): string {
-  return n === 10 ? 'Quick' : n === 100 ? 'Long' : 'Medium'
-}
-
-// The two halves of the model/iterations chip interlock along a diagonal
-// seam via matching clip-paths (left cut short at the bottom, right cut
-// short at the top) rather than a straight vertical divider, per design.
-const CHIP_SLANT_PX = 7
-const chipLeftClip = `polygon(0 0, 100% 0, calc(100% - ${CHIP_SLANT_PX}px) 100%, 0 100%)`
-const chipRightClip = `polygon(${CHIP_SLANT_PX}px 0, 100% 0, 100% 100%, 0 100%)`
-// Same purple as the Deep Run chip's text (var(--accent)) — used for the
-// model/iterations chip's dark half and its border, in place of plain black.
-const CHIP_DARK_PURPLE = 'var(--accent)'
 
 export function ChatInput() {
   const [value, setValue] = useState('')
@@ -166,6 +146,14 @@ export function ChatInput() {
     setProcessedAttachments(prev => prev.filter((_, i) => i !== index))
   }, [])
 
+  const handlePaste = useCallback(async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const result = await extractImageFromClipboard(e.clipboardData, isMultimodalEnabled)
+    if (!result) return // no image in the clipboard — let default text paste proceed
+    e.preventDefault()
+    setAttachedFiles(prev => [...prev, result.file])
+    setProcessedAttachments(prev => [...prev, result.processed])
+  }, [isMultimodalEnabled])
+
   const handleSend = useCallback(async () => {
     const text = value.trim()
     if ((!text && processedAttachments.length === 0) || !isConnected || isThinking) return
@@ -202,7 +190,23 @@ export function ChatInput() {
   }, [value, processedAttachments, attachedFiles, isConnected, isThinking, activePersonaName, addUserMessage, setThinking, sendMessage, addAgentResponse, addErrorMessage])
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && e.shiftKey) return // default newline insertion
+
+    const el = e.currentTarget
+    const smart = handleSmartKeydown(e.key, value, el.selectionStart, el.selectionEnd)
+    if (smart) {
+      e.preventDefault()
+      // Set the DOM value + cursor synchronously first — React re-rendering
+      // with an already-matching value won't reset the cursor, whereas
+      // waiting for the render (even via requestAnimationFrame) races it
+      // and loses the cursor position to the end of the text.
+      el.value = smart.value
+      el.setSelectionRange(smart.cursorPos, smart.cursorPos)
+      setValue(smart.value)
+      return
+    }
+
+    if (e.key === 'Enter') {
       e.preventDefault()
       handleSend()
     }
@@ -300,6 +304,7 @@ export function ChatInput() {
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           placeholder={
             isConnected
               ? 'Message Jivam... (Shift+Enter for new line)'
@@ -431,48 +436,13 @@ export function ChatInput() {
         </button>
       </div>
 
-      <div className="flex items-center justify-between gap-3 mt-2">
-        <p className="text-[10px] text-[var(--text-subtle)] flex-shrink-0">
-          Jivam can make mistakes. Verify important information.
-        </p>
-
-        {(deepRun || selectedModel) && (
-          <button
-            onClick={() => setSettingsOpen(true)}
-            className="flex items-center gap-1.5 flex-shrink-0"
-          >
-            {deepRun && (
-              <span
-                className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-medium"
-                style={{ background: 'rgba(139,92,246,0.1)', color: 'var(--accent)', border: '1px solid rgba(139,92,246,0.2)' }}
-              >
-                <Zap size={9} />
-                Deep Run
-              </span>
-            )}
-            {selectedModel && (
-              <div
-                className="inline-flex items-stretch rounded-full overflow-hidden text-[10px] font-medium"
-                style={{ border: `1px solid ${CHIP_DARK_PURPLE}` }}
-              >
-                <span
-                  title={selectedModel}
-                  className="flex items-center pl-2.5 pr-3.5 py-0.5"
-                  style={{ background: CHIP_DARK_PURPLE, color: 'rgba(255,255,255,0.92)', clipPath: chipLeftClip }}
-                >
-                  {shortModelName(selectedModel)}
-                </span>
-                <span
-                  className="flex items-center pl-3.5 pr-2.5 py-0.5"
-                  style={{ background: '#f4f4f5', color: CHIP_DARK_PURPLE, marginLeft: `-${CHIP_SLANT_PX}px`, clipPath: chipRightClip }}
-                >
-                  {maxIterationsLabel(maxIterations)}
-                </span>
-              </div>
-            )}
-          </button>
-        )}
-      </div>
+      <AgentStatusRow
+        disclaimer="Jivam can make mistakes. Verify important information."
+        deepRun={deepRun}
+        model={selectedModel || null}
+        maxIterations={maxIterations}
+        onOpenSettings={() => setSettingsOpen(true)}
+      />
     </div>
   )
 }

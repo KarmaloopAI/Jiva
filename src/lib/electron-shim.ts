@@ -58,7 +58,7 @@ connectWS()
 // Spreading a large Uint8Array into String.fromCharCode(...) as call args blows
 // the JS engine's argument-count limit (~65k) — chunk it instead so image/doc
 // uploads of any size survive base64 encoding.
-function arrayBufferToBase64(buf: ArrayBuffer): string {
+export function arrayBufferToBase64(buf: ArrayBuffer): string {
   const bytes = new Uint8Array(buf)
   let binary = ''
   const chunkSize = 0x8000
@@ -218,6 +218,13 @@ const electronShim = {
       return post('/files/convert', { filePath })
     },
     describeImage: (dataUri: string) => post('/files/describe-image', { dataUri }),
+    // Same upload-and-convert path pickAndUploadFiles() uses internally,
+    // exposed directly for callers (e.g. clipboard paste) that already have
+    // base64 data in hand and don't need the native file-picker dialog.
+    uploadAndConvert: (files: Array<{ name: string; data: string; mimeType: string }>) =>
+      post<Array<{ name: string; category: string; markdown: string; mimeType?: string; dataUri?: string; error?: string }>>(
+        '/files/upload-and-convert', { files }
+      ),
   },
 
   window: {
@@ -253,6 +260,7 @@ const electronShim = {
       get('/git/diff-file', { dir, file, ...(status ? { status } : {}) }),
     initRepo: (dir: string) => post('/git/init-repo', { dir }),
     branchInfo: (dir: string) => get('/git/branch-info', { dir }),
+    listFiles: (dir: string) => get<string[]>('/git/list-files', { dir }),
   },
 
   directive: {

@@ -42,9 +42,14 @@ function resolveJivaCoreEntryPath(): string {
 // Parses a jiva-core log line into a structured event
 // Format: "2026-03-13T10:28:32.695Z [INFO] [CodeAgent] Tool: glob"
 const LOG_RE = /^(\d{4}-\d{2}-\d{2}T[\d:.Z]+)\s+\[(INFO|WARN|ERROR)\]\s+\[(\w+)\]\s+(.+)$/
+// jiva-core's logger colors the timestamp/level/prefix via chalk whenever
+// stdout is a TTY (e.g. `npm run dev` from an interactive terminal, as
+// opposed to the packaged/LaunchAgent path) — strip escape codes before
+// matching so LOG_RE's leading `^\d{4}` anchor doesn't silently fail.
+const ANSI_RE = /\x1B\[[0-9;]*[a-zA-Z]/g
 
 export function parseLogLine(line: string): CodeLogEvent | null {
-  const m = LOG_RE.exec(line.trim())
+  const m = LOG_RE.exec(line.trim().replace(ANSI_RE, ''))
   if (!m) return null
   return {
     timestamp: m[1],
@@ -378,18 +383,6 @@ export class CodeRunner extends EventEmitter {
 
     try {
       const result = await agent.chat(prompt)
-
-      // Emit one Tool: event per distinct tool used as a guaranteed fallback,
-      // in case the logger hook didn't fire live events during execution
-      if (result.toolsUsed?.length) {
-        const seen = new Set<string>()
-        for (const tool of result.toolsUsed) {
-          if (!seen.has(tool)) {
-            seen.add(tool)
-            onLog({ timestamp: new Date().toISOString(), level: 'info', tag: 'CodeAgent', message: `Tool: ${tool}` })
-          }
-        }
-      }
 
       return {
         content: result.content,
