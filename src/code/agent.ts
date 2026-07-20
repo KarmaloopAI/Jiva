@@ -10,7 +10,7 @@ import { WorkspaceManager } from '../core/workspace.js';
 import { ConversationManager } from '../core/conversation-manager.js';
 import { formatToolResult } from '../models/harmony.js';
 import type { Message, Tool } from '../models/base.js';
-import { logger } from '../utils/logger.js';
+import { logger, formatToolCallArgs } from '../utils/logger.js';
 import type { PersonaManager } from '../personas/persona-manager.js';
 import type { MCPServerManager } from '../mcp/server-manager.js';
 import { LspManager } from './lsp/manager.js';
@@ -483,6 +483,14 @@ ${directive ? `\n${directive}` : ''}`;
    * Runs the model → tools → model loop until no more tool calls or max iterations.
    */
   async chat(userMessage: string, onChunk?: (text: string) => void): Promise<AgentResponse> {
+    // Code mode has no persona concept, but `logger`'s persona context is a
+    // process-wide singleton that Chat mode sets and never resets — an
+    // embedding app running both modes in the same long-lived process (e.g.
+    // Jivam's persistent background service) can leak a stale
+    // `[PersonaName]` prefix onto every one of this agent's log lines,
+    // corrupting any log-line parser downstream that expects `[CodeAgent]`
+    // to lead the message.
+    logger.setPersonaContext(null);
     const toolsUsed: string[] = [];
     const directive = this.workspace.getDirectivePrompt();
     const skillsBlock = this.personaManager?.getSystemPromptAddition() || undefined;
@@ -1034,7 +1042,7 @@ ${directive ? `\n${directive}` : ''}`;
           break;
         }
 
-        logger.info(`[CodeAgent] Tool: ${toolName}`);
+        logger.info(`[CodeAgent] Tool: ${toolName} ${formatToolCallArgs(toolArgs)}`);
         toolsUsed.push(toolName);
 
         const tool = this.tools.find((t) => t.name === toolName);
