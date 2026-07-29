@@ -1008,8 +1008,21 @@ ${directive ? `\n${directive}` : ''}`;
         break;
       }
 
-      // Execute tool calls
-      for (const toolCall of response.toolCalls) {
+      // Execute tool calls. Indexed, not for...of — the doom-loop and
+      // excessive-reads branches below need to know which tool calls in
+      // this batch (response.toolCalls can hold several, issued as one
+      // parallel group) still haven't been answered when they decide to
+      // bail out early, so every one of them can still get a stub tool
+      // result before we stop. Skipping that was a real bug: providers that
+      // validate parallel tool-calling strictly reject the *next* request
+      // outright with "incomplete parallel tool-call group: tool call 'X'
+      // has no tool response" the moment any tool_call_id from an assistant
+      // turn is missing its matching tool message — which silently broke
+      // every session that happened to hit a doom-loop or 15-consecutive-
+      // reads nudge in the middle of a multi-call batch, not just at the
+      // end of one.
+      for (let toolCallIndex = 0; toolCallIndex < response.toolCalls.length; toolCallIndex++) {
+        const toolCall = response.toolCalls[toolCallIndex];
         const toolName = toolCall.function.name;
         let toolArgs: Record<string, unknown> = {};
         try {
@@ -1035,6 +1048,13 @@ ${directive ? `\n${directive}` : ''}`;
           recentCalls.every((c) => c === recentCalls[0])
         ) {
           logger.warn(`[CodeAgent] Doom loop detected for tool: ${toolName}`);
+          // This call (and anything still queued after it in the same
+          // batch) never gets executed — but every tool_call_id the model
+          // issued still needs a tool-role response before the next
+          // non-tool message, or the request becomes malformed.
+          for (const skipped of response.toolCalls.slice(toolCallIndex)) {
+            messages.push(formatToolResult(skipped.id, skipped.function.name, 'Skipped — doom loop detected, see the instruction that follows.'));
+          }
           messages.push({
             role: 'user',
             content: `STOP: You are calling \`${toolName}\` with the same arguments repeatedly. This action is not making progress. Stop and reassess your approach — try a different strategy or report what is blocking you.`,
@@ -1098,6 +1118,13 @@ ${directive ? `\n${directive}` : ''}`;
         if (consecutiveReadCount >= MAX_CONSECUTIVE_READS) {
           logger.warn(`[CodeAgent] ${consecutiveReadCount} consecutive read_file calls without edits — nudging model to act`);
           consecutiveReadCount = 0;
+          // This tool call already got its real result above — but any
+          // calls still queued after it in the same batch won't run, and
+          // still need a stub tool response for the same reason as the
+          // doom-loop case above.
+          for (const skipped of response.toolCalls.slice(toolCallIndex + 1)) {
+            messages.push(formatToolResult(skipped.id, skipped.function.name, 'Skipped — see the instruction that follows.'));
+          }
           messages.push({
             role: 'user',
             content:
