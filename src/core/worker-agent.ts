@@ -16,7 +16,7 @@ import { AgentSpawner } from './agent-spawner.js';
 import { AgentContext } from './types/agent-context.js';
 import { Message, MessageContent, ModelResponse, Tool } from '../models/base.js';
 import { formatToolResult } from '../models/harmony.js';
-import { logger } from '../utils/logger.js';
+import { logger, formatToolCallArgs } from '../utils/logger.js';
 import { OrchestrationLogger, orchestrationLogger } from '../utils/orchestration-logger.js';
 
 /** Max consecutive empty responses before breaking out */
@@ -658,12 +658,12 @@ Please complete this subtask and report your findings.`,
 
         for (const toolCall of response.toolCalls) {
           const toolName = toolCall.function.name;
-          logger.info(`  [Worker] Tool: ${toolName}`);
 
           // Parse args outside the try block so the catch block can reference
           // them for the failure signature (circuit breaker key).
           let args: Record<string, any> = {};
           try { args = JSON.parse(toolCall.function.arguments); } catch { /* use empty */ }
+          logger.info(`  [Worker] Tool: ${toolName} ${formatToolCallArgs(args)}`);
           const failureSig = `${toolName}:${JSON.stringify(args)}`;
 
           // Sliding-window doom-loop: only triggers on CONSECUTIVE identical calls
