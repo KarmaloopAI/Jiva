@@ -15,7 +15,7 @@ import { PersonaManager } from '../personas/persona-manager.js';
 import { AgentSpawner } from './agent-spawner.js';
 import { AgentContext } from './types/agent-context.js';
 import { Message, MessageContent, ModelResponse, Tool } from '../models/base.js';
-import { formatToolResult } from '../models/harmony.js';
+import { formatToolResult, ensureToolResultPairing } from '../models/harmony.js';
 import { logger, formatToolCallArgs } from '../utils/logger.js';
 import { OrchestrationLogger, orchestrationLogger } from '../utils/orchestration-logger.js';
 
@@ -363,6 +363,7 @@ Please complete this subtask and report your findings.`,
       let response: ModelResponse;
 
       try {
+        conversationHistory.splice(0, conversationHistory.length, ...ensureToolResultPairing(conversationHistory));
         response = await this.orchestrator.chatWithFallback({
           messages: conversationHistory,
           tools: tools.length > 0 ? tools : undefined,

@@ -9,6 +9,7 @@
 
 import { logger } from '../utils/logger.js';
 import { ToolCallError } from '../utils/errors.js';
+import type { Message } from './base.js';
 
 export interface HarmonyMessage {
   role: 'system' | 'developer' | 'user' | 'assistant' | 'tool';
@@ -386,4 +387,74 @@ export function formatToolResult(
     tool_call_id: toolCallId,
     content: typeof result === 'string' ? result : JSON.stringify(result, null, 2),
   };
+}
+
+/**
+ * Defense-in-depth repair pass, run immediately before sending messages to the
+ * model. Ensures every tool_call declared by an assistant message has a
+ * matching tool result before the next non-tool message, and drops any tool
+ * result that matches no declared call. Never throws; repairs silently and
+ * logs a warning when it actually changes anything, so regressions stay
+ * observable.
+ *
+ * This is a pure safety net for whatever the primary round-aware compaction
+ * (see `code/rounds.ts`), or any other future history mutation, might still
+ * get wrong — it does not replace the semantically-specific stubs already
+ * added at known early-break sites (doom-loop / excessive-reads nudges),
+ * which produce a more informative placeholder than this generic one can.
+ *
+ * Harmony-mode assistant messages carry no structured `tool_calls` (see the
+ * `Message.tool_calls` doc comment), so per-id verification only applies in
+ * standard tool-calling mode; Harmony rounds are left untouched since there's
+ * no ground truth here to check them against.
+ */
+export function ensureToolResultPairing(messages: Message[]): Message[] {
+  const result: Message[] = [];
+  let repaired = false;
+  // Ids declared by the most recent assistant message's tool_calls that
+  // haven't yet been matched by a tool-result message.
+  let pendingCalls: Map<string, string> | null = null; // id -> tool name
+
+  const flushPending = () => {
+    if (!pendingCalls) return;
+    for (const [id, name] of pendingCalls) {
+      result.push(formatToolResult(id, name, '[No result recorded — orphaned tool call, auto-repaired]'));
+      repaired = true;
+    }
+    pendingCalls = null;
+  };
+
+  for (const msg of messages) {
+    if (msg.role === 'tool') {
+      const id = msg.tool_call_id;
+      if (pendingCalls && id && pendingCalls.has(id)) {
+        pendingCalls.delete(id);
+        result.push(msg);
+      } else if (pendingCalls) {
+        // Doesn't match any currently-open call — orphaned, drop it.
+        repaired = true;
+      } else {
+        // No structured tool_calls being tracked (e.g. a Harmony round) —
+        // can't verify, pass through unchanged.
+        result.push(msg);
+      }
+      continue;
+    }
+
+    // A non-tool message closes out the previous round: any calls still
+    // pending at this point never got answered.
+    flushPending();
+
+    result.push(msg);
+    if (msg.role === 'assistant' && msg.tool_calls && msg.tool_calls.length > 0) {
+      pendingCalls = new Map(msg.tool_calls.map((tc) => [tc.id, tc.function.name]));
+    }
+  }
+  flushPending();
+
+  if (repaired) {
+    logger.warn('[ensureToolResultPairing] Repaired mismatched tool_call/tool_result pairing in message history');
+  }
+
+  return result;
 }

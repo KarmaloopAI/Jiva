@@ -383,6 +383,7 @@ program
           mcpManager: codeMcpServerNames.length > 0 ? mcpManager : undefined,
           mcpServerNames: codeMcpServerNames,
           harness: options.harness === 'evaluator' ? 'evaluator' : undefined,
+          compactionThreshold: codeModeConfig?.compactionThreshold,
         });
 
         const mcpNote = codeMcpServerNames.length > 0 ? ` | MCP: ${codeMcpServerNames.join(', ')}` : '';
@@ -892,6 +893,7 @@ program
           lspEnabled: lspEnabledRun,
           mcpManager: codeMcpServerNamesRun.length > 0 ? mcpManager : undefined,
           mcpServerNames: codeMcpServerNamesRun,
+          compactionThreshold: codeModeConfigRun?.compactionThreshold,
         });
 
         const mcpNoteRun = codeMcpServerNamesRun.length > 0 ? ` | MCP: ${codeMcpServerNamesRun.join(', ')}` : '';

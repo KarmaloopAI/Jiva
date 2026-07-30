@@ -8,9 +8,10 @@
 import { ModelOrchestrator } from '../models/orchestrator.js';
 import { WorkspaceManager } from '../core/workspace.js';
 import { ConversationManager } from '../core/conversation-manager.js';
-import { formatToolResult } from '../models/harmony.js';
+import { formatToolResult, ensureToolResultPairing } from '../models/harmony.js';
 import type { Message, Tool } from '../models/base.js';
 import { logger, formatToolCallArgs } from '../utils/logger.js';
+import { splitRoundsForCompaction } from './rounds.js';
 import type { PersonaManager } from '../personas/persona-manager.js';
 import type { MCPServerManager } from '../mcp/server-manager.js';
 import { LspManager } from './lsp/manager.js';
@@ -115,7 +116,12 @@ export interface CodeAgentConfig {
    * Token count at which in-loop context compaction is triggered.
    * When promptTokens in a response exceeds this threshold, the message history
    * is condensed to free up context window space.
-   * Default: 90000 (safe for a 128K context model, leaving ~38K for output).
+   * Default: 100000 (≈78% of a 128K context model, matching DualAgent's
+   * equivalent default — see `DEFAULT_COMPACTION_THRESHOLD` below for the full
+   * reasoning). Override for models with a larger context window: sourced from
+   * `codeMode.compactionThreshold` in jiva config, one absolute token count per
+   * installation today (no per-model context-window field exists yet to compute
+   * this automatically).
    * Set to 0 to disable in-loop compaction.
    */
   compactionThreshold?: number;
@@ -143,8 +149,22 @@ const DOOM_LOOP_THRESHOLD = 3;
 /** Max consecutive read_file calls before injecting an "act, don't just read" nudge. */
 const MAX_CONSECUTIVE_READS = 15;
 const CODE_MODE_INDICATOR = '[CODE MODE]';
-// Default token threshold for in-loop compaction (90K leaves ~38K headroom in a 128K model)
-const DEFAULT_COMPACTION_THRESHOLD = 90_000;
+// Default token threshold for in-loop compaction, assuming a 128K context model
+// (the same assumption DualAgent's equivalent default already makes elsewhere in
+// this codebase — see `src/core/dual-agent.ts`). Previously 90_000 (~70%, ~38K
+// headroom); raised to match DualAgent's 100_000 (~78%, ~28K headroom) now that
+// compaction can re-trigger later in the same turn (see `compactedThisIteration`
+// above) instead of firing only once per chat() call. That was the main reason
+// the extra headroom existed: after the single compaction, a long tool-heavy
+// turn (up to maxIterations, default 50) could keep growing the context
+// unchecked for the rest of the turn, so a bigger safety margin was needed to
+// absorb that unbounded growth. With re-triggering, the required headroom is
+// just enough for one round's growth (the batch that pushed tokens over the
+// threshold, plus the compaction summary call's own overhead) before the next
+// check catches it again — 28K comfortably covers that in normal use.
+// Override via `codeMode.compactionThreshold` in jiva config for models with a
+// larger context window.
+const DEFAULT_COMPACTION_THRESHOLD = 100_000;
 
 /**
  * Below this output-token budget, the skeleton-first workflow becomes
@@ -429,6 +449,7 @@ ${directive ? `\n${directive}` : ''}`;
 
       let response;
       try {
+        messages.splice(0, messages.length, ...ensureToolResultPairing(messages));
         response = await this.orchestrator.chatWithFallback({
           messages,
           tools: isLast ? [] : readOnlyDefs,
@@ -544,9 +565,6 @@ ${directive ? `\n${directive}` : ''}`;
     let continueInjected = false;
     let wrapUpInjected = false;
 
-    // In-loop compaction flag — only compact once per chat() turn to avoid thrashing
-    let compactedThisTurn = false;
-
     // Reset stop flag at the start of each chat() so the agent is immediately reusable
     this._stopped = false;
 
@@ -558,6 +576,16 @@ ${directive ? `\n${directive}` : ''}`;
         stopReason = 'stopped';
         break;
       }
+
+      // In-loop compaction flag — guards against compacting twice for the SAME
+      // response (the normal threshold check below and the forced length-starved
+      // check further down are structurally reachable from the same iteration).
+      // Reset every iteration (not once per chat() turn) so compaction can fire
+      // again later in a long-running turn once growth re-crosses the threshold —
+      // a turn can run up to maxIterations (default 50), and tool-heavy work can
+      // easily rebuild a large context after a single earlier compaction.
+      let compactedThisIteration = false;
+
       iterations = i + 1;
       logger.debug(`[CodeAgent] Iteration ${iterations}/${this.maxIterations}`);
 
@@ -598,6 +626,7 @@ ${directive ? `\n${directive}` : ''}`;
 
       let response;
       try {
+        messages.splice(0, messages.length, ...ensureToolResultPairing(messages));
         response = await this.orchestrator.chatWithFallback({
           messages,
           // Strip tools in the final phase so the model is forced to produce a text response
@@ -870,8 +899,10 @@ ${directive ? `\n${directive}` : ''}`;
 
       // ── In-loop context compaction ──────────────────────────────────────────
       // Check if we're approaching the context window limit and compact if needed.
-      // Triggered once per turn (compactedThisTurn flag) to avoid thrashing.
-      // Only runs when: threshold > 0, orchestrator available, not already compacted.
+      // Triggered at most once per iteration (compactedThisIteration flag), but can
+      // fire again on a later iteration once growth re-crosses the threshold.
+      // Only runs when: threshold > 0, orchestrator available, not already compacted
+      // this iteration.
       //
       // Deliberately NOT gated on the response having tool calls: a model that's
       // starved for completion-token budget by a bloated prompt (spending its
@@ -887,13 +918,13 @@ ${directive ? `\n${directive}` : ''}`;
       if (
         this.compactionThreshold > 0 &&
         promptTokens > this.compactionThreshold &&
-        !compactedThisTurn &&
+        !compactedThisIteration &&
         this.conversationManager
       ) {
         logger.warn(
           `[CodeAgent] Context at ${promptTokens} tokens (threshold: ${this.compactionThreshold}) — compacting in-loop history`,
         );
-        compactedThisTurn = true;
+        compactedThisIteration = true;
         try {
           const compacted = await this.compactInLoopMessages(messages, systemPrompt);
           // Replace messages in-place, preserving the system prompt at index 0
@@ -956,12 +987,12 @@ ${directive ? `\n${directive}` : ''}`;
           //   2. Anything else — the model is genuinely stuck/confused; a nudge is the
           //      right tool.
           const isLengthStarved = response.finishReason === 'length';
-          if (isLengthStarved && !compactedThisTurn && this.conversationManager) {
+          if (isLengthStarved && !compactedThisIteration && this.conversationManager) {
             logger.warn(
               '[CodeAgent] Empty response with finishReason=length — model ran out of completion budget ' +
               'while thinking. Forcing context compaction instead of a text nudge.',
             );
-            compactedThisTurn = true;
+            compactedThisIteration = true;
             try {
               const compacted = await this.compactInLoopMessages(messages, systemPrompt);
               messages.splice(0, messages.length, ...compacted);
@@ -1185,28 +1216,39 @@ ${directive ? `\n${directive}` : ''}`;
    *
    * Strategy (mirrors opencode's compaction approach):
    * 1. Keep the system/developer prompt (index 0).
-   * 2. Identify tool-call + tool-result pairs in the middle of the conversation.
+   * 2. Group the rest into rounds (a non-tool message + its immediately-following
+   *    run of tool-result messages) via `splitRoundsForCompaction`, and cut strictly
+   *    on round boundaries — never mid-round — so a tool_call can never be summarized
+   *    away while the tool_result answering it survives in the kept tail, or vice
+   *    versa. This holds regardless of message shape (standard tool-calling or
+   *    Harmony mode) since the grouping only inspects `role`, not `tool_calls`.
    * 3. Replace bulky tool results with compact "[result summarised]" placeholders.
    * 4. If a ConversationManager is available, generate a structured summary of
    *    the condensed middle section and inject it as a single context message.
    *
-   * This runs in-loop (mid-turn) so we only compact once per chat() invocation
-   * to avoid thrashing (controlled by the `compactedThisTurn` flag in the caller).
+   * This runs in-loop (mid-turn); the caller (`compactedThisIteration`) only
+   * guards against compacting twice for the same response, not against
+   * compacting again on a later iteration once growth re-crosses the threshold.
    */
   private async compactInLoopMessages(messages: Message[], systemPrompt: string): Promise<Message[]> {
-    // Always keep: [0] system/developer prompt + last KEEP_RECENT messages
-    const KEEP_RECENT = 10;
+    // Always keep: [0] system/developer prompt + last KEEP_RECENT_ROUNDS rounds.
+    // A round count, not a raw message count — a single wide parallel tool-call
+    // batch can itself contain more messages than any small fixed budget, so
+    // counting rounds (not messages) is what keeps the cut round-boundary-safe
+    // without needing a backward-walk correction pass.
+    const KEEP_RECENT_ROUNDS = 5;
 
-    if (messages.length <= KEEP_RECENT + 1) {
+    const { recentMessages, middleMessages } = splitRoundsForCompaction(
+      messages.slice(1), // messages[0] is always the system/developer prompt
+      KEEP_RECENT_ROUNDS,
+    );
+
+    if (middleMessages.length === 0) {
       // Nothing meaningful to compact
       return messages;
     }
 
     const systemMsg: Message = { role: 'developer' as any, content: systemPrompt };
-    const recentMessages = messages.slice(-KEEP_RECENT);
-    const middleMessages = messages.slice(1, -KEEP_RECENT);
-
-    if (middleMessages.length === 0) return messages;
 
     // Build a structured compaction summary using the opencode template
     const conversationText = middleMessages
