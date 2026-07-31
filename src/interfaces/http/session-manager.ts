@@ -324,12 +324,19 @@ export class SessionManager extends EventEmitter {
       if (codeModeEnabled) {
         const { CodeAgent } = await import('../../code/agent.js');
         const lspEnabled = process.env.JIVA_CODE_LSP !== 'false';
+        // Server-level override for models with a larger context window than the
+        // 128K CodeAgent's DEFAULT_COMPACTION_THRESHOLD assumes. Mirrors the
+        // `codeMode.compactionThreshold` jiva-config field the CLI reads, since
+        // this interface sources its per-tenant config from `storageProvider`
+        // rather than a local config.json.
+        const envCompactionThreshold = process.env.JIVA_CODE_COMPACTION_THRESHOLD;
         agent = new CodeAgent({
           orchestrator,
           workspace,
           conversationManager,
           maxIterations: 50,
           lspEnabled,
+          compactionThreshold: envCompactionThreshold ? Number(envCompactionThreshold) : undefined,
         });
         logger.info('[SessionManager] Using CodeAgent (code mode)');
       } else {

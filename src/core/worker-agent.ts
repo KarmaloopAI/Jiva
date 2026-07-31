@@ -15,8 +15,8 @@ import { PersonaManager } from '../personas/persona-manager.js';
 import { AgentSpawner } from './agent-spawner.js';
 import { AgentContext } from './types/agent-context.js';
 import { Message, MessageContent, ModelResponse, Tool } from '../models/base.js';
-import { formatToolResult } from '../models/harmony.js';
-import { logger } from '../utils/logger.js';
+import { formatToolResult, ensureToolResultPairing } from '../models/harmony.js';
+import { logger, formatToolCallArgs } from '../utils/logger.js';
 import { OrchestrationLogger, orchestrationLogger } from '../utils/orchestration-logger.js';
 
 /** Max consecutive empty responses before breaking out */
@@ -363,6 +363,7 @@ Please complete this subtask and report your findings.`,
       let response: ModelResponse;
 
       try {
+        conversationHistory.splice(0, conversationHistory.length, ...ensureToolResultPairing(conversationHistory));
         response = await this.orchestrator.chatWithFallback({
           messages: conversationHistory,
           tools: tools.length > 0 ? tools : undefined,
@@ -656,14 +657,25 @@ Please complete this subtask and report your findings.`,
       if (response.toolCalls && response.toolCalls.length > 0) {
         logger.info(`  [Worker] Using ${response.toolCalls.length} tool(s)`);
 
-        for (const toolCall of response.toolCalls) {
+        // Indexed, not for...of — response.toolCalls can hold several calls
+        // issued together as one parallel group, and the doom-loop check
+        // below needs to know which of them are still unanswered when it
+        // decides to bail out early, so every one can still get a stub tool
+        // result before the loop stops. Without this, a provider that
+        // validates parallel tool-calling strictly rejects the *next*
+        // request outright with "incomplete parallel tool-call group: tool
+        // call 'X' has no tool response" the moment any tool_call_id from
+        // this turn is missing its matching tool message — the same bug
+        // (and fix) as CodeAgent's tool loop, see src/code/agent.ts.
+        for (let toolCallIndex = 0; toolCallIndex < response.toolCalls.length; toolCallIndex++) {
+          const toolCall = response.toolCalls[toolCallIndex];
           const toolName = toolCall.function.name;
-          logger.info(`  [Worker] Tool: ${toolName}`);
 
           // Parse args outside the try block so the catch block can reference
           // them for the failure signature (circuit breaker key).
           let args: Record<string, any> = {};
           try { args = JSON.parse(toolCall.function.arguments); } catch { /* use empty */ }
+          logger.info(`  [Worker] Tool: ${toolName} ${formatToolCallArgs(args)}`);
           const failureSig = `${toolName}:${JSON.stringify(args)}`;
 
           // Sliding-window doom-loop: only triggers on CONSECUTIVE identical calls
@@ -675,6 +687,9 @@ Please complete this subtask and report your findings.`,
             recentCalls.every((c) => c === recentCalls[0])
           ) {
             logger.warn(`  [Worker] Doom loop detected for tool: ${toolName} — same call ${DOOM_LOOP_THRESHOLD} times in a row`);
+            for (const skipped of response.toolCalls.slice(toolCallIndex)) {
+              conversationHistory.push(formatToolResult(skipped.id, skipped.function.name, 'Skipped — doom loop detected, see the instruction that follows.'));
+            }
             conversationHistory.push({
               role: 'user',
               content: `STOP: You are calling \`${toolName}\` with the same arguments ${DOOM_LOOP_THRESHOLD} times in a row. This is not making progress. Try a different approach, different arguments, or a different tool to achieve the same goal.`,

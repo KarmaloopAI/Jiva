@@ -135,6 +135,14 @@ const CodeModeConfigSchema = z.object({
   }).optional(),
   maxIterations: z.number().default(50),
   includeMcp: z.boolean().default(false),
+  /**
+   * Token count at which CodeAgent's in-loop context compaction is triggered.
+   * Defaults to 100000 (CodeAgent's own `DEFAULT_COMPACTION_THRESHOLD`, sized
+   * for a 128K context model). Raise this for models with a larger context
+   * window — e.g. a 200K-context model can comfortably use a higher value.
+   * Set to 0 to disable in-loop compaction entirely.
+   */
+  compactionThreshold: z.number().optional(),
 });
 
 const JivaConfigSchema = z.object({
