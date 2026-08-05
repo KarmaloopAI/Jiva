@@ -85,6 +85,13 @@ export interface ChatCompletionOptions {
    * "high"   — most thorough (best for planning, complex code changes, orchestration)
    */
   reasoningEffort?: 'low' | 'medium' | 'high';
+
+  /**
+   * Disable the model's thinking chain for this call. Sends `thinking:false` (GLM)
+   * and `enable_thinking:false` (Qwen3) via chat_template_kwargs; other providers
+   * ignore it. For models that can't disable thinking, pair with reasoningEffort:'low'.
+   */
+  disableThinking?: boolean;
 }
 
 export interface IModel {

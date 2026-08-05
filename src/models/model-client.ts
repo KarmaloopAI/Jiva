@@ -468,6 +468,16 @@ export class ModelClient implements IModel {
       if (this.config.includeReasoning && isReasoningModel) {
         requestBody.include_reasoning = true;
       }
+
+      // Disable the model's thinking chain. Send both toggle flags — `thinking:false`
+      // (GLM) and `enable_thinking:false` (Qwen3) — since each family reads only its
+      // own; other providers ignore chat_template_kwargs entirely.
+      if (options.disableThinking) {
+        requestBody.chat_template_kwargs = {
+          thinking: false,
+          enable_thinking: false,
+        };
+      }
       // ────────────────────────────────────────────────────────────────────────
 
       // Send tools in standard OpenAI format if not using Harmony
