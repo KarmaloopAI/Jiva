@@ -4,6 +4,7 @@
 
 import { Express, Request, Response } from 'express';
 import { SessionManager } from '../session-manager.js';
+import { validateAgentConfig } from '../agent-config.js';
 import { logger } from '../../../utils/logger.js';
 import { getDefaultFilesystemAllowedPath } from '../../../utils/platform.js';
 
@@ -11,6 +12,10 @@ export function setupChatRoutes(app: Express, sessionManager: SessionManager): v
   /**
    * Send a message (non-streaming)
    * POST /api/chat
+   *
+   * Optional body field `agentConfig` supplies per-session overrides for the
+   * "create-on-chat" shortcut path (session is created on first chat if it
+   * doesn't exist). It is validated before session creation.
    */
   app.post('/api/chat', async (req: Request, res: Response) => {
     try {
@@ -22,8 +27,19 @@ export function setupChatRoutes(app: Express, sessionManager: SessionManager): v
         return;
       }
 
+      // Validate per-session agentConfig (if supplied) before creating a session.
+      const agentConfig = req.body?.agentConfig;
+      const validation = validateAgentConfig(agentConfig);
+      if (!validation.valid) {
+        res.status(400).json({
+          error: 'Invalid agentConfig',
+          details: validation.errors,
+        });
+        return;
+      }
+
       // Get or create session
-      const agent = await sessionManager.getOrCreateSession(tenantId, sessionId);
+      const agent = await sessionManager.getOrCreateSession(tenantId, sessionId, agentConfig);
 
       // Process message
       const response = await agent.chat(message);
@@ -36,6 +52,9 @@ export function setupChatRoutes(app: Express, sessionManager: SessionManager): v
         response: response.content,
         iterations: response.iterations,
         toolsUsed: response.toolsUsed,
+        // toolCalls is undefined for CodeAgent (code-mode) sessions → omitted
+        // from JSON. Only the Chat-mode (DualAgent) path threads args through.
+        ...(response.toolCalls !== undefined && { toolCalls: response.toolCalls }),
         ...(response.plan !== undefined && { plan: response.plan }),
         ...(response.tokenUsage && { tokenUsage: response.tokenUsage }),
       });
@@ -51,6 +70,11 @@ export function setupChatRoutes(app: Express, sessionManager: SessionManager): v
   /**
    * Send a message with streaming (Server-Sent Events)
    * POST /api/chat/stream
+   *
+   * Optional body field `agentConfig` supplies per-session overrides for the
+   * "create-on-chat" shortcut path. It is validated BEFORE the SSE headers are
+   * sent, so a bad config returns a normal JSON 400 instead of an error
+   * mid-stream.
    */
   app.post('/api/chat/stream', async (req: Request, res: Response) => {
     try {
@@ -59,6 +83,19 @@ export function setupChatRoutes(app: Express, sessionManager: SessionManager): v
 
       if (!message || typeof message !== 'string') {
         res.status(400).json({ error: 'Message is required and must be a string' });
+        return;
+      }
+
+      // Validate per-session agentConfig BEFORE sending SSE headers, so an
+      // invalid config returns a normal JSON 400 rather than an error event
+      // mid-stream (which clients can't easily surface as a creation failure).
+      const agentConfig = req.body?.agentConfig;
+      const validation = validateAgentConfig(agentConfig);
+      if (!validation.valid) {
+        res.status(400).json({
+          error: 'Invalid agentConfig',
+          details: validation.errors,
+        });
         return;
       }
 
@@ -76,7 +113,7 @@ export function setupChatRoutes(app: Express, sessionManager: SessionManager): v
 
       try {
         // Get or create session
-        const agent = await sessionManager.getOrCreateSession(tenantId, sessionId);
+        const agent = await sessionManager.getOrCreateSession(tenantId, sessionId, agentConfig);
 
         sendEvent('status', { message: 'Processing request...' });
 
@@ -89,6 +126,9 @@ export function setupChatRoutes(app: Express, sessionManager: SessionManager): v
           content: response.content,
           iterations: response.iterations,
           toolsUsed: response.toolsUsed,
+          // toolCalls is undefined for CodeAgent (code-mode) sessions → omitted
+          // from JSON. Only the Chat-mode (DualAgent) path threads args through.
+          ...(response.toolCalls !== undefined && { toolCalls: response.toolCalls }),
           ...(response.plan !== undefined && { plan: response.plan }),
           ...(response.tokenUsage && { tokenUsage: response.tokenUsage }),
         });

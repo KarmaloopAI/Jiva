@@ -930,6 +930,10 @@ program
 
       logger.info(`Completed in ${response.iterations} iteration(s)`);
 
+      if (response.tokenUsage) {
+        logger.info(`Token usage: prompt=${response.tokenUsage.promptTokens} completion=${response.tokenUsage.completionTokens} total=${response.tokenUsage.totalTokens}`);
+      }
+
       // Cleanup
       await agent.cleanup();
       orchestrationLogger.close();

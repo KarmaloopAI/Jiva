@@ -126,6 +126,15 @@ export class ModelClient implements IModel {
   private config: ModelClientConfig;
   /** Timestamps (ms) of requests sent in the trailing rate-limit window. */
   private requestTimestamps: number[] = [];
+  /**
+   * Set true once this model instance returns a 400 "streaming_required" error
+   * (e.g. Qwen/Qwen3.7-Plus on Together AI, which only supports streaming).
+   * Once set, every subsequent call sends `stream: true` and parses the SSE
+   * response, so the provider accepts it. Auto-detected on first failure — no
+   * configuration required. Also honoured when a caller passes `stream: true`
+   * per-call via ChatCompletionOptions.
+   */
+  private _streamingRequired = false;
 
   constructor(config: ModelClientConfig) {
     this.config = config;
@@ -193,6 +202,27 @@ export class ModelClient implements IModel {
       } catch (error) {
         lastError = error as Error;
 
+        // Some providers reject non-streaming requests with a 400
+        // "streaming_required" error (e.g. Qwen/Qwen3.7-Plus on Together AI:
+        // "This model only supports streaming. Set \"stream\": true."). This is
+        // not transient — retrying identically would fail forever — so flip the
+        // model instance into streaming mode and retry immediately (no backoff).
+        // Once set, every subsequent call through this instance streams.
+        if (
+          error instanceof ModelError &&
+          !this._streamingRequired &&
+          error.message.includes('(400)') &&
+          (error.message.includes('streaming_required') ||
+            error.message.includes('only supports streaming'))
+        ) {
+          logger.warn(
+            `[ModelClient] ${this.config.model}: provider requires streaming — ` +
+            `switching to stream:true for this and future calls.`,
+          );
+          this._streamingRequired = true;
+          continue; // retry immediately, this time with stream:true
+        }
+
         // Retry on transient errors: 403 (WAF), 429 (rate limit), 500/502/503/504 (server errors)
         if (error instanceof ModelError) {
           const is429 = error.message.includes('(429)');
@@ -247,6 +277,124 @@ export class ModelClient implements IModel {
 
   /** Retry wait time in ms, set dynamically based on API hint or exponential backoff. */
   private _lastRetryWait?: number;
+
+  /**
+   * Consume a streaming (SSE) chat-completion response and reassemble it into
+   * the same shape as a non-streaming response, so the rest of `attemptChat`
+   * can parse it identically regardless of whether `stream` was set.
+   *
+   * OpenAI-compatible streaming sends a sequence of `data: {json}\n\n` chunks
+   * terminated by `data: [DONE]`. Each chunk's `choices[0].delta` carries
+   * incremental content/tool-call fragments; the final chunk (when
+   * `stream_options.include_usage` is set) carries the aggregate `usage`.
+   *
+   * We accumulate:
+   *   - content: concatenation of every delta.content
+   *   - tool_calls: deltas merge by index — id/function.name come from the
+   *     first chunk that sets them, function.arguments is concatenated across
+   *     all chunks for that index (providers stream JSON args piece by piece)
+   *   - reasoning: concatenation of delta.reasoning_content / delta.reasoning
+   *   - finish_reason: the last non-null value seen
+   *   - usage: the final chunk's usage object (if the provider sent one)
+   *
+   * Returns a minimal `{ choices, usage }` object shaped like a non-streaming
+   * response body, with `choices[0].message` (not `delta`) populated.
+   */
+  private async parseSSEStream(response: Response): Promise<any> {
+    if (!response.body) {
+      throw new ModelError('Streaming response had no body', this.config.model);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    let content = '';
+    let reasoning = '';
+    let finishReason: string | null = null;
+    let usage: any = undefined;
+    // tool_calls indexed by their delta index, accumulated across chunks
+    const toolCallsByIndex = new Map<number, { id: string; type: 'function'; function: { name: string; arguments: string } }>();
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        // SSE events are separated by a blank line; process every complete one.
+        let newlineIdx: number;
+        while ((newlineIdx = buffer.indexOf('\n\n')) !== -1) {
+          const rawEvent = buffer.slice(0, newlineIdx);
+          buffer = buffer.slice(newlineIdx + 2);
+
+          for (const line of rawEvent.split('\n')) {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith('data:')) continue;
+            const payload = trimmed.slice(5).trim();
+            if (payload === '[DONE]') continue;
+
+            let chunk: any;
+            try {
+              chunk = JSON.parse(payload);
+            } catch {
+              // Skip malformed lines rather than aborting the whole stream.
+              continue;
+            }
+
+            if (chunk.usage) usage = chunk.usage;
+
+            const choice = chunk.choices?.[0];
+            if (!choice) continue;
+            const delta = choice.delta;
+            if (delta) {
+              if (typeof delta.content === 'string') content += delta.content;
+              // Reasoning/thinking tokens (Groq: reasoning, Sarvam/others: reasoning_content)
+              const r = delta.reasoning_content ?? delta.reasoning;
+              if (typeof r === 'string') reasoning += r;
+              if (Array.isArray(delta.tool_calls)) {
+                for (const tc of delta.tool_calls) {
+                  const idx = tc.index ?? 0;
+                  let acc = toolCallsByIndex.get(idx);
+                  if (!acc) {
+                    acc = { id: tc.id ?? '', type: 'function', function: { name: '', arguments: '' } };
+                    toolCallsByIndex.set(idx, acc);
+                  }
+                  if (tc.id) acc.id = tc.id;
+                  if (tc.type) acc.type = tc.type;
+                  if (tc.function?.name) acc.function.name += tc.function.name;
+                  if (typeof tc.function?.arguments === 'string') acc.function.arguments += tc.function.arguments;
+                }
+              }
+            }
+            if (choice.finish_reason) finishReason = choice.finish_reason;
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+
+    const toolCalls = Array.from(toolCallsByIndex.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([, v]) => v);
+
+    return {
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: content || null,
+            ...(reasoning ? { reasoning_content: reasoning } : {}),
+            ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+          },
+          finish_reason: finishReason ?? 'stop',
+        },
+      ],
+      ...(usage ? { usage } : {}),
+    };
+  }
 
   private async attemptChat(options: ChatCompletionOptions, isReasoningModel: boolean): Promise<ModelResponse> {
     try {
@@ -335,6 +483,22 @@ export class ModelClient implements IModel {
         requestBody.tool_choice = 'auto';
       }
 
+      // Streaming: some providers/models only accept streaming requests
+      // (e.g. Qwen/Qwen3.7-Plus on Together AI returns 400 "streaming_required"
+      // otherwise). `_streamingRequired` is auto-set the first time such an
+      // error is seen (see chat()); a caller may also force it per-call via
+      // `options.stream`. When streaming, the response is consumed as SSE and
+      // reassembled below into the same shape as a non-streaming response.
+      const useStream = this._streamingRequired || options.stream === true;
+      if (useStream) {
+        requestBody.stream = true;
+        // Together AI (and OpenAI) emit a final chunk carrying the total usage
+        // only when `stream_options.include_usage` is set; without it the
+        // reassembled response would have no usage and TokenTracker would fall
+        // back to local estimation. Harmless on providers that ignore it.
+        requestBody.stream_options = { include_usage: true };
+      }
+
       // Log full request for debugging
       logger.debug('API Request:', JSON.stringify(requestBody, null, 2));
       logger.debug('Request size:', JSON.stringify(requestBody).length, 'bytes');
@@ -351,7 +515,9 @@ export class ModelClient implements IModel {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${authToken}`,
           'User-Agent': 'Jiva/0.1.0',
-          'Accept': 'application/json',
+          // text/event-stream so intermediaries don't buffer the SSE chunks;
+          // providers that ignore Accept still work.
+          'Accept': useStream ? 'text/event-stream' : 'application/json',
         },
         body: JSON.stringify(requestBody),
       });
@@ -403,7 +569,9 @@ export class ModelClient implements IModel {
         );
       }
 
-      const data: any = await response.json();
+      const data: any = useStream
+        ? await this.parseSSEStream(response)
+        : await response.json();
       logger.debug('API Response:', JSON.stringify(data, null, 2));
 
       if (!data.choices || data.choices.length === 0) {

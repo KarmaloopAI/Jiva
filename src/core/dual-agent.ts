@@ -19,6 +19,7 @@ import { serializeAgentContext } from './utils/serialize-agent-context.js';
 import { logger } from '../utils/logger.js';
 import { OrchestrationLogger, orchestrationLogger } from '../utils/orchestration-logger.js';
 import { Message } from '../models/base.js';
+import type { ToolCallRecord } from './worker-agent.js';
 
 export interface DualAgentConfig {
   orchestrator: ModelOrchestrator;
@@ -55,6 +56,8 @@ export interface DualAgentResponse {
   content: string;
   iterations: number;
   toolsUsed: string[];
+  /** Parallel to `toolsUsed`: each tool call's name AND arguments. */
+  toolCalls: ToolCallRecord[];
   plan?: {
     subtasks: string[];
     reasoning: string;
@@ -288,6 +291,9 @@ VALIDATION GUIDANCE:
     const agentContext = this.buildAgentContext();
 
     const allToolsUsed: string[] = [];
+    // Parallel to `allToolsUsed`: aggregates each worker's `toolCalls` so the
+    // HTTP layer can surface tool arguments to end users.
+    const allToolCalls: ToolCallRecord[] = [];
     let totalIterations = 0;
 
     // PHASE 1: Manager creates plan
@@ -332,6 +338,7 @@ VALIDATION GUIDANCE:
         content: directReply,
         iterations: 1,
         toolsUsed: [],
+        toolCalls: [],
         plan: { subtasks: [], reasoning: plan.reasoning },
         tokenUsage: this.orchestrator.getTokenUsage(),
       };
@@ -369,6 +376,9 @@ VALIDATION GUIDANCE:
 
       totalIterations += 1;
       allToolsUsed.push(...workerResult.toolsUsed);
+      if (workerResult.toolCalls) {
+        allToolCalls.push(...workerResult.toolCalls);
+      }
 
       // Manager reviews Worker's result — fast-path for common cases, LLM only for edge cases
       const review = await this.manager.reviewSubtaskResult(subtask, workerResult, userMessage);
@@ -440,6 +450,7 @@ VALIDATION GUIDANCE:
       content: finalResponse,
       iterations: totalIterations,
       toolsUsed: allToolsUsed,
+      toolCalls: allToolCalls,
       plan: {
         subtasks: plan.subtasks,
         reasoning: plan.reasoning,
