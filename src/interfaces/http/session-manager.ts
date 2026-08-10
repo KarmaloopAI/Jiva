@@ -26,6 +26,7 @@ import { Message } from '../../models/base.js';
 import { PersonaManager } from '../../personas/persona-manager.js';
 import { getDefaultFilesystemAllowedPath } from '../../utils/platform.js';
 import type { IAgent } from '../../core/agent-interface.js';
+import type { AgentConfig } from './agent-config.js';
 
 export interface SessionConfig {
   storageProvider: StorageProvider;
@@ -75,12 +76,24 @@ export class SessionManager extends EventEmitter {
    * Concurrent calls for the same (tenantId, sessionId) are deduplicated:
    * the second caller awaits the same creation Promise so only one session
    * object (and its MCP sub-processes) is ever created per key.
+   *
+   * When `agentConfig` is supplied, its values override the server-level
+   * environment-variable defaults (model, tool-calling model, MCP servers,
+   * code-mode LSP, max iterations, workspace dir) for this session only.
+   * Per-session config is never persisted. If `agentConfig` is supplied for
+   * an already-cached or already-pending session, it is logged and ignored
+   * (the existing session's config wins).
    */
-  async getOrCreateSession(tenantId: string, sessionId: string): Promise<IAgent> {
+  async getOrCreateSession(tenantId: string, sessionId: string, agentConfig?: AgentConfig): Promise<IAgent> {
     const key = this.getSessionKey(tenantId, sessionId);
 
     // Fast path — session already active
     if (this.sessions.has(key)) {
+      if (agentConfig) {
+        logger.warn(
+          `[SessionManager] agentConfig supplied for already-active session ${key} — ignored (existing session config retained)`,
+        );
+      }
       const session = this.sessions.get(key)!;
       this.resetIdleTimer(key);
       session.info.lastActivityAt = new Date();
@@ -91,6 +104,11 @@ export class SessionManager extends EventEmitter {
 
     // Deduplication — a concurrent request is already creating this session
     if (this.pendingSessions.has(key)) {
+      if (agentConfig) {
+        logger.warn(
+          `[SessionManager] agentConfig supplied for pending session ${key} — ignored (existing session config retained)`,
+        );
+      }
       logger.debug(`[SessionManager] Awaiting pending session creation: ${key}`);
       const session = await this.pendingSessions.get(key)!;
       return session.agent;
@@ -107,8 +125,8 @@ export class SessionManager extends EventEmitter {
     // Create new session; register the Promise before awaiting so concurrent
     // callers that arrive while we await find it in pendingSessions.
     logger.info(`[SessionManager] Creating session: ${key}`);
-    const codeModeEnabled = process.env.JIVA_CODE_MODE === 'true';
-    const creationPromise = this.createSession(tenantId, sessionId, codeModeEnabled);
+    const codeModeEnabled = agentConfig?.codeModeEnabled ?? process.env.JIVA_CODE_MODE === 'true';
+    const creationPromise = this.createSession(tenantId, sessionId, codeModeEnabled, agentConfig);
     this.pendingSessions.set(key, creationPromise);
 
     try {
@@ -128,8 +146,14 @@ export class SessionManager extends EventEmitter {
 
   /**
    * Create a new session with all components
+   *
+   * When `agentConfig` is supplied, its values replace the server-level
+   * environment-variable reads for: the model name, tool-calling model name,
+   * MCP server list, code-mode LSP flag, and max iterations. Per-session
+   * config is NEVER persisted via storageProvider.setConfig() — it stays in
+   * memory for the session's lifetime only (secrets never touch disk/GCS).
    */
-  private async createSession(tenantId: string, sessionId: string, codeModeEnabled: boolean): Promise<ActiveSession> {
+  private async createSession(tenantId: string, sessionId: string, codeModeEnabled: boolean, agentConfig?: AgentConfig): Promise<ActiveSession> {
     const info: SessionInfo = {
       sessionId,
       tenantId,
@@ -197,10 +221,14 @@ export class SessionManager extends EventEmitter {
 
       // Create model orchestrator
       const rm = modelConfig.reasoning as any;
+      // agentConfig.model (when supplied) overrides the stored/env model name
+      // for this session only — the endpoint/apiKey/strategy still come from the
+      // tenant's stored config (secrets are never part of agentConfig).
+      const reasoningModelName = agentConfig?.model ?? rm.model ?? rm.defaultModel;
       const reasoningModel = createModelClient({
         endpoint: rm.endpoint,
         apiKey: rm.apiKey || '',
-        model: rm.model || rm.defaultModel,
+        model: reasoningModelName,
         type: 'reasoning',
         useHarmonyFormat: rm.useHarmonyFormat ?? false,
         useGoogleADC: rm.useGoogleADC ?? false,
@@ -215,10 +243,11 @@ export class SessionManager extends EventEmitter {
       // execution (reliable standard-JSON tool formatting). The reasoning model acts as
       // the secondary fallback.
       // Configure via JIVA_TOOL_CALLING_MODEL_BASE_URL / JIVA_TOOL_CALLING_MODEL_API_KEY /
-      // JIVA_TOOL_CALLING_MODEL_NAME environment variables.
+      // JIVA_TOOL_CALLING_MODEL_NAME environment variables, OR via agentConfig.toolCallingModel
+      // (which reuses the reasoning model's endpoint/apiKey for the session).
       const tcEndpoint = process.env.JIVA_TOOL_CALLING_MODEL_BASE_URL;
       const tcApiKey   = process.env.JIVA_TOOL_CALLING_MODEL_API_KEY;
-      const tcModel    = process.env.JIVA_TOOL_CALLING_MODEL_NAME;
+      const tcModel    = agentConfig?.toolCallingModel ?? process.env.JIVA_TOOL_CALLING_MODEL_NAME;
       const toolCallingModel = (tcEndpoint && tcApiKey && tcModel)
         ? createModelClient({
             endpoint: tcEndpoint,
@@ -226,7 +255,13 @@ export class SessionManager extends EventEmitter {
             model: tcModel,
             type: 'tool-calling',
             useHarmonyFormat: false, // standard OpenAI format for tool-calling LLMs
-            defaultReasoningEffort: 'medium',
+            // Patch 8: pass reasoning-effort config through as-is (undefined when
+            // the catalog/config doesn't set it) instead of forcing 'medium'. A
+            // plain tool-calling model (e.g. Groq llama-3.3-70b-versatile) rejects
+            // `reasoning_effort` with a 400; an agent type whose tool-calling model
+            // IS reasoning-capable can still opt in explicitly via its config.
+            defaultReasoningEffort: undefined,
+            reasoningEffortStrategy: undefined,
           })
         : undefined;
 
@@ -251,47 +286,80 @@ export class SessionManager extends EventEmitter {
 
       const baseMcpServers: Record<string, any> = {};
 
-      if (mcpEnabled && filesystemEnabled) {
-        baseMcpServers.filesystem = {
-          command: 'npx',
-          args: ['--no', '@modelcontextprotocol/server-filesystem', ...allowedPaths],
-          enabled: true,
-        };
-        logger.info(`[SessionManager] Filesystem MCP paths: ${allowedPaths.join(', ')}`);
-      }
-      
-      // Load MCP server config from storage
-      const mcpConfig = await storageProvider.getConfig<Array<{
-        name: string;
-        command: string;
-        args?: string[];
-        env?: Record<string, string>;
-      }>>('mcpServers');
-      if (mcpConfig && Array.isArray(mcpConfig)) {
-        for (const serverConfig of mcpConfig) {
-          // Add to base servers (will override filesystem if configured)
+      // When agentConfig.mcpServers is supplied, it REPLACES the filesystem
+      // default and any stored MCP config for this session — the caller fully
+      // controls the session's MCP surface (an empty array means "no MCP
+      // servers for this session"). Otherwise fall back to the env-var
+      // filesystem default + stored per-tenant config (original behavior).
+      if (agentConfig?.mcpServers) {
+        for (const serverConfig of agentConfig.mcpServers) {
           baseMcpServers[serverConfig.name] = {
-            command: serverConfig.command,
-            args: serverConfig.args,
-            env: serverConfig.env,
+            ...(serverConfig.url ? { url: serverConfig.url } : {}),
+            ...(serverConfig.command ? { command: serverConfig.command } : {}),
+            ...(serverConfig.args ? { args: serverConfig.args } : {}),
+            ...(serverConfig.env ? { env: serverConfig.env } : {}),
             enabled: true,
           };
         }
+        logger.info(
+          `[SessionManager] Using ${agentConfig.mcpServers.length} MCP server(s) from agentConfig`,
+        );
+      } else {
+        if (mcpEnabled && filesystemEnabled) {
+          baseMcpServers.filesystem = {
+            command: 'npx',
+            args: ['--no', '@modelcontextprotocol/server-filesystem', ...allowedPaths],
+            enabled: true,
+          };
+          logger.info(`[SessionManager] Filesystem MCP paths: ${allowedPaths.join(', ')}`);
+        }
+
+        // Load MCP server config from storage
+        const mcpConfig = await storageProvider.getConfig<Array<{
+          name: string;
+          command: string;
+          args?: string[];
+          env?: Record<string, string>;
+        }>>('mcpServers');
+        if (mcpConfig && Array.isArray(mcpConfig)) {
+          for (const serverConfig of mcpConfig) {
+            // Add to base servers (will override filesystem if configured)
+            baseMcpServers[serverConfig.name] = {
+              command: serverConfig.command,
+              args: serverConfig.args,
+              env: serverConfig.env,
+              enabled: true,
+            };
+          }
+        }
       }
-      
+
       // Initialize all MCP servers (base + configured)
       await mcpManager.initialize(baseMcpServers);
 
       // Initialize workspace
-      const workspace = new WorkspaceManager(storageProvider);
+      // When agentConfig.workspaceDir is supplied, build WorkspaceManager in
+      // local/config mode (session-scoped directory) instead of the
+      // storage-provider mode (which resolves to the process-wide process.cwd()
+      // and is NOT session-scoped). The config-mode constructor overload
+      // already exists upstream — it verifies the directory exists during
+      // initialize() and throws WorkspaceError if not.
+      const workspace = agentConfig?.workspaceDir
+        ? new WorkspaceManager({ workspaceDir: agentConfig.workspaceDir })
+        : new WorkspaceManager(storageProvider);
       await workspace.initialize();
 
       // Initialize conversation manager
       const conversationManager = new ConversationManager(storageProvider);
 
       // Initialize persona manager with per-tenant storage provider
-      // This ensures persona config is isolated per tenant, not shared globally
-      const personaManager = new PersonaManager([], false, storageProvider);
+      // This ensures persona config is isolated per tenant, not shared globally.
+      // When a session-scoped workspaceDir is configured, also scan
+      // `<workspaceDir>/skills` for standalone skills (patch 7).
+      const additionalSkillsDirs = agentConfig?.workspaceDir
+        ? [`${agentConfig.workspaceDir}/skills`]
+        : [];
+      const personaManager = new PersonaManager([], false, storageProvider, additionalSkillsDirs);
       await personaManager.initialize();
 
       // Merge persona MCP servers with session MCP servers
@@ -323,23 +391,28 @@ export class SessionManager extends EventEmitter {
       let agent: IAgent;
       if (codeModeEnabled) {
         const { CodeAgent } = await import('../../code/agent.js');
-        const lspEnabled = process.env.JIVA_CODE_LSP !== 'false';
+        // agentConfig.codeLsp overrides JIVA_CODE_LSP for this session only.
+        const lspEnabled = agentConfig?.codeLsp ?? process.env.JIVA_CODE_LSP !== 'false';
         // Server-level override for models with a larger context window than the
         // 128K CodeAgent's DEFAULT_COMPACTION_THRESHOLD assumes. Mirrors the
         // `codeMode.compactionThreshold` jiva-config field the CLI reads, since
         // this interface sources its per-tenant config from `storageProvider`
         // rather than a local config.json.
         const envCompactionThreshold = process.env.JIVA_CODE_COMPACTION_THRESHOLD;
+        // agentConfig.maxIterations overrides the hardcoded default for this session.
+        const maxIterations = agentConfig?.maxIterations ?? 50;
         agent = new CodeAgent({
           orchestrator,
           workspace,
           conversationManager,
-          maxIterations: 50,
+          maxIterations,
           lspEnabled,
           compactionThreshold: envCompactionThreshold ? Number(envCompactionThreshold) : undefined,
         });
         logger.info('[SessionManager] Using CodeAgent (code mode)');
       } else {
+        // agentConfig.maxIterations overrides the hardcoded default for this session.
+        const maxIterations = agentConfig?.maxIterations ?? 20;
         agent = new DualAgent({
           orchestrator,
           mcpManager,
@@ -347,7 +420,7 @@ export class SessionManager extends EventEmitter {
           conversationManager,
           personaManager,
           maxSubtasks: 20,
-          maxIterations: 20,
+          maxIterations,
           autoSave: true,
           orchestrationLogger: orchLogger,
         });
@@ -565,6 +638,25 @@ export class SessionManager extends EventEmitter {
   getActiveAgent(tenantId: string, sessionId: string): IAgent | null {
     const key = this.getSessionKey(tenantId, sessionId);
     return this.sessions.get(key)?.agent ?? null;
+  }
+
+  /**
+   * Get the live status string for a session.
+   *
+   * Reads `currentStatus` off the session's per-session OrchestrationLogger —
+   * the latest event the agent emitted while processing a `POST /api/chat`
+   * turn. Designed to be polled concurrently from a separate HTTP request
+   * while a chat turn is in flight (Node's event loop services the poll while
+   * `agent.chat()` awaits the model provider).
+   *
+   * Returns `null` if the session does not exist — an expected poll outcome
+   * (e.g. polling before/after the session's lifetime), not an error.
+   */
+  getSessionStatus(tenantId: string, sessionId: string): string | null {
+    const key = this.getSessionKey(tenantId, sessionId);
+    const session = this.sessions.get(key);
+    if (!session) return null;
+    return session.orchestrationLogger.getCurrentStatus();
   }
 
   private getSessionKey(tenantId: string, sessionId: string): string {

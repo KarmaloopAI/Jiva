@@ -65,6 +65,7 @@ program
   .command('config')
   .description('Update Jiva configuration')
   .option('--show', 'Show current configuration and source')
+  .option('--compaction-threshold <number>', 'Set global compaction threshold (tokens). Hint: if model context length is x, set threshold to ~70-80% of x (e.g., 128k context → 90000-100000).')
   .action(async (options) => {
     try {
       if (options.show) {
@@ -112,6 +113,13 @@ program
         return;
       }
       
+      if (options.compactionThreshold !== undefined) {
+        configManager.setCompactionThreshold(options.compactionThreshold);
+        console.log(chalk.green(`✓ Global compactionThreshold set to ${options.compactionThreshold}`));
+        console.log(chalk.gray('Hint: if model context length is x, set threshold to ~70-80% of x (e.g., 128k → 90000-100000).'));
+        return;
+      }
+
       if (!configManager.isConfigured()) {
         console.log(chalk.yellow('Jiva is not configured. Running setup wizard...\n'));
         await runSetupWizard();
@@ -929,6 +937,10 @@ program
       }
 
       logger.info(`Completed in ${response.iterations} iteration(s)`);
+
+      if (response.tokenUsage) {
+        logger.info(`Token usage: prompt=${response.tokenUsage.promptTokens} completion=${response.tokenUsage.completionTokens} total=${response.tokenUsage.totalTokens}`);
+      }
 
       // Cleanup
       await agent.cleanup();

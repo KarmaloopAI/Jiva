@@ -30,6 +30,15 @@ export class OrchestrationLogger {
   private maxBufferSize: number = 100;
 
   /**
+   * Latest live status string derived from the most recent orchestration event.
+   * Updated in `writeEvent()` — the single funnel every `logXxx()` call passes
+   * through — so it always reflects what the agent is doing *right now*.
+   * Exposed over `GET /api/session/:sessionId/status` for polling while a
+   * `POST /api/chat` turn is in flight.
+   */
+  private currentStatus: string = 'Idle';
+
+  /**
    * Create an OrchestrationLogger.
    *
    * Called with no arguments → CLI mode: writes to a timestamped file in
@@ -127,6 +136,11 @@ export class OrchestrationLogger {
   }
 
   private writeEvent(event: OrchestrationEvent): void {
+    // Derive a human-readable live status from this event BEFORE writing it.
+    // Every logXxx() call funnels through here, so this is the single place to
+    // keep currentStatus in sync with what the agent is doing right now.
+    this.currentStatus = this.deriveStatus(event);
+
     const line = [
       `[${event.timestamp}]`,
       `[${event.phase}]`,
@@ -149,6 +163,79 @@ export class OrchestrationLogger {
     else if (this.logStream) {
       this.logStream.write(logLine);
     }
+  }
+
+  /**
+   * Derive a short, human-readable status string from an orchestration event.
+   * Used to populate `currentStatus` for the live-status polling endpoint.
+   * Unknown events fall back to the event name itself so new event types are
+   * never silently dropped.
+   */
+  private deriveStatus(event: OrchestrationEvent): string {
+    const { phase, event: evt, details } = event;
+    const toolName = typeof details?.toolName === 'string' ? details.toolName : '';
+
+    // DualAgent phase transitions
+    if (phase === 'DUAL_AGENT') {
+      switch (evt) {
+        case 'USER_MESSAGE': return 'Received message…';
+        case 'PHASE_START_PLANNING': return 'Planning execution…';
+        case 'PHASE_END_PLANNING': return 'Planning complete';
+        case 'PHASE_START_EXECUTION': return 'Executing subtasks…';
+        case 'PHASE_END_EXECUTION': return 'Execution complete';
+        case 'PHASE_START_SYNTHESIS': return 'Synthesizing results…';
+        case 'PHASE_END_SYNTHESIS': return 'Synthesis complete';
+        case 'FINAL_RESPONSE': return 'Done';
+        default: return evt;
+      }
+    }
+
+    // Manager activity
+    if (phase === 'MANAGER') {
+      switch (evt) {
+        case 'CREATE_PLAN': return 'Planning execution…';
+        case 'PLAN_CREATED': return 'Plan created';
+        case 'REVIEW_SUBTASK': return 'Reviewing subtask result…';
+        case 'DECISION': return 'Evaluating progress…';
+        case 'SYNTHESIZE': return 'Synthesizing results…';
+        default: return evt;
+      }
+    }
+
+    // Worker activity — the most useful "what is it doing right now" signal
+    if (phase === 'WORKER') {
+      switch (evt) {
+        case 'START_SUBTASK': return 'Starting subtask…';
+        case 'ITERATION': return `Working (step ${details?.iteration ?? '?'}/${details?.maxIterations ?? '?'})`;
+        case 'TOOL_CALL':
+          return toolName ? `Running ${toolName}…` : 'Running tool…';
+        case 'TOOL_RESULT':
+          return toolName ? `Finished ${toolName}` : 'Finished tool call';
+        case 'COMPLETE': return 'Subtask complete';
+        default: return evt;
+      }
+    }
+
+    // Client (validation) activity
+    if (phase === 'CLIENT') {
+      switch (evt) {
+        case 'TASK_ANALYSIS': return 'Analyzing task…';
+        case 'COHERENCE_CHECK': return 'Checking coherence…';
+        case 'VALIDATION_RESULT': return 'Validation complete';
+        default: return evt;
+      }
+    }
+
+    return evt;
+  }
+
+  /**
+   * Get the latest live status string for this session.
+   * Polled via `GET /api/session/:sessionId/status` while a `POST /api/chat`
+   * turn is in flight. Returns 'Idle' before any event has been logged.
+   */
+  getCurrentStatus(): string {
+    return this.currentStatus;
   }
 
   /**

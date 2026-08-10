@@ -9,10 +9,17 @@ import type { WorkspaceManager } from './workspace.js';
 import type { ConversationManager } from './conversation-manager.js';
 import type { Message } from '../models/base.js';
 import type { TokenUsageSnapshot } from '../models/token-tracker.js';
+import type { ToolCallRecord } from './worker-agent.js';
 
 export interface AgentChatResponse {
   content: string;
   toolsUsed: string[];
+  /**
+   * Parallel to `toolsUsed`: each tool call's name AND arguments.
+   * Present only for DualAgent (Chat-mode) responses; `undefined` for CodeAgent
+   * (code-mode) sessions, so it is omitted from JSON in that case.
+   */
+  toolCalls?: ToolCallRecord[];
   iterations: number;
   /**
    * Present only in DualAgent responses (contains the plan produced by the manager).

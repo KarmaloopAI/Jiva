@@ -85,10 +85,18 @@ export interface ToolFailure {
   attempts: number;
 }
 
+/** A single tool invocation with its name and arguments (parallel to `toolsUsed`). */
+export interface ToolCallRecord {
+  name: string;
+  args: Record<string, any>;
+}
+
 export interface WorkerResult {
   success: boolean;
   result: string;
   toolsUsed: string[];
+  /** Parallel to `toolsUsed`: each entry records the tool name AND its arguments. */
+  toolCalls: ToolCallRecord[];
   failedTools: ToolFailure[];
   reasoning: string;
 }
@@ -153,6 +161,9 @@ export class WorkerAgent {
 
     const conversationHistory: Message[] = [];
     const toolsUsed: string[] = [];
+    // Parallel to `toolsUsed`: records each tool call's name AND arguments so
+    // callers can surface *what* a tool ran, not just that it ran.
+    const toolCalls: ToolCallRecord[] = [];
     // Tracks consecutive failures per (toolName:args) signature.
     // Drives the per-tool circuit breaker: warn at 2, hard-stop at 3.
     const toolFailureCounts = new Map<string, { count: number; lastError: string }>();
@@ -458,6 +469,7 @@ Please complete this subtask and report your findings.`,
             try {
               const repResult = await this.mcpManager.getClient().executeTool(repairedName, repairedArgs);
               toolsUsed.push(repairedName);
+              toolCalls.push({ name: repairedName, args: repairedArgs });
               const repText = typeof repResult === 'string' ? repResult : JSON.stringify(repResult);
               conversationHistory.push({ role: 'assistant', content: '' });
               conversationHistory.push({
@@ -715,6 +727,7 @@ Please complete this subtask and report your findings.`,
               });
 
               toolsUsed.push(toolName);
+              toolCalls.push({ name: toolName, args });
 
               const resultText = `Sub-agent spawned with persona '${spawnResult.persona}' completed the task.
 
@@ -748,6 +761,7 @@ Tools used: ${spawnResult.toolsUsed.join(', ')}`;
             const result = await this.mcpManager.getClient().executeTool(toolName, args);
 
             toolsUsed.push(toolName);
+            toolCalls.push({ name: toolName, args });
 
             // Check if tool returned images (multimodal support)
             let toolResultText: string;
@@ -1004,6 +1018,7 @@ Tools used: ${spawnResult.toolsUsed.join(', ')}`;
       success,
       result: finalResult,
       toolsUsed,
+      toolCalls,
       failedTools,
       reasoning: reasoning || 'Task executed',
     };

@@ -342,17 +342,16 @@ Keep the summary focused and complete — include file paths, function names, an
       const response = await orchestrator.chat({
         messages: [{ role: 'user', content: titlePrompt }],
         temperature: 0.1, // Low temperature for deterministic title generation
-        // Reasoning models (e.g. GLM-5.2) spend tokens on a thinking chain
-        // before emitting the title; 20 tokens was barely enough for the
-        // thinking alone, leaving nothing for the actual title.
-        maxTokens: 200,
-        reasoningEffort: 'low', // Minimize thinking for this simple task
+        // Reasoning models can exhaust max_tokens on thinking, returning empty
+        // content. disableThinking (GLM/Qwen3) + reasoningEffort:'low' (gpt-oss,
+        // Sarvam) prevent this; max_tokens is left unset so each model uses its
+        // configured defaultMaxTokens.
+        reasoningEffort: 'low',
+        disableThinking: true,
       });
 
-      // Clean up the title. Reasoning models (e.g. GLM-5.2, DeepSeek) emit
-      // inline thinking blocks; stripThinkingContent() removes those, then
-      // take the last non-empty line (the model sometimes emits preamble
-      // before the actual title).
+      // Clean up the title: strip inline thinking blocks (GLM-5.2, DeepSeek),
+      // then take the last non-empty line (models sometimes emit preamble first).
       let title = this.stripThinkingContent(response.content).trim();
       const lines = title.split('\n').map(l => l.trim()).filter(Boolean);
       title = lines.length > 0 ? lines[lines.length - 1] : '';

@@ -24,12 +24,20 @@ export class PersonaManager {
   private configManager: ConfigManager;
   private storageProvider: StorageProvider | null = null; // Per-tenant storage for cloud mode
   private ephemeral: boolean; // If true, don't persist persona to config (for sub-agents)
+  /** Extra directories (besides ~/.claude/skills) to scan for standalone skills. */
+  private additionalSkillsDirs: string[] = [];
 
-  constructor(additionalPaths: string[] = [], ephemeral: boolean = false, storageProvider?: StorageProvider) {
+  constructor(
+    additionalPaths: string[] = [],
+    ephemeral: boolean = false,
+    storageProvider?: StorageProvider,
+    additionalSkillsDirs: string[] = [],
+  ) {
     this.additionalSearchPaths = additionalPaths;
     this.configManager = ConfigManager.getInstance();
     this.storageProvider = storageProvider || null;
     this.ephemeral = ephemeral;
+    this.additionalSkillsDirs = additionalSkillsDirs;
   }
 
   /**
@@ -71,20 +79,38 @@ export class PersonaManager {
   }
 
   /**
-   * Discover skills installed in ~/.claude/skills/ (Claude-compatible standalone skills).
-   * Non-fatal: silently skips if the directory does not exist.
+   * Discover skills installed in ~/.claude/skills/ (Claude-compatible standalone skills)
+   * plus any per-session `additionalSkillsDirs` (e.g. a session-scoped
+   * `<workspaceDir>/skills` folder). Each directory is scanned independently and
+   * is non-fatal — a missing per-session skills folder just contributes nothing.
+   * Results are merged; duplicate skill names from later directories are skipped.
    */
   async initializeStandaloneSkills(): Promise<void> {
-    try {
-      const skillsDir = this.getClaudeSkillsDir();
-      this.standaloneSkills = await discoverSkills(skillsDir, '__standalone__');
-      if (this.standaloneSkills.length > 0) {
-        logger.info(`Found ${this.standaloneSkills.length} standalone skill(s) in ${skillsDir}`);
+    const allSkills: Skill[] = [];
+    const seenNames = new Set<string>();
+
+    // Always scan ~/.claude/skills first (the canonical standalone location).
+    const dirs = [this.getClaudeSkillsDir(), ...this.additionalSkillsDirs];
+
+    for (const skillsDir of dirs) {
+      try {
+        const found = await discoverSkills(skillsDir, '__standalone__');
+        for (const skill of found) {
+          if (!seenNames.has(skill.metadata.name)) {
+            seenNames.add(skill.metadata.name);
+            allSkills.push(skill);
+          }
+        }
+        if (found.length > 0) {
+          logger.info(`Found ${found.length} standalone skill(s) in ${skillsDir}`);
+        }
+      } catch {
+        // Directory likely doesn't exist — not an error. Per-session skills
+        // folders are optional; silently skip and continue with the rest.
       }
-    } catch {
-      // Directory likely doesn't exist — not an error
-      this.standaloneSkills = [];
     }
+
+    this.standaloneSkills = allSkills;
   }
 
   /** All standalone skills discovered from ~/.claude/skills/. */
