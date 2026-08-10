@@ -287,6 +287,11 @@ export class ConfigManager {
     this.store.set('codeMode', { ...current, enabled });
   }
 
+  setCompactionThreshold(threshold: number) {
+    const current = this.store.get('codeMode') || {};
+    this.store.set('codeMode', { ...current, compactionThreshold: threshold });
+  }
+
   reset() {
     this.store.clear();
   }
