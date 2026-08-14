@@ -55,6 +55,12 @@ Output is truncated at ${MAX_OUTPUT_LINES} lines / ${MAX_OUTPUT_BYTES / 1024}KB.
         timeout,
         maxBuffer: 10 * 1024 * 1024, // 10MB raw buffer; we truncate before returning
         env: { ...process.env },
+        // Without this, every command spawns a visible console window on
+        // Windows (Node's child_process default) that flashes on screen for
+        // the command's duration — disruptive during a Code mode session
+        // that may run dozens of commands per task. windowsHide suppresses
+        // the window entirely; it's a no-op on macOS/Linux.
+        windowsHide: true,
         ...(isWindows && { shell: 'powershell.exe' }),
       }, (error, stdout, stderr) => {
         const output: string[] = [];
