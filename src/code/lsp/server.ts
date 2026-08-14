@@ -66,6 +66,10 @@ export function spawnLspServer(serverId: string): LspServerHandle | undefined {
     const proc = spawn(binary, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env },
+      // Same reasoning as the bash tool: without this, Node spawns a
+      // visible console window on Windows for the life of the LSP server
+      // process. No-op on macOS/Linux.
+      windowsHide: true,
     });
 
     // Swallow stderr to avoid polluting Jiva's output
