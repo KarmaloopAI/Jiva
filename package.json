@@ -6,6 +6,12 @@
   "bin": {
     "jiva": "dist/interfaces/cli/index.js"
   },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
   "type": "module",
   "scripts": {
     "test": "tsx --test src/**/*.test.ts",

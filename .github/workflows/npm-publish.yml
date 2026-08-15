@@ -3,12 +3,16 @@ name: Build and Publish to npm
 on:
   release:
     types: [published]
+  push:
+    branches:
+      - develop
 
 jobs:
   build-and-publish:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      id-token: write  # Required for OIDC trusted publishing
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -25,7 +29,18 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Publish to npm
+      - name: Set dev version (develop branch only)
+        if: github.event_name == 'push'
+        run: |
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          DEV_VERSION="${CURRENT_VERSION}-dev.${SHORT_SHA}"
+          npm version "$DEV_VERSION" --no-git-tag-version
+
+      - name: Publish to npm (latest)
+        if: github.event_name == 'release'
         run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish to npm (dev)
+        if: github.event_name == 'push'
+        run: npm publish --access public --tag dev
