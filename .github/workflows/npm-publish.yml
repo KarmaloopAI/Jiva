@@ -22,6 +22,9 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Upgrade npm for OIDC support
+        run: npm install -g npm@latest
+
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
@@ -38,8 +41,8 @@ jobs:
 
       - name: Publish to npm (latest)
         if: github.event_name == 'release'
-        run: npm publish --access public
+        run: npm publish --access public --provenance
 
       - name: Publish to npm (dev)
         if: github.event_name == 'push'
-        run: npm publish --access public --tag dev
+        run: npm publish --access public --tag dev --provenance
