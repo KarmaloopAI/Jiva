@@ -142,7 +142,7 @@ args: ['-y', '@modelcontextprotocol/server-filesystem', allowedPath]
 // Broad access to all user directories
 ```
 
-**Note:** The MCP filesystem server specifically rejects "/" as a security measure. See [FILESYSTEM_SERVER_ROOT_FIX.md](FILESYSTEM_SERVER_ROOT_FIX.md) for details.
+**Note:** The MCP filesystem server specifically rejects "/" as a security measure.
 
 ### System Prompt Updates
 
@@ -242,4 +242,4 @@ Jiva: ✅ Creates backup in different directory
 
 **Jiva now has broad access to help you across all your user directories, while system directories remain protected!** 🎉
 
-For details on why "/" isn't used, see [FILESYSTEM_SERVER_ROOT_FIX.md](FILESYSTEM_SERVER_ROOT_FIX.md).
+The filesystem server rejects "/" as a root, so a workspace directory is used instead.

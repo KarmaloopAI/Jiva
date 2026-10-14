@@ -256,7 +256,7 @@ npx jiva setup
 npx jiva chat
 ```
 
-Or add npm global bin to PATH (see [BUILD.md](BUILD.md#4-add-npm-global-bin-to-path-if-needed)).
+Or add npm global bin to PATH (see [BUILD.md](../developer-guides/BUILD.md#4-add-npm-global-bin-to-path-if-needed)).
 
 ---
 

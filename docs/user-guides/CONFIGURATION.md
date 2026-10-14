@@ -535,7 +535,7 @@ The custom config file uses the same format as the default configuration:
 }
 ```
 
-See [examples/jiva-config.example.json](../examples/jiva-config.example.json) for a complete template.
+See [examples/jiva-config.example.json](../../examples/jiva-config.example.json) for a complete template.
 
 ### Use Cases for Custom Config Files
 
@@ -656,7 +656,7 @@ go install golang.org/x/tools/gopls@latest
 rustup component add rust-analyzer
 ```
 
-For the full reference see [Code Mode Architecture](../architecture/CODE_MODE.md).
+For the full reference see [Code Mode Architecture](../reference/CODE_MODE.md).
 
 ---
 
@@ -731,7 +731,7 @@ If you're stuck:
 
 ## Related Documentation
 
-- [Quick Start Guide](QUICKSTART.md)
+- [Quick Start Guide](../getting-started/QUICK_START.md)
 - [Troubleshooting](TROUBLESHOOTING.md)
 - [MCP Servers](https://github.com/modelcontextprotocol/servers)
-- [Programmatic Usage](../examples/programmatic-usage.ts)
+- [Programmatic Usage](../../examples/programmatic-usage.ts)

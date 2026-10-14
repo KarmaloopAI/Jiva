@@ -159,11 +159,10 @@ npx jiva setup
 
 ## 📚 Documentation Files
 
-- **[TESTING.md](TESTING.md)** - Comprehensive testing guide
 - **[BUILD.md](BUILD.md)** - Full build instructions
-- **[QUICKSTART.md](QUICKSTART.md)** - Quick start guide
-- **[README.md](README.md)** - Main documentation
-- **[IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md)** - Technical details
+- **[QUICK_START.md](../getting-started/QUICK_START.md)** - Quick start guide
+- **[Documentation index](../README.md)** - Main documentation
+- **[ARCHITECTURE.md](../reference/ARCHITECTURE.md)** - Technical details
 
 ---
 

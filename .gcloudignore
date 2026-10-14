@@ -6,9 +6,9 @@ node_modules/
 
 # Development and docs
 docs/
-examples/
 *.md
 !README.md
+!examples/personas/
 
 # Git
 .git/

@@ -349,8 +349,10 @@ export class SessionManager extends EventEmitter {
         : new WorkspaceManager(storageProvider);
       await workspace.initialize();
 
-      // Initialize conversation manager
-      const conversationManager = new ConversationManager(storageProvider);
+      // Initialize conversation manager with sessionId as default conversation ID
+      // This ensures conversations are saved with the session ID, allowing them to be
+      // loaded correctly when the session is restored
+      const conversationManager = new ConversationManager(storageProvider, undefined, sessionId);
 
       // Initialize persona manager with per-tenant storage provider
       // This ensures persona config is isolated per tenant, not shared globally.

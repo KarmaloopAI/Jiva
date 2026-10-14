@@ -22,10 +22,12 @@ import type { ConversationMetadata, CodeConversationMeta } from '../storage/type
 export class ConversationManager {
   private storageProvider: StorageProvider;
   private currentConversationId: string | null = null;
+  private defaultConversationId: string | null = null;
 
-  constructor(storageProvider: StorageProvider, orchestrator?: ModelOrchestrator) {
+  constructor(storageProvider: StorageProvider, orchestrator?: ModelOrchestrator, defaultConversationId?: string) {
     this.storageProvider = storageProvider;
     this.orchestrator = orchestrator;
+    this.defaultConversationId = defaultConversationId || null;
   }
 
   private orchestrator?: ModelOrchestrator;
@@ -49,14 +51,20 @@ export class ConversationManager {
     tokenUsage?: { promptTokens: number; completionTokens: number; totalTokens: number },
     codeMeta?: CodeConversationMeta
   ): Promise<string> {
-    const finalId = conversationId || this.currentConversationId || this.generateConversationId();
+    const finalId = conversationId || this.currentConversationId || this.defaultConversationId || this.generateConversationId();
 
     // Use provided orchestrator or fallback to constructor orchestrator
     const modelOrchestrator = orchestrator || this.orchestrator;
 
     // Load existing conversation if updating
     let existingData: SavedConversation | null = null;
-    if (this.currentConversationId && finalId === this.currentConversationId) {
+    // The default ID counts too: after a session restore the stored conversation
+    // already exists under it, and skipping the load would reset its title,
+    // created timestamp and token totals on the first save.
+    if (
+      finalId === this.currentConversationId ||
+      (this.defaultConversationId !== null && finalId === this.defaultConversationId)
+    ) {
       try {
         existingData = await this.storageProvider.loadConversation(finalId);
       } catch (error) {
@@ -436,5 +444,11 @@ Keep the summary focused and complete — include file paths, function names, an
    */
   setCurrentConversationId(id: string | null | undefined): void {
     this.currentConversationId = id || null;
+    // Explicitly clearing the current conversation means "start a new one" —
+    // the default (session) ID must not silently take over and overwrite the
+    // previous conversation.
+    if (!id) {
+      this.defaultConversationId = null;
+    }
   }
 }

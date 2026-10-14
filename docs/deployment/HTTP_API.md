@@ -291,7 +291,7 @@ gs://<JIVA_GCP_BUCKET>/
 }
 ```
 
-See [`docs/guides/CONFIGURATION.md`](../guides/CONFIGURATION.md) for the full configuration schema and [`docs/deployment/CLOUD_RUN_DEPLOYMENT.md`](./CLOUD_RUN_DEPLOYMENT.md) for Cloud Run setup.
+See [`docs/guides/CONFIGURATION.md`](../user-guides/CONFIGURATION.md) for the full configuration schema and [`docs/deployment/CLOUD_RUN_DEPLOYMENT.md`](./CLOUD_RUN_DEPLOYMENT.md) for Cloud Run setup.
 
 ---
 

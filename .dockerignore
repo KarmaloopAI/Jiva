@@ -29,7 +29,6 @@ yarn-error.log*
 *.md
 !README.md
 docs/
-examples/
 
 # Tests
 test/

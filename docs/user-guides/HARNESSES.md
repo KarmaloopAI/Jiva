@@ -278,4 +278,4 @@ The harness system is designed for extensibility:
 The harness feature provides powerful task validation capabilities that enhance Jiva's reliability for critical workflows. By combining autonomous evaluation with targeted guidance, it ensures tasks are completed according to specifications while providing transparency into the validation process.
 
 For more information on related topics, see:
-- [Agentic Pipeline Playbook](./agentic-pipeline-playbook.md)
+- [Agentic Pipeline Playbook](../reference/AGENTIC_PIPELINE.md)

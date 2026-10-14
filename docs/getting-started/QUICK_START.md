@@ -265,8 +265,8 @@ Start using Jiva and enjoy:
 
 ## Learn More
 
-- Full documentation: [NEW_FEATURES.md](./NEW_FEATURES.md)
-- Summary: [IMPROVEMENTS_SUMMARY.md](./IMPROVEMENTS_SUMMARY.md)
+- Documentation index: [docs/README.md](../README.md)
+- Configuration: [Configuration Guide](../user-guides/CONFIGURATION.md)
 - Help: Type `help` in Jiva chat
 
 ---
