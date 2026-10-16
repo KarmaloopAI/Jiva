@@ -1,4 +1,6 @@
+import path from 'path';
 import type { LspManager } from '../lsp/manager.js';
+import type { ToolAccess } from '../../core/tool-scheduler.js';
 
 export interface CodeToolContext {
   workspaceDir: string;
@@ -22,6 +24,18 @@ export interface ICodeTool {
     required?: string[];
   };
   execute(args: Record<string, unknown>, ctx: CodeToolContext): Promise<string>;
+  /**
+   * What this call touches, used by the tool scheduler to decide which calls
+   * in one model turn may run concurrently. Omitted ⇒ exclusive (runs alone).
+   * See src/core/tool-scheduler.ts.
+   */
+  access?(args: Record<string, unknown>, ctx: { workspaceDir: string }): ToolAccess;
+}
+
+/** Resolve a tool's path argument the same way the tools themselves do. */
+export function resolveToolPath(raw: unknown, workspaceDir: string): string | undefined {
+  if (typeof raw !== 'string' || !raw) return undefined;
+  return path.isAbsolute(raw) ? path.normalize(raw) : path.resolve(workspaceDir, raw);
 }
 
 // Re-export all tools

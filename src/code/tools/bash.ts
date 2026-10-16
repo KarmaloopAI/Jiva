@@ -1,5 +1,7 @@
 import { exec } from 'child_process';
 import type { ICodeTool, CodeToolContext } from './index.js';
+import { EXCLUSIVE, READS_ALL } from '../../core/tool-scheduler.js';
+import { isReadOnlyCommand } from './bash-readonly.js';
 
 const DEFAULT_TIMEOUT = 30_000; // 30s
 const MAX_TIMEOUT = 300_000; // 5 min
@@ -26,6 +28,8 @@ Use for:
 - Installing dependencies
 
 Returns: stdout + stderr combined, plus exit code.
+Independent read-only commands (e.g. "git status" and "git diff") can be issued as separate calls in the same response — they run in parallel. Chain dependent commands in one call with &&.
+
 Commands timeout after ${DEFAULT_TIMEOUT / 1000}s by default (configurable up to ${MAX_TIMEOUT / 1000}s).
 Output is truncated at ${MAX_OUTPUT_LINES} lines / ${MAX_OUTPUT_BYTES / 1024}KB.`,
 
@@ -43,6 +47,10 @@ Output is truncated at ${MAX_OUTPUT_LINES} lines / ${MAX_OUTPUT_BYTES / 1024}KB.
     },
     required: ['command'],
   },
+
+  // Read-only commands (conservative allowlist) may run alongside other reads;
+  // anything else runs alone.
+  access: (args) => (isReadOnlyCommand(args.command) ? READS_ALL : EXCLUSIVE),
 
   async execute(args, ctx: CodeToolContext): Promise<string> {
     const command = args.command as string;

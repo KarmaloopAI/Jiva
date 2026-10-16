@@ -18,6 +18,13 @@ import { Message, MessageContent, ModelResponse, Tool } from '../models/base.js'
 import { formatToolResult, ensureToolResultPairing } from '../models/harmony.js';
 import { logger, formatToolCallArgs } from '../utils/logger.js';
 import { OrchestrationLogger, orchestrationLogger } from '../utils/orchestration-logger.js';
+import {
+  runToolBatch,
+  resolveToolExecutionSettings,
+  accessFromAnnotations,
+  EXCLUSIVE,
+  type ScheduledCall,
+} from './tool-scheduler.js';
 
 /** Max consecutive empty responses before breaking out */
 const MAX_EMPTY_RESPONSES = 4;
@@ -101,6 +108,14 @@ export interface WorkerResult {
   reasoning: string;
 }
 
+/** Result of one Worker tool call (MCP tool or spawn_agent). */
+interface WorkerToolOutput {
+  text: string;
+  images?: ToolResultWithImages['images'];
+  /** The call previewed a file edit with dryRun:true — nothing was written. */
+  isDryRun: boolean;
+}
+
 export class WorkerAgent {
   private orchestrator: ModelOrchestrator;
   private mcpManager: MCPServerManager;
@@ -110,6 +125,7 @@ export class WorkerAgent {
   private maxIterations: number;
   private contextMemory: WorkerContextMemory;
   private readonly orchLogger: OrchestrationLogger;
+  private toolExecution: { parallel: boolean; maxConcurrency: number };
 
   constructor(
     orchestrator: ModelOrchestrator,
@@ -118,7 +134,9 @@ export class WorkerAgent {
     maxIterations: number = 20,
     personaManager?: PersonaManager,
     orchLogger?: OrchestrationLogger,
+    toolExecution?: import('./tool-scheduler.js').ToolExecutionSettingsInput,
   ) {
+    this.toolExecution = resolveToolExecutionSettings(toolExecution);
     this.orchestrator = orchestrator;
     this.mcpManager = mcpManager;
     this.workspace = workspace;
@@ -149,6 +167,57 @@ export class WorkerAgent {
   /**
    * Execute a subtask assigned by Manager
    */
+  /**
+   * Execute one Worker tool call. Throws on failure (the scheduler records the
+   * error on the call's outcome; the post-pass applies the circuit breaker).
+   */
+  private async runWorkerTool(toolName: string, args: Record<string, any>): Promise<WorkerToolOutput> {
+    if (toolName === 'spawn_agent') {
+      if (!this.agentSpawner) {
+        throw new Error('Agent spawning is not enabled');
+      }
+      logger.info(`  [Worker] Spawning sub-agent with persona: ${args.persona}`);
+      const spawnResult = await this.agentSpawner.spawnAgent({
+        persona: args.persona,
+        task: args.task,
+        context: args.context,
+        maxIterations: args.maxIterations,
+      });
+      return {
+        text: `Sub-agent spawned with persona '${spawnResult.persona}' completed the task.
+
+RESULT:
+${spawnResult.result}
+
+Iterations: ${spawnResult.iterations}
+Tools used: ${spawnResult.toolsUsed.join(', ')}`,
+        isDryRun: false,
+      };
+    }
+
+    // Catch dry-run file edits. Some MCP filesystem tools (e.g.
+    // filesystem__edit_file) accept `dryRun: true`, which previews the edit
+    // without writing it. Models occasionally use this as a "safety check" and
+    // then forget the real call. We let the dry-run through so the model sees
+    // the preview; the post-pass then reminds it the file was NOT modified.
+    const isDryRun =
+      args.dryRun === true &&
+      (toolName.includes('edit_file') || toolName.includes('write_file') || toolName.includes('create_file'));
+
+    const result = await this.mcpManager.getClient().executeTool(toolName, args);
+
+    // Tools may return images (multimodal support)
+    if (typeof result === 'object' && result !== null && 'images' in result) {
+      const typedResult = result as ToolResultWithImages;
+      return {
+        text: typedResult.text || '[Image content returned]',
+        images: typedResult.images && typedResult.images.length > 0 ? typedResult.images : undefined,
+        isDryRun,
+      };
+    }
+    return { text: typeof result === 'string' ? result : JSON.stringify(result), isDryRun };
+  }
+
   async executeSubtask(subtask: WorkerSubtask, agentContext?: AgentContext): Promise<WorkerResult> {
     logger.info(`[Worker] Starting: "${subtask.instruction}"`);
     this.orchLogger.logWorkerStart(subtask.instruction, subtask.context || '');
@@ -234,6 +303,7 @@ PERSISTENCE — READ CAREFULLY:
 
 CRITICAL - Avoid Repetitive Actions:
 - NEVER call the same tool with the same arguments more than once
+- You can call multiple tools in one response. When calls are independent (reading several files, listing several directories, several searches), issue them together in a single response — read-only tools run in parallel. When one call needs another's result, call them sequentially.
 - If a tool succeeds, move on to the next step - do NOT repeat it
 - For browser tasks: open tab ONCE, then navigate ONCE to the URL
 - If you've already created/opened something, don't create/open it again
@@ -673,26 +743,30 @@ Please complete this subtask and report your findings.`,
       if (response.toolCalls && response.toolCalls.length > 0) {
         logger.info(`  [Worker] Using ${response.toolCalls.length} tool(s)`);
 
-        // Indexed, not for...of — response.toolCalls can hold several calls
-        // issued together as one parallel group, and the doom-loop check
-        // below needs to know which of them are still unanswered when it
-        // decides to bail out early, so every one can still get a stub tool
-        // result before the loop stops. Without this, a provider that
-        // validates parallel tool-calling strictly rejects the *next*
-        // request outright with "incomplete parallel tool-call group: tool
-        // call 'X' has no tool response" the moment any tool_call_id from
-        // this turn is missing its matching tool message — the same bug
-        // (and fix) as CodeAgent's tool loop, see src/code/agent.ts.
-        for (let toolCallIndex = 0; toolCallIndex < response.toolCalls.length; toolCallIndex++) {
-          const toolCall = response.toolCalls[toolCallIndex];
+        // Three phases (see src/core/tool-scheduler.ts):
+        //   1. Pre-pass, in call order: parse args + doom-loop window → cutoff.
+        //   2. Execute surviving calls with the scheduler — read-only MCP tools
+        //      (annotations.readOnlyHint) run concurrently, everything else alone.
+        //   3. Post-pass, in call order: tool results, stubs for skipped calls,
+        //      THEN one user note (dry-run reminders, circuit-breaker warnings,
+        //      doom-loop STOP). Notes must never sit between tool results: a
+        //      provider validating parallel tool-calling rejects the next request
+        //      when a tool_call_id is unanswered, and ensureToolResultPairing
+        //      treats a mid-group user message as the end of the group.
+        const turnCalls = response.toolCalls;
+        const scheduled: ScheduledCall<WorkerToolOutput>[] = [];
+        const callArgs = new Map<string, Record<string, any>>();
+        let cutoff = turnCalls.length;
+        const notes: string[] = [];
+        const accessByName = new Map(tools.map((t) => [t.name, t.annotations]));
+
+        for (let toolCallIndex = 0; toolCallIndex < turnCalls.length; toolCallIndex++) {
+          const toolCall = turnCalls[toolCallIndex];
           const toolName = toolCall.function.name;
 
-          // Parse args outside the try block so the catch block can reference
-          // them for the failure signature (circuit breaker key).
           let args: Record<string, any> = {};
           try { args = JSON.parse(toolCall.function.arguments); } catch { /* use empty */ }
           logger.info(`  [Worker] Tool: ${toolName} ${formatToolCallArgs(args)}`);
-          const failureSig = `${toolName}:${JSON.stringify(args)}`;
 
           // Sliding-window doom-loop: only triggers on CONSECUTIVE identical calls
           const callSig = `${toolName}:${JSON.stringify(args)}`;
@@ -703,136 +777,91 @@ Please complete this subtask and report your findings.`,
             recentCalls.every((c) => c === recentCalls[0])
           ) {
             logger.warn(`  [Worker] Doom loop detected for tool: ${toolName} — same call ${DOOM_LOOP_THRESHOLD} times in a row`);
-            for (const skipped of response.toolCalls.slice(toolCallIndex)) {
-              conversationHistory.push(formatToolResult(skipped.id, skipped.function.name, 'Skipped — doom loop detected, see the instruction that follows.'));
-            }
-            conversationHistory.push({
-              role: 'user',
-              content: `STOP: You are calling \`${toolName}\` with the same arguments ${DOOM_LOOP_THRESHOLD} times in a row. This is not making progress. Try a different approach, different arguments, or a different tool to achieve the same goal.`,
-            });
+            cutoff = toolCallIndex;
+            notes.push(`STOP: You are calling \`${toolName}\` with the same arguments ${DOOM_LOOP_THRESHOLD} times in a row. This is not making progress. Try a different approach, different arguments, or a different tool to achieve the same goal.`);
             break;
           }
 
-          try {
-            this.orchLogger.logWorkerToolCall(toolName, args);
+          this.orchLogger.logWorkerToolCall(toolName, args);
+          callArgs.set(toolCall.id, args);
+          scheduled.push({
+            index: toolCallIndex,
+            id: toolCall.id,
+            name: toolName,
+            // spawn_agent runs a whole nested agent → always alone.
+            access: toolName === 'spawn_agent' ? EXCLUSIVE : accessFromAnnotations(accessByName.get(toolName)),
+            run: () => this.runWorkerTool(toolName, args),
+          });
+        }
 
-            // Handle spawn_agent specially
-            if (toolName === 'spawn_agent') {
-              if (!this.agentSpawner) {
-                throw new Error('Agent spawning is not enabled');
-              }
+        const batch = await runToolBatch(scheduled, this.toolExecution);
 
-              logger.info(`  [Worker] Spawning sub-agent with persona: ${args.persona}`);
-              const spawnResult = await this.agentSpawner.spawnAgent({
-                persona: args.persona,
-                task: args.task,
-                context: args.context,
-                maxIterations: args.maxIterations,
-              });
+        for (const outcome of batch.outcomes) {
+          const toolName = outcome.call.name;
+          const args = callArgs.get(outcome.call.id) ?? {};
+          const failureSig = `${toolName}:${JSON.stringify(args)}`;
 
-              toolsUsed.push(toolName);
-              toolCalls.push({ name: toolName, args });
-
-              const resultText = `Sub-agent spawned with persona '${spawnResult.persona}' completed the task.
-
-RESULT:
-${spawnResult.result}
-
-Iterations: ${spawnResult.iterations}
-Tools used: ${spawnResult.toolsUsed.join(', ')}`;
-
-              this.orchLogger.logWorkerToolResult(toolName, true, false);
-
-              const toolMessage = formatToolResult(toolCall.id, toolName, resultText);
-              conversationHistory.push(toolMessage);
-
-              logger.success(`  ✓ [Worker] Sub-agent completed task`);
-              continue;
-            }
-
-            // Catch dry-run file edits before they execute.
-            // Some MCP filesystem tools (e.g. filesystem__edit_file) accept a
-            // `dryRun: true` flag that previews the edit without writing it.
-            // Models occasionally use this as a "safety check" and then forget
-            // to make the real call, leaving files unchanged.
-            // We let the dry-run through so the model sees the preview, then
-            // immediately remind it that the file was NOT actually modified.
-            const isDryRun =
-              args.dryRun === true &&
-              (toolName.includes('edit_file') || toolName.includes('write_file') || toolName.includes('create_file'));
-
-            // Regular MCP tool execution
-            const result = await this.mcpManager.getClient().executeTool(toolName, args);
-
+          if (outcome.result) {
+            const out = outcome.result;
             toolsUsed.push(toolName);
             toolCalls.push({ name: toolName, args });
-
-            // Check if tool returned images (multimodal support)
-            let toolResultText: string;
-            let hasImages = false;
-            if (typeof result === 'object' && result !== null && 'images' in result) {
-              const typedResult = result as ToolResultWithImages;
-              toolResultText = typedResult.text || '[Image content returned]';
-
-              if (typedResult.images && typedResult.images.length > 0) {
-                hasImages = true;
-                logger.info(`  [Worker] Tool returned ${typedResult.images.length} image(s), will attach to next model call`);
-                pendingImages.push(...typedResult.images);
-              }
-            } else {
-              toolResultText = typeof result === 'string' ? result : JSON.stringify(result);
+            if (out.images && out.images.length > 0) {
+              logger.info(`  [Worker] Tool returned ${out.images.length} image(s), will attach to next model call`);
+              pendingImages.push(...out.images);
             }
+            this.orchLogger.logWorkerToolResult(toolName, true, !!out.images?.length);
+            conversationHistory.push(formatToolResult(outcome.call.id, toolName, out.text));
 
-            this.orchLogger.logWorkerToolResult(toolName, true, hasImages);
-
-            const toolMessage = formatToolResult(toolCall.id, toolName, toolResultText);
-            conversationHistory.push(toolMessage);
+            if (toolName === 'spawn_agent') {
+              logger.success(`  ✓ [Worker] Sub-agent completed task`);
+            } else {
+              logger.debug(`  ✓ [Worker] Tool ${toolName} completed`);
+            }
 
             // If the model used dryRun=true the file was NOT modified.
-            // Inject a reminder so the model makes the real call next.
-            if (isDryRun) {
+            // Remind it to make the real call next.
+            if (out.isDryRun) {
               logger.warn(`  [Worker] ${toolName} executed with dryRun=true — file NOT modified; injecting reminder`);
-              conversationHistory.push({
-                role: 'user',
-                content: `Note: You called \`${toolName}\` with \`dryRun: true\`. This was a preview only — the file was NOT actually modified. You MUST call \`${toolName}\` again WITHOUT \`dryRun: true\` to actually apply the change.`,
-              });
+              notes.push(`Note: You called \`${toolName}\` with \`dryRun: true\`. This was a preview only — the file was NOT actually modified. You MUST call \`${toolName}\` again WITHOUT \`dryRun: true\` to actually apply the change.`);
             }
-
-            logger.debug(`  ✓ [Worker] Tool ${toolName} completed`);
-          } catch (error) {
-            const errorMsg = error instanceof Error ? error.message : String(error);
-            logger.error(`  ✗ [Worker] Tool ${toolName} failed:`, error);
-            this.orchLogger.logWorkerToolResult(toolName, false, false);
-
-            // Always push the raw tool error so the LLM sees what happened
-            conversationHistory.push({
-              role: 'tool',
-              name: toolName,
-              tool_call_id: toolCall.id,
-              content: `Error: ${errorMsg}`,
-            });
-
-            // Per-tool circuit breaker: track failure count by exact (tool, args) signature
-            const prev = toolFailureCounts.get(failureSig) || { count: 0, lastError: '' };
-            const newCount = prev.count + 1;
-            toolFailureCounts.set(failureSig, { count: newCount, lastError: errorMsg });
-
-            if (newCount === 2) {
-              // Second failure: explicit warning to the LLM to change approach
-              conversationHistory.push({
-                role: 'user',
-                content: `WARNING: Tool \`${toolName}\` has now failed twice with the same arguments.\nError: ${errorMsg}\n\nDo NOT call this tool with the same arguments again. Try a different approach, different arguments, or a completely different tool to achieve the same goal.`,
-              });
-              logger.warn(`  [Worker] Tool ${toolName} has failed twice — warning injected`);
-            } else if (newCount >= 3) {
-              // Third failure: hard stop — block the tool and force honest exit
-              conversationHistory.push({
-                role: 'user',
-                content: `HARD STOP: Tool \`${toolName}\` has failed ${newCount} times and will NOT succeed with these arguments.\nFinal error: ${errorMsg}\n\nYou MUST stop attempting this tool. Respond now with an honest report of what you tried and why it failed. Do not call any more tools — just describe the failure clearly so the user can be informed.`,
-              });
-              logger.warn(`  [Worker] Tool ${toolName} circuit breaker triggered after ${newCount} failures`);
-            }
+            continue;
           }
+
+          const errorMsg = outcome.skipped
+            ? 'Skipped — the task was stopped before this call ran.'
+            : outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
+          logger.error(`  ✗ [Worker] Tool ${toolName} failed:`, outcome.error);
+          this.orchLogger.logWorkerToolResult(toolName, false, false);
+
+          // Always push the raw tool error so the LLM sees what happened
+          conversationHistory.push({
+            role: 'tool',
+            name: toolName,
+            tool_call_id: outcome.call.id,
+            content: `Error: ${errorMsg}`,
+          });
+
+          // Per-tool circuit breaker: track failure count by exact (tool, args) signature
+          const prev = toolFailureCounts.get(failureSig) || { count: 0, lastError: '' };
+          const newCount = prev.count + 1;
+          toolFailureCounts.set(failureSig, { count: newCount, lastError: errorMsg });
+
+          if (newCount === 2) {
+            // Second failure: explicit warning to the LLM to change approach
+            notes.push(`WARNING: Tool \`${toolName}\` has now failed twice with the same arguments.\nError: ${errorMsg}\n\nDo NOT call this tool with the same arguments again. Try a different approach, different arguments, or a completely different tool to achieve the same goal.`);
+            logger.warn(`  [Worker] Tool ${toolName} has failed twice — warning injected`);
+          } else if (newCount >= 3) {
+            // Third failure: hard stop — block the tool and force honest exit
+            notes.push(`HARD STOP: Tool \`${toolName}\` has failed ${newCount} times and will NOT succeed with these arguments.\nFinal error: ${errorMsg}\n\nYou MUST stop attempting this tool. Respond now with an honest report of what you tried and why it failed. Do not call any more tools — just describe the failure clearly so the user can be informed.`);
+            logger.warn(`  [Worker] Tool ${toolName} circuit breaker triggered after ${newCount} failures`);
+          }
+        }
+
+        for (const skipped of turnCalls.slice(cutoff)) {
+          conversationHistory.push(formatToolResult(skipped.id, skipped.function.name, 'Skipped — doom loop detected, see the instruction that follows.'));
+        }
+        if (notes.length > 0) {
+          conversationHistory.push({ role: 'user', content: notes.join('\n\n') });
         }
 
         // If images are pending, attach them to next model call

@@ -1,6 +1,7 @@
 import path from 'path';
 import fs from 'fs';
-import type { ICodeTool, CodeToolContext } from './index.js';
+import { resolveToolPath, type ICodeTool, type CodeToolContext } from './index.js';
+import { EXCLUSIVE, readsPath } from '../../core/tool-scheduler.js';
 
 const MAX_LINES = 2000;
 const MAX_BYTES = 50 * 1024; // 50KB
@@ -22,7 +23,9 @@ For files:
 - Binary files return "[binary file, cannot display]"
 
 For directories:
-- Returns a listing with [FILE] and [DIR] prefixes`,
+- Returns a listing with [FILE] and [DIR] prefixes
+
+When you need several files, request them all in the same response — independent read_file calls run in parallel.`,
 
   parameters: {
     type: 'object',
@@ -43,29 +46,34 @@ For directories:
     required: ['path'],
   },
 
+  access(args, ctx) {
+    const p = resolveToolPath(args.path, ctx.workspaceDir);
+    return p ? readsPath(p) : EXCLUSIVE;
+  },
+
   async execute(args, ctx: CodeToolContext): Promise<string> {
     const rawPath = args.path as string;
     const filePath = path.isAbsolute(rawPath) ? rawPath : path.resolve(ctx.workspaceDir, rawPath);
 
     let stat: fs.Stats;
     try {
-      stat = fs.statSync(filePath);
+      stat = await fs.promises.stat(filePath);
     } catch {
       return `Error: Path not found: ${filePath}`;
     }
 
     if (stat.isDirectory()) {
-      return listDirectory(filePath);
+      return await listDirectory(filePath);
     }
 
-    return readFile(filePath, args.offset as number | undefined, args.limit as number | undefined);
+    return await readFile(filePath, args.offset as number | undefined, args.limit as number | undefined);
   },
 };
 
-function listDirectory(dirPath: string): string {
+async function listDirectory(dirPath: string): Promise<string> {
   let entries: fs.Dirent[];
   try {
-    entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
   } catch (e) {
     return `Error reading directory: ${e instanceof Error ? e.message : String(e)}`;
   }
@@ -84,10 +92,10 @@ function listDirectory(dirPath: string): string {
   return lines.join('\n');
 }
 
-function readFile(filePath: string, offset?: number, limit?: number): string {
+async function readFile(filePath: string, offset?: number, limit?: number): Promise<string> {
   let buffer: Buffer;
   try {
-    buffer = fs.readFileSync(filePath);
+    buffer = await fs.promises.readFile(filePath);
   } catch (e) {
     return `Error reading file: ${e instanceof Error ? e.message : String(e)}`;
   }

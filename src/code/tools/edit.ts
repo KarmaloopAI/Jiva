@@ -9,7 +9,9 @@ import path from 'path';
 import fs from 'fs';
 import { createTwoFilesPatch, diffLines } from 'diff';
 import { fileLock } from '../file-lock.js';
-import type { ICodeTool, CodeToolContext } from './index.js';
+import { resolveToolPath, type ICodeTool, type CodeToolContext } from './index.js';
+import { collectDiagnostics } from './diagnostics.js';
+import { EXCLUSIVE, writesPath } from '../../core/tool-scheduler.js';
 
 const MAX_DIAGNOSTICS = 20;
 
@@ -82,6 +84,11 @@ Returns a diff of the changes made, plus any LSP errors detected.`,
     required: ['old_string', 'new_string'],
   },
 
+  access(args, ctx) {
+    const p = resolveToolPath(args.file_path ?? args.path, ctx.workspaceDir);
+    return p ? writesPath(p) : EXCLUSIVE;
+  },
+
   async execute(args, ctx: CodeToolContext): Promise<string> {
     const rawPath = (args.file_path ?? args.path) as string | undefined;
     if (typeof rawPath !== 'string' || rawPath.trim() === '') {
@@ -97,7 +104,7 @@ Returns a diff of the changes made, plus any LSP errors detected.`,
       return 'Error: old_string and new_string are identical — no change made.';
     }
 
-    return fileLock.withLock(filePath, async () => {
+    const locked = await fileLock.withLock(filePath, async (): Promise<{ ok: boolean; text: string }> => {
       let contentBefore = '';
       let contentAfter = '';
 
@@ -109,14 +116,14 @@ Returns a diff of the changes made, plus any LSP errors detected.`,
           fs.mkdirSync(dir, { recursive: true });
           fs.writeFileSync(filePath, newString, 'utf-8');
         } catch (e) {
-          return `Error writing file: ${e instanceof Error ? e.message : String(e)}`;
+          return { ok: false, text: `Error writing file: ${e instanceof Error ? e.message : String(e)}` };
         }
       } else {
         // Read existing file
         try {
           contentBefore = fs.readFileSync(filePath, 'utf-8');
         } catch {
-          return `Error: File not found: ${filePath}`;
+          return { ok: false, text: `Error: File not found: ${filePath}` };
         }
 
         // Normalize line endings for matching
@@ -130,7 +137,7 @@ Returns a diff of the changes made, plus any LSP errors detected.`,
             ? regexReplace(contentBefore, oldString, newString, replaceAll)
             : replace(contentBefore, normalizedOld, normalizedNew, replaceAll);
         } catch (e) {
-          return `Error: ${e instanceof Error ? e.message : String(e)}`;
+          return { ok: false, text: `Error: ${e instanceof Error ? e.message : String(e)}` };
         }
 
         contentAfter = result;
@@ -138,7 +145,7 @@ Returns a diff of the changes made, plus any LSP errors detected.`,
         try {
           fs.writeFileSync(filePath, contentAfter, 'utf-8');
         } catch (e) {
-          return `Error writing file: ${e instanceof Error ? e.message : String(e)}`;
+          return { ok: false, text: `Error writing file: ${e instanceof Error ? e.message : String(e)}` };
         }
       }
 
@@ -160,21 +167,15 @@ Returns a diff of the changes made, plus any LSP errors detected.`,
         if (change.removed) deletions += change.count ?? 0;
       }
 
-      // Notify LSP and collect diagnostics
-      let diagnosticsOutput = '';
-      try {
-        await ctx.lsp.touchFile(filePath);
-        const errors = ctx.lsp.getErrorsForFile(filePath);
-        if (errors) {
-          diagnosticsOutput = `\n\nLSP errors detected — please fix:\n<diagnostics file="${filePath}">\n${errors}\n</diagnostics>`;
-        }
-      } catch {
-        // LSP errors should not block the edit result
-      }
-
       const relPath = path.relative(ctx.workspaceDir, filePath);
-      return `Edit applied to ${relPath} (+${additions}/-${deletions} lines).\n\n${diff}${diagnosticsOutput}`;
+      return { ok: true, text: `Edit applied to ${relPath} (+${additions}/-${deletions} lines).\n\n${diff}` };
     });
+
+    if (!locked.ok) return locked.text;
+    // LSP diagnostics run AFTER the file lock is released, so other edits to
+    // this file (and parallel edits to other files) aren't held up by the
+    // 150ms–3s diagnostics wait.
+    return locked.text + (await collectDiagnostics(ctx, filePath));
   },
 };
 

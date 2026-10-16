@@ -4,6 +4,7 @@
  * Main exports for programmatic usage
  */
 
+/** @deprecated Use DualAgent or CodeAgent. Kept for backward compatibility; will be removed. */
 export { JivaAgent } from './core/agent.js';
 export { DualAgent } from './core/dual-agent.js';
 export { CodeAgent } from './code/agent.js';
@@ -20,6 +21,29 @@ export { ModelClient, createModelClient } from './models/model-client.js';
 // Backward-compat aliases (deprecated — use ModelClient / createModelClient)
 export { KrutrimModel, createKrutrimModel } from './models/krutrim.js';
 export { ModelOrchestrator } from './models/orchestrator.js';
+export { modelClientConfigFromStored } from './models/client-config.js';
+export type { ModelClientConfig } from './models/model-client.js';
+
+// OpenRouter: provider routing config + helpers (provider discovery for UIs)
+export {
+  OpenRouterConfigSchema,
+  OPENROUTER_ENDPOINT,
+  OPENROUTER_API_BASE,
+  isOpenRouterEndpoint,
+  isOpenRouterModel,
+  parseSlugList,
+  normalizeSlugs,
+  buildOpenRouterRouting,
+  fetchModelProviderEndpoints,
+  fetchOpenRouterModels,
+  findUnknownSlugs,
+} from './models/openrouter.js';
+export type { OpenRouterConfig, OpenRouterProviderEndpoint, OpenRouterRoutingInfo, OpenRouterModelInfo } from './models/openrouter.js';
+
+// Parallel tool execution
+export { resolveToolExecutionSettings, DEFAULT_MAX_TOOL_CONCURRENCY } from './core/tool-scheduler.js';
+export type { ToolExecutionSettingsInput, ToolAccess } from './core/tool-scheduler.js';
+export type { TurnTiming, AgentResponse as CodeAgentResponse } from './code/agent.js';
 
 export { MCPClient } from './mcp/client.js';
 export { MCPServerManager } from './mcp/server-manager.js';

@@ -1,6 +1,7 @@
 import path from 'path';
 import fs from 'fs';
 import type { ICodeTool, CodeToolContext } from './index.js';
+import { READS_ALL } from '../../core/tool-scheduler.js';
 
 const MAX_MATCHES = 100;
 const MAX_FILE_SIZE = 1 * 1024 * 1024; // 1MB per file
@@ -18,7 +19,9 @@ REQUIRED parameter: "pattern" (string) — the regex to search for.
 Example: {"pattern": "class UserService"}
 Example: {"pattern": "TODO|FIXME", "include": "*.ts"}
 
-Returns matches in the format: file:line: content`,
+Returns matches in the format: file:line: content
+
+Several independent searches can be issued in the same response — they run in parallel.`,
 
   parameters: {
     type: 'object',
@@ -43,6 +46,8 @@ Returns matches in the format: file:line: content`,
     required: ['pattern'],
   },
 
+  access: () => READS_ALL,
+
   async execute(args, ctx: CodeToolContext): Promise<string> {
     const patternStr = args.pattern as string;
     const searchPath = args.path
@@ -62,11 +67,11 @@ Returns matches in the format: file:line: content`,
     let truncated = false;
 
     try {
-      const stat = fs.statSync(searchPath);
+      const stat = await fs.promises.stat(searchPath);
       if (stat.isFile()) {
-        searchFile(searchPath, regex, ctx.workspaceDir, results, { max: MAX_MATCHES });
+        await searchFile(searchPath, regex, ctx.workspaceDir, results, { max: MAX_MATCHES });
       } else {
-        searchDir(searchPath, regex, ctx.workspaceDir, results, includePattern, {
+        await searchDir(searchPath, regex, ctx.workspaceDir, results, includePattern, {
           max: MAX_MATCHES,
           truncated: () => { truncated = true; },
         });
@@ -97,21 +102,21 @@ function matchesInclude(filename: string, include?: string): boolean {
   return filename.includes(include);
 }
 
-function searchFile(
+async function searchFile(
   filePath: string,
   regex: RegExp,
   workspaceDir: string,
   results: string[],
   opts: { max: number },
-): void {
+): Promise<void> {
   if (results.length >= opts.max) return;
 
   let stat: fs.Stats;
-  try { stat = fs.statSync(filePath); } catch { return; }
+  try { stat = await fs.promises.stat(filePath); } catch { return; }
   if (stat.size > MAX_FILE_SIZE) return;
 
   let content: string;
-  try { content = fs.readFileSync(filePath, 'utf-8'); } catch { return; }
+  try { content = await fs.promises.readFile(filePath, 'utf-8'); } catch { return; }
 
   const relPath = path.relative(workspaceDir, filePath).replace(/\\/g, '/');
   const lines = content.split('\n');
@@ -123,28 +128,28 @@ function searchFile(
   }
 }
 
-function searchDir(
+async function searchDir(
   dirPath: string,
   regex: RegExp,
   workspaceDir: string,
   results: string[],
   include: string | undefined,
   opts: { max: number; truncated: () => void },
-): void {
+): Promise<void> {
   if (results.length >= opts.max) { opts.truncated(); return; }
 
   let entries: fs.Dirent[];
-  try { entries = fs.readdirSync(dirPath, { withFileTypes: true }); } catch { return; }
+  try { entries = await fs.promises.readdir(dirPath, { withFileTypes: true }); } catch { return; }
 
   for (const entry of entries) {
     if (results.length >= opts.max) { opts.truncated(); return; }
 
     if (entry.isDirectory()) {
       if (IGNORE_DIRS.has(entry.name) || entry.name.startsWith('.')) continue;
-      searchDir(path.join(dirPath, entry.name), regex, workspaceDir, results, include, opts);
+      await searchDir(path.join(dirPath, entry.name), regex, workspaceDir, results, include, opts);
     } else if (entry.isFile()) {
       if (!matchesInclude(entry.name, include)) continue;
-      searchFile(path.join(dirPath, entry.name), regex, workspaceDir, results, opts);
+      await searchFile(path.join(dirPath, entry.name), regex, workspaceDir, results, opts);
     }
   }
 }

@@ -57,6 +57,8 @@ export interface EvaluatorOrchestratorConfig {
   headers?: Record<string, string>;
   toolCallingOpenRouter?: OpenRouterConfig;
   toolCallingHeaders?: Record<string, string>;
+  /** Parallel tool execution settings (config `toolExecution`). */
+  toolExecution?: import('../core/tool-scheduler.js').ToolExecutionSettingsInput;
 }
 
 /**
@@ -125,6 +127,7 @@ export async function createEvaluatorHarness(
     mcpManager,
     workspace,
     targetAgent: mainAgent,
+    toolExecution: orchestratorCfg.toolExecution,
   });
 
   // 5. Wire into harness

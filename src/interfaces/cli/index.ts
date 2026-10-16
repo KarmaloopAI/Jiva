@@ -41,6 +41,48 @@ if (ConfigManager.lastMigrationMessage) {
   console.log(chalk.yellow(`\n⚠  ${ConfigManager.lastMigrationMessage}\n`));
 }
 
+/** MCP server names code mode exposes: `codeMode: true` in config plus `--mcp a,b`. */
+function resolveCodeModeMcpNames(mcpServers: Record<string, any>, mcpOption?: string): string[] {
+  const cli = mcpOption ? mcpOption.split(',').map((n) => n.trim()).filter(Boolean) : [];
+  const fromConfig = Object.entries(mcpServers)
+    .filter(([, cfg]) => cfg?.codeMode === true)
+    .map(([name]) => name);
+  return [...new Set([...fromConfig, ...cli])];
+}
+
+/** Start the MCP servers needed for the selected mode (all of them in chat mode). */
+async function startMcpServersForMode(
+  mcpServers: Record<string, any>,
+  useCodeMode: boolean,
+  mcpOption?: string,
+): Promise<MCPServerManager> {
+  const mcpManager = new MCPServerManager();
+  const wanted = useCodeMode
+    ? Object.fromEntries(
+        Object.entries(mcpServers).filter(([name]) => resolveCodeModeMcpNames(mcpServers, mcpOption).includes(name)),
+      )
+    : mcpServers;
+  await mcpManager.initialize(wanted);
+  return mcpManager;
+}
+
+/** Add an active persona's MCP servers concurrently (they're independent processes). */
+async function addPersonaMcpServers(mcpManager: MCPServerManager, servers: Record<string, unknown>): Promise<void> {
+  const entries = Object.entries(servers);
+  if (entries.length === 0) return;
+  logger.info(`Adding ${entries.length} MCP servers from active persona`);
+  await Promise.allSettled(
+    entries.map(async ([name, config]) => {
+      try {
+        await mcpManager.addServer(name, config as any);
+        logger.success(`Added persona MCP server: ${name}`);
+      } catch (error) {
+        logger.warn(`Failed to add persona MCP server '${name}': ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }),
+  );
+}
+
 /** Print an OpenRouter routing block (used by `jiva config --show`). */
 function printOpenRouterRouting(or: import('../../models/openrouter.js').OpenRouterConfig | undefined): void {
   if (!or) return;
@@ -240,7 +282,12 @@ program
       // Test model connectivity before proceeding
       console.log(chalk.gray('Testing model connectivity...\n'));
 
-      const reasoningTest = await reasoningModel.testConnectivity();
+      // All configured models are pinged concurrently; results are reported in order.
+      const [reasoningTest, multimodalTest, toolCallingTest] = await Promise.all([
+        reasoningModel.testConnectivity(),
+        multimodalModel?.testConnectivity(),
+        toolCallingModel?.testConnectivity(),
+      ]);
       if (!reasoningTest.success) {
         console.log(chalk.red('✗ Reasoning model connection failed'));
         console.log(chalk.gray(`  Endpoint: ${reasoningModelConfig.endpoint}`));
@@ -251,8 +298,7 @@ program
       }
       console.log(chalk.green(`✓ Reasoning model connected (${reasoningTest.latency}ms)`));
 
-      if (multimodalModel) {
-        const multimodalTest = await multimodalModel.testConnectivity();
+      if (multimodalModel && multimodalTest) {
         if (!multimodalTest.success) {
           console.log(chalk.yellow('⚠ Multimodal model connection failed (continuing without vision support)'));
           console.log(chalk.gray(`  Error: ${multimodalTest.error}`));
@@ -262,8 +308,7 @@ program
         }
       }
 
-      if (toolCallingModel) {
-        const toolCallingTest = await toolCallingModel.testConnectivity();
+      if (toolCallingModel && toolCallingTest) {
         if (!toolCallingTest.success) {
           console.log(chalk.yellow('⚠ Tool-calling model connection failed (continuing without dedicated tool-call model)'));
           console.log(chalk.gray(`  Error: ${toolCallingTest.error}`));
@@ -321,9 +366,12 @@ program
         };
         logger.info('Adding default mcp-shell-server MCP server');
       }
-      // Initialize MCP servers with updated paths
-      const mcpManager = new MCPServerManager();
-      await mcpManager.initialize(mcpServers);
+      // Decide the mode BEFORE starting MCP servers: code mode only needs the
+      // servers it actually exposes (codeMode:true in config, or --mcp), so it
+      // doesn't pay for `npx` startups of servers it never uses.
+      const codeModeConfig = configManager.getCodeMode();
+      const useCodeMode = options.code || (codeModeConfig?.enabled ?? false);
+      const mcpManager = await startMcpServersForMode(mcpServers, useCodeMode, options.mcp);
 
       // Initialize workspace
       const workspace = new WorkspaceManager({
@@ -341,25 +389,11 @@ program
       const personaManager = new PersonaManager();
       await personaManager.initialize();
 
-      // Merge persona MCP servers with global MCP servers
-      const personaMCPServers = personaManager.getPersonaMCPServers();
-      if (Object.keys(personaMCPServers).length > 0) {
-        logger.info(`Adding ${Object.keys(personaMCPServers).length} MCP servers from active persona`);
-        
-        // Add persona MCP servers to the manager
-        for (const [name, config] of Object.entries(personaMCPServers)) {
-          try {
-            await mcpManager.addServer(name, config as any);
-            logger.success(`Added persona MCP server: ${name}`);
-          } catch (error) {
-            logger.warn(`Failed to add persona MCP server '${name}': ${error instanceof Error ? error.message : String(error)}`);
-          }
-        }
+      // Merge persona MCP servers (chat mode only — code mode doesn't expose them)
+      if (!useCodeMode) {
+        await addPersonaMcpServers(mcpManager, personaManager.getPersonaMCPServers());
       }
 
-      // Determine if code mode should be used
-      const codeModeConfig = configManager.getCodeMode();
-      const useCodeMode = options.code || (codeModeConfig?.enabled ?? false);
 
       let agent: IAgent;
 
@@ -394,6 +428,7 @@ program
           mcpServerNames: codeMcpServerNames,
           harness: options.harness === 'evaluator' ? 'evaluator' : undefined,
           compactionThreshold: codeModeConfig?.compactionThreshold,
+          toolExecution: configManager.getToolExecution(),
         });
 
         const mcpNote = codeMcpServerNames.length > 0 ? ` | MCP: ${codeMcpServerNames.join(', ')}` : '';
@@ -411,6 +446,7 @@ program
           maxIterations: options.maxIterations || 20, // Worker's iteration limit per subtask
           autoSave: true,
           condensingThreshold: options.condensingThreshold ?? 30,
+          toolExecution: configManager.getToolExecution(),
         });
       }
 
@@ -437,6 +473,7 @@ program
             toolCallingOpenRouter: modelConfig.toolCalling.openrouter,
             toolCallingHeaders: modelConfig.toolCalling.headers,
           }),
+          toolExecution: configManager.getToolExecution(),
         };
         harness = await createEvaluatorHarness(agent, mcpServers, evalOrchestratorCfg);
         console.log(chalk.magenta('⚡ Evaluator harness active — a supervisor agent will validate task completion after each response.\n'));
@@ -745,7 +782,12 @@ program
       // Test model connectivity before proceeding
       console.log(chalk.gray('Testing model connectivity...\n'));
 
-      const reasoningTest = await reasoningModel.testConnectivity();
+      // All configured models are pinged concurrently; results are reported in order.
+      const [reasoningTest, multimodalTest, toolCallingTest] = await Promise.all([
+        reasoningModel.testConnectivity(),
+        multimodalModel?.testConnectivity(),
+        toolCallingModel?.testConnectivity(),
+      ]);
       if (!reasoningTest.success) {
         console.log(chalk.red('✗ Reasoning model connection failed'));
         console.log(chalk.gray(`  Endpoint: ${reasoningModelConfig.endpoint}`));
@@ -756,8 +798,7 @@ program
       }
       console.log(chalk.green(`✓ Reasoning model connected (${reasoningTest.latency}ms)`));
 
-      if (multimodalModel) {
-        const multimodalTest = await multimodalModel.testConnectivity();
+      if (multimodalModel && multimodalTest) {
         if (!multimodalTest.success) {
           console.log(chalk.yellow('⚠ Multimodal model connection failed (continuing without vision support)'));
           console.log(chalk.gray(`  Error: ${multimodalTest.error}`));
@@ -767,8 +808,7 @@ program
         }
       }
 
-      if (toolCallingModel) {
-        const toolCallingTest = await toolCallingModel.testConnectivity();
+      if (toolCallingModel && toolCallingTest) {
         if (!toolCallingTest.success) {
           console.log(chalk.yellow('⚠ Tool-calling model connection failed (continuing without dedicated tool-call model)'));
           console.log(chalk.gray(`  Error: ${toolCallingTest.error}`));
@@ -826,9 +866,12 @@ program
         };
         logger.info('Adding default mcp-shell-server MCP server');
       }
-      // Initialize MCP servers with updated paths
-      const mcpManager = new MCPServerManager();
-      await mcpManager.initialize(mcpServers);
+      // Decide the mode BEFORE starting MCP servers: code mode only needs the
+      // servers it actually exposes (codeMode:true in config, or --mcp), so it
+      // doesn't pay for `npx` startups of servers it never uses.
+      const codeModeConfigRun = configManager.getCodeMode();
+      const useCodeModeRun = options.code || (codeModeConfigRun?.enabled ?? false);
+      const mcpManager = await startMcpServersForMode(mcpServers, useCodeModeRun, options.mcp);
 
       // Initialize workspace
       const workspace = new WorkspaceManager({
@@ -846,25 +889,11 @@ program
       const personaManager = new PersonaManager();
       await personaManager.initialize();
 
-      // Merge persona MCP servers with global MCP servers
-      const personaMCPServers = personaManager.getPersonaMCPServers();
-      if (Object.keys(personaMCPServers).length > 0) {
-        logger.info(`Adding ${Object.keys(personaMCPServers).length} MCP servers from active persona`);
-        
-        // Add persona MCP servers to the manager
-        for (const [name, config] of Object.entries(personaMCPServers)) {
-          try {
-            await mcpManager.addServer(name, config as any);
-            logger.success(`Added persona MCP server: ${name}`);
-          } catch (error) {
-            logger.warn(`Failed to add persona MCP server '${name}': ${error instanceof Error ? error.message : String(error)}`);
-          }
-        }
+      // Merge persona MCP servers (chat mode only — code mode doesn't expose them)
+      if (!useCodeModeRun) {
+        await addPersonaMcpServers(mcpManager, personaManager.getPersonaMCPServers());
       }
 
-      // Determine if code mode should be used
-      const codeModeConfigRun = configManager.getCodeMode();
-      const useCodeModeRun = options.code || (codeModeConfigRun?.enabled ?? false);
 
       let agent: IAgent;
 
@@ -891,6 +920,7 @@ program
           mcpManager: codeMcpServerNamesRun.length > 0 ? mcpManager : undefined,
           mcpServerNames: codeMcpServerNamesRun,
           compactionThreshold: codeModeConfigRun?.compactionThreshold,
+          toolExecution: configManager.getToolExecution(),
         });
 
         const mcpNoteRun = codeMcpServerNamesRun.length > 0 ? ` | MCP: ${codeMcpServerNamesRun.join(', ')}` : '';
@@ -908,6 +938,7 @@ program
           maxToolCalls: options.maxToolCalls || 30, // Maximum tool calls per subtask
           autoSave: true,
           condensingThreshold: options.condensingThreshold ?? 30,
+          toolExecution: configManager.getToolExecution(),
         });
       }
 
@@ -963,6 +994,7 @@ program
   .option('--max-iterations <number>', 'Override the per-task iteration cap', parseInt)
   .option('--timeout <ms>', 'Override the per-task wall-clock timeout (ms)', parseInt)
   .option('--lsp', 'Enable LSP during the benchmark (default: off)')
+  .option('--no-parallel-tools', 'Run tool calls one at a time (A/B baseline for parallel tool execution)')
   .option('--continuous', "Carry the agent's own output forward between tiers")
   .option('--output <path>', 'Write the full JSON report to a file')
   .option('--json', 'Print JSON only (machine-readable, suppresses progress)')
@@ -1048,6 +1080,7 @@ program
           maxIterations: options.maxIterations,
           timeoutMs: options.timeout,
           lspEnabled: !!options.lsp,
+          parallelTools: options.parallelTools !== false,
           continuous: !!options.continuous,
           keepWorkspaces: !!options.keepWorkspaces,
           model: modelLabel,

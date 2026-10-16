@@ -50,6 +50,8 @@ export interface DualAgentConfig {
    * tenants.  Omit to use the module-level singleton (CLI mode).
    */
   orchestrationLogger?: OrchestrationLogger;
+  /** Parallel tool execution for the Worker (config `toolExecution`). */
+  toolExecution?: import('./tool-scheduler.js').ToolExecutionSettingsInput;
 }
 
 export interface DualAgentResponse {
@@ -112,7 +114,7 @@ export class DualAgent {
 
     // Initialize agents (Manager + Worker architecture)
     this.manager = new ManagerAgent(this.orchestrator, this.workspace, this.personaManager || undefined, this.orchLogger);
-    this.worker = new WorkerAgent(this.orchestrator, this.mcpManager, this.workspace, this.maxIterations, this.personaManager || undefined, this.orchLogger);
+    this.worker = new WorkerAgent(this.orchestrator, this.mcpManager, this.workspace, this.maxIterations, this.personaManager || undefined, this.orchLogger, config.toolExecution);
 
     // Initialize AgentSpawner - always available as a baseline tool
     // Create a PersonaManager if one wasn't provided

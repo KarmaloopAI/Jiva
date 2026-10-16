@@ -1,12 +1,18 @@
 /**
  * Example: Programmatic Usage of Jiva
  *
- * This example shows how to use Jiva programmatically in your own TypeScript/Node.js projects.
+ * Shows how to embed Jiva in your own TypeScript/Node.js project using the
+ * same agents the CLI uses:
+ *   - DualAgent — general mode (`jiva chat`): Manager plans, Worker executes MCP tools
+ *   - CodeAgent — code mode (`jiva chat --code`): single loop, in-process tools, LSP
+ *
+ * Both implement the IAgent interface (chat, cleanup, resetConversation, …).
  */
 
 import {
-  JivaAgent,
-  createKrutrimModel,
+  DualAgent,
+  CodeAgent,
+  createModelClient,
   ModelOrchestrator,
   MCPServerManager,
   WorkspaceManager,
@@ -15,103 +21,73 @@ import {
 } from '../src/index.js';
 
 async function main() {
-  // Enable debug logging
-  logger.setLogLevel(LogLevel.DEBUG);
+  logger.setLogLevel(LogLevel.INFO);
+
+  // 1. Models — any OpenAI-compatible endpoint (OpenRouter shown here)
+  const reasoningModel = createModelClient({
+    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+    apiKey: process.env.OPENROUTER_API_KEY || 'your-api-key-here',
+    model: 'openai/gpt-oss-120b',
+    type: 'reasoning',
+    reasoningEffortStrategy: 'api_param',
+    // Optional: rank OpenRouter's upstream providers (see docs/user-guides/OPENROUTER.md)
+    openrouter: { providerOrder: ['cerebras', 'groq'], allowFallbacks: true },
+  });
+
+  const orchestrator = new ModelOrchestrator({ reasoningModel });
+
+  // 2. Workspace — the directory the agent works in
+  const workspace = new WorkspaceManager({ workspaceDir: process.cwd() });
+  await workspace.initialize();
+
+  // 3a. Code mode: no MCP servers needed — tools run in-process
+  const coder = new CodeAgent({
+    orchestrator,
+    workspace,
+    maxIterations: 30,
+    lspEnabled: false, // set true if language servers are installed
+  });
 
   try {
-    // 1. Create the reasoning model (gpt-oss-120b)
-    const reasoningModel = createKrutrimModel({
-      endpoint: 'https://cloud.olakrutrim.com/v1/chat/completions',
-      apiKey: process.env.KRUTRIM_API_KEY || 'your-api-key-here',
-      model: 'gpt-oss-120b',
-      type: 'reasoning',
-    });
+    const res = await coder.chat('List the TypeScript files in src/ and describe the project layout in 3 lines.');
+    console.log('CodeAgent:', res.content);
+    console.log('Tools used:', res.toolsUsed.join(', '));
+    console.log('Timing:', res.timing);
+  } finally {
+    await coder.cleanup();
+  }
 
-    // 2. Optional: Create multimodal model for image understanding
-    const multimodalModel = createKrutrimModel({
-      endpoint: 'https://cloud.olakrutrim.com/v1/chat/completions',
-      apiKey: process.env.KRUTRIM_API_KEY || 'your-api-key-here',
-      model: 'Llama-4-Maverick-17B-128E-Instruct',
-      type: 'multimodal',
-    });
+  // 3b. General mode: tools come from MCP servers
+  const mcpManager = new MCPServerManager();
+  await mcpManager.initialize({
+    filesystem: {
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-filesystem', process.cwd()],
+      enabled: true,
+    },
+  });
 
-    // 3. Create model orchestrator
-    const orchestrator = new ModelOrchestrator({
-      reasoningModel,
-      multimodalModel,
-    });
+  const agent = new DualAgent({
+    orchestrator,
+    mcpManager,
+    workspace,
+    maxIterations: 20,
+    autoSave: false, // no ConversationManager in this example
+  });
 
-    // 4. Initialize MCP servers
-    const mcpManager = new MCPServerManager();
-    await mcpManager.initialize({
-      // Filesystem server for file operations
-      filesystem: {
-        command: 'npx',
-        args: ['-y', '@modelcontextprotocol/server-filesystem', process.cwd()],
-        enabled: true,
-      },
-      // You can add more MCP servers here
-      // For example: @playwright/mcp for browser automation
-      // See: https://github.com/modelcontextprotocol/servers
-    });
+  try {
+    const res = await agent.chat('What files are in the current directory?');
+    console.log('DualAgent:', res.content);
+    console.log('Tools used:', res.toolsUsed.join(', '));
 
-    // 5. Initialize workspace
-    const workspace = new WorkspaceManager({
-      workspaceDir: process.cwd(),
-      // Optional: specify directive file
-      // directivePath: './my-directive.md',
-    });
-    await workspace.initialize();
-
-    // 6. Create Jiva agent
-    const agent = new JivaAgent({
-      orchestrator,
-      mcpManager,
-      workspace,
-      maxIterations: 10,
-      temperature: 0.7,
-    });
-
-    // 7. Use the agent
-    console.log('Starting Jiva agent...\n');
-
-    // Example 1: Simple chat
-    const response1 = await agent.chat('What files are in the current directory?');
-    console.log('Response:', response1.content);
-    console.log('Tools used:', response1.toolsUsed);
-    console.log('Iterations:', response1.iterations);
-    console.log('\n---\n');
-
-    // Example 2: Multi-step task
-    const response2 = await agent.chat(
-      'Find all TypeScript files and count the total lines of code'
-    );
-    console.log('Response:', response2.content);
-    console.log('Tools used:', response2.toolsUsed);
-    console.log('Iterations:', response2.iterations);
-    console.log('\n---\n');
-
-    // Example 3: With image (if multimodal model configured)
-    if (orchestrator.hasMultimodalSupport()) {
-      const response3 = await agent.chat(
-        'Describe the image at https://example.com/image.jpg'
-      );
-      console.log('Response:', response3.content);
-      console.log('\n---\n');
-    }
-
-    // 8. Reset conversation to start fresh
+    // Start a fresh conversation
     agent.resetConversation();
-
-    // 9. Cleanup
+  } finally {
     await agent.cleanup();
-
-    console.log('Done!');
-  } catch (error) {
-    logger.error('Error in main', error);
-    process.exit(1);
   }
 }
 
-// Run the example
-main();
+main().catch((error) => {
+  logger.error('Error in main', error);
+  process.exit(1);
+});

@@ -29,6 +29,8 @@ export interface EvaluatorConfig {
    * Default: 5.
    */
   maxEvaluationCycles?: number;
+  /** Parallel tool execution settings (same as the main agent's `toolExecution`). */
+  toolExecution?: import('../core/tool-scheduler.js').ToolExecutionSettingsInput;
   /**
    * Maximum model iterations per evaluation cycle (mirrors CodeAgent.maxIterations).
    * Default: 30.

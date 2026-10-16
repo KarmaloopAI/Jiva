@@ -31,6 +31,19 @@ export interface AgentResponse {
   toolsUsed: string[];
 }
 
+/** Emit the deprecation warning once per process, not once per instance. */
+let deprecationWarned = false;
+
+/**
+ * Original single-agent implementation (pre-v0.2.1).
+ *
+ * @deprecated Use `DualAgent` (general mode — what `jiva chat` runs) or
+ * `CodeAgent` (code mode — `jiva chat --code`). Neither the CLI nor the HTTP
+ * server uses JivaAgent. It also lacks fixes the other agents have: assistant
+ * tool_calls are not kept in history (standard OpenAI-style providers reject
+ * the follow-up request), there is no doom-loop guard, and it has no parallel
+ * tool execution. Scheduled for removal in a future minor release.
+ */
 export class JivaAgent {
   private orchestrator: ModelOrchestrator;
   private mcpManager: MCPServerManager;
@@ -44,6 +57,13 @@ export class JivaAgent {
   private baseDeveloperMessage: string = ''; // Store base developer content without directive
 
   constructor(config: AgentConfig) {
+    if (!deprecationWarned) {
+      deprecationWarned = true;
+      logger.warn(
+        '[Jiva] JivaAgent is deprecated and will be removed in a future release. ' +
+          'Use DualAgent (general mode) or CodeAgent (code mode) instead.',
+      );
+    }
     this.orchestrator = config.orchestrator;
     this.mcpManager = config.mcpManager;
     this.workspace = config.workspace;

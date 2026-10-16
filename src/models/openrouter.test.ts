@@ -13,6 +13,7 @@ import {
   extractRoutingInfo,
   findUnknownSlugs,
   fetchModelProviderEndpoints,
+  fetchOpenRouterModels,
 } from './openrouter.js';
 
 test('parseSlugList handles commas, spaces, case and duplicates', () => {
@@ -136,4 +137,24 @@ test('fetchModelProviderEndpoints is advisory and tolerant', async () => {
   }) as unknown as typeof fetch;
   assert.equal(await fetchModelProviderEndpoints('a/b', undefined, boom), undefined);
   assert.equal(await fetchModelProviderEndpoints('no-slash', undefined, ok), undefined);
+});
+
+test('fetchOpenRouterModels maps pricing and tool support; tolerant of failures', async () => {
+  const ok = (async () =>
+    new Response(
+      JSON.stringify({
+        data: [
+          { id: 'a/tools', name: 'A', context_length: 1000, pricing: { prompt: '0.0000002', completion: '0.000001' }, supported_parameters: ['tools', 'temperature'] },
+          { id: 'b/notools', name: 'B', supported_parameters: ['temperature'] },
+        ],
+      }),
+      { status: 200 },
+    )) as unknown as typeof fetch;
+  const all = await fetchOpenRouterModels(undefined, {}, ok);
+  assert.equal(all?.length, 2);
+  assert.deepEqual(all?.[0], { id: 'a/tools', name: 'A', contextLength: 1000, promptPricePerM: 0.2, completionPricePerM: 1, supportsTools: true });
+  const tools = await fetchOpenRouterModels(undefined, { toolsOnly: true }, ok);
+  assert.deepEqual(tools?.map((m) => m.id), ['a/tools']);
+  const boom = (async () => { throw new Error('offline'); }) as unknown as typeof fetch;
+  assert.equal(await fetchOpenRouterModels(undefined, {}, boom), undefined);
 });

@@ -51,6 +51,72 @@ export class ConversationManager {
     tokenUsage?: { promptTokens: number; completionTokens: number; totalTokens: number },
     codeMeta?: CodeConversationMeta
   ): Promise<string> {
+    // Saves (and background title patches) are serialized so a late title
+    // patch can never overwrite a newer save of the same conversation.
+    return this.serializeWrite(() =>
+      this.saveConversationNow(messages, workspace, conversationId, orchestrator, type, tokenUsage, codeMeta),
+    );
+  }
+
+  private writeChain: Promise<unknown> = Promise.resolve();
+  private pendingTitles = new Set<Promise<void>>();
+
+  private serializeWrite<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.writeChain.then(fn, fn);
+    this.writeChain = run.catch(() => undefined);
+    return run;
+  }
+
+  /** Heuristic title used until (or instead of) an LLM-generated one. */
+  private fallbackTitle(messages: Message[]): string | undefined {
+    const firstUserMsg = messages.find(m => m.role === 'user');
+    if (!firstUserMsg || typeof firstUserMsg.content !== 'string') return undefined;
+    const text = firstUserMsg.content.trim();
+    if (text.length <= 40) return this.capitalizeFirst(text);
+    return text.substring(0, 50).trim() + '...';
+  }
+
+  /**
+   * Generate an LLM title off the response path, then patch it into the stored
+   * conversation — only if the stored title is still the fallback (the user or
+   * a later save may have changed it meanwhile).
+   */
+  private generateTitleInBackground(
+    id: string,
+    messages: Message[],
+    orchestrator: ModelOrchestrator,
+    fallback: string,
+  ): void {
+    const job = (async () => {
+      const generated = await this.generateTitle(messages, orchestrator);
+      if (!generated || generated === fallback) return;
+      await this.serializeWrite(async () => {
+        const stored = await this.storageProvider.loadConversation(id);
+        if (!stored || stored.metadata.title !== fallback) return;
+        stored.metadata.title = generated;
+        await this.storageProvider.saveConversation(stored);
+        logger.debug(`Conversation title generated: ${generated}`);
+      });
+    })()
+      .catch((error) => logger.debug('Background title generation failed', error))
+      .finally(() => this.pendingTitles.delete(job));
+    this.pendingTitles.add(job);
+  }
+
+  /** Resolve once all in-flight background title generations have finished (tests, graceful shutdown). */
+  async flushPendingTitles(): Promise<void> {
+    await Promise.all([...this.pendingTitles]);
+  }
+
+  private async saveConversationNow(
+    messages: Message[],
+    workspace?: string,
+    conversationId?: string,
+    orchestrator?: ModelOrchestrator,
+    type?: 'chat' | 'code',
+    tokenUsage?: { promptTokens: number; completionTokens: number; totalTokens: number },
+    codeMeta?: CodeConversationMeta
+  ): Promise<string> {
     const finalId = conversationId || this.currentConversationId || this.defaultConversationId || this.generateConversationId();
 
     // Use provided orchestrator or fallback to constructor orchestrator
@@ -72,21 +138,16 @@ export class ConversationManager {
       }
     }
 
-    // Generate title if this is a new conversation and we have at least one user message
+    // Title: never block the save (and so the agent's reply) on an LLM call.
+    // A new conversation is saved with a heuristic title right away; when an
+    // orchestrator is available a better title is generated in the background
+    // and patched in afterwards (see generateTitleInBackground).
     let title = existingData?.metadata?.title;
     const hasUserMessage = messages.some(msg => msg.role === 'user');
-    if (!title && hasUserMessage && modelOrchestrator) {
-      logger.info('Generating conversation title...');
-      title = await this.generateTitle(messages, modelOrchestrator);
-      logger.info(`Title generated: ${title}`);
-    } else if (!title && hasUserMessage) {
-      // Fallback: use first user message as title if no orchestrator
-      const firstUserMsg = messages.find(m => m.role === 'user');
-      if (firstUserMsg && typeof firstUserMsg.content === 'string') {
-        title = firstUserMsg.content.substring(0, 50).trim();
-        if (firstUserMsg.content.length > 50) {
-          title += '...';
-        }
+    if (!title && hasUserMessage) {
+      title = this.fallbackTitle(messages);
+      if (modelOrchestrator && title) {
+        this.generateTitleInBackground(finalId, messages, modelOrchestrator, title);
       }
     }
 

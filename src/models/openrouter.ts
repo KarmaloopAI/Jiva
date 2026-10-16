@@ -312,3 +312,51 @@ export function findUnknownSlugs(
   const known = endpoints.map((e) => e.slug);
   return slugs.filter((s) => !known.some((k) => k === s || k.startsWith(`${s}/`)));
 }
+
+export interface OpenRouterModelInfo {
+  id: string;
+  name: string;
+  contextLength?: number;
+  /** USD per million tokens (converted from OpenRouter's per-token strings). */
+  promptPricePerM?: number;
+  completionPricePerM?: number;
+  /** True when the model advertises native tool calling. */
+  supportsTools: boolean;
+}
+
+/**
+ * Best-effort listing of OpenRouter's model catalog (GET /models), for model
+ * pickers in UIs. Returns undefined on any failure. Pass `toolsOnly` to keep
+ * only models that support tool calling (what an agent needs).
+ */
+export async function fetchOpenRouterModels(
+  apiKey?: string,
+  opts: { toolsOnly?: boolean } = {},
+  fetchImpl: typeof fetch = fetch,
+): Promise<OpenRouterModelInfo[] | undefined> {
+  try {
+    const res = await fetchImpl(`${OPENROUTER_API_BASE}/models`, {
+      headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) return undefined;
+    const body: any = await res.json();
+    const perM = (v: unknown) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? Math.round(n * 1_000_000 * 10_000) / 10_000 : undefined;
+    };
+    const models: OpenRouterModelInfo[] = (Array.isArray(body?.data) ? body.data : [])
+      .filter((m: any) => typeof m?.id === 'string')
+      .map((m: any) => ({
+        id: m.id,
+        name: typeof m.name === 'string' ? m.name : m.id,
+        contextLength: typeof m.context_length === 'number' ? m.context_length : undefined,
+        promptPricePerM: perM(m.pricing?.prompt),
+        completionPricePerM: perM(m.pricing?.completion),
+        supportsTools: Array.isArray(m.supported_parameters) && m.supported_parameters.includes('tools'),
+      }));
+    return opts.toolsOnly ? models.filter((m) => m.supportsTools) : models;
+  } catch {
+    return undefined;
+  }
+}

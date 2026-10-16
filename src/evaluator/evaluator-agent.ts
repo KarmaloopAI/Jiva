@@ -17,6 +17,14 @@ import { WorkspaceManager } from '../core/workspace.js';
 import { formatToolResult } from '../models/harmony.js';
 import type { Message, Tool } from '../models/base.js';
 import { logger } from '../utils/logger.js';
+import {
+  runToolBatch,
+  resolveToolExecutionSettings,
+  accessFromAnnotations,
+  EXCLUSIVE,
+  READS_ALL,
+  type ScheduledCall,
+} from '../core/tool-scheduler.js';
 import { deriveEvaluatorDirective } from './directive-adapter.js';
 import { EVALUATOR_VIRTUAL_TOOLS, type IEvaluatorTool } from './tools/agent-tools.js';
 import type {
@@ -145,6 +153,7 @@ export class EvaluatorAgent {
   private maxIterations: number;
   private maxCycles: number;
   private virtualTools: IEvaluatorTool[];
+  private toolExecution: { parallel: boolean; maxConcurrency: number };
 
   constructor(config: EvaluatorConfig) {
     this.orchestrator = config.orchestrator;
@@ -154,6 +163,7 @@ export class EvaluatorAgent {
     this.maxIterations = config.maxIterationsPerCycle ?? DEFAULT_MAX_ITERATIONS;
     this.maxCycles = config.maxEvaluationCycles ?? DEFAULT_MAX_CYCLES;
     this.virtualTools = EVALUATOR_VIRTUAL_TOOLS;
+    this.toolExecution = resolveToolExecutionSettings(config.toolExecution);
   }
 
   /** Return token usage accumulated by the evaluator's isolated orchestrator. */
@@ -254,6 +264,36 @@ export class EvaluatorAgent {
   }
 
   // ─── Private: single cycle ──────────────────────────────────────────────────
+
+  /** Run one evaluator tool call (virtual or MCP). Never throws. */
+  private async runEvaluatorTool(
+    toolName: string,
+    toolArgs: Record<string, unknown>,
+    virtualTool: IEvaluatorTool | undefined,
+    toolContext: Parameters<IEvaluatorTool['execute']>[1],
+  ): Promise<string> {
+    if (virtualTool) {
+      try {
+        return await virtualTool.execute(toolArgs, toolContext);
+      } catch (e) {
+        return `Error executing ${toolName}: ${e instanceof Error ? e.message : String(e)}`;
+      }
+    }
+    try {
+      const result = await this.mcpManager.getClient().executeTool(toolName, toolArgs);
+      // Track filesystem reads as evidence
+      if (toolName.includes('read') || toolName.includes('search') || toolName.includes('list')) {
+        const pathArg =
+          (toolArgs.path as string) ||
+          (toolArgs.query as string) ||
+          (toolArgs.pattern as string);
+        if (pathArg) toolContext.onEvidenceFound(pathArg);
+      }
+      return typeof result === 'string' ? result : JSON.stringify(result);
+    } catch (e) {
+      return `Error executing ${toolName}: ${e instanceof Error ? e.message : String(e)}`;
+    }
+  }
 
   private async runEvaluationCycle(params: {
     systemPrompt: string;
@@ -383,8 +423,19 @@ export class EvaluatorAgent {
         break;
       }
 
-      // Execute tool calls
-      for (const toolCall of response.toolCalls) {
+      // Execute tool calls: pre-pass (doom loop) → scheduler → in-order results.
+      // Read-only tools (MCP readOnlyHint, conversation inspection) run in
+      // parallel; interact_with_agent mutates the target agent and runs alone.
+      const turnCalls = response.toolCalls;
+      const mcpAnnotations = new Map(
+        this.mcpManager.getClient().getAllTools().map((t) => [t.name, t.annotations]),
+      );
+      const scheduled: ScheduledCall<string>[] = [];
+      let cutoff = turnCalls.length;
+      let doomNote: string | null = null;
+
+      for (let idx = 0; idx < turnCalls.length; idx++) {
+        const toolCall = turnCalls[idx];
         const toolName = toolCall.function.name;
         let toolArgs: Record<string, unknown> = {};
         try {
@@ -403,52 +454,36 @@ export class EvaluatorAgent {
           recentCalls.every((c) => c === recentCalls[0])
         ) {
           logger.warn(`[Evaluator] Doom loop detected for tool: ${toolName}`);
-          messages.push({
-            role: 'user',
-            content: `STOP: You are calling \`${toolName}\` with the same arguments repeatedly. ` +
-              `Move on and output your final JSON assessment based on what you have found so far.`,
-          });
+          cutoff = idx;
+          doomNote =
+            `STOP: You are calling \`${toolName}\` with the same arguments repeatedly. ` +
+            `Move on and output your final JSON assessment based on what you have found so far.`;
           break;
         }
 
         logger.info(`[Evaluator] Tool: ${toolName}`);
-
-        let toolResult: string;
-
-        // Check virtual tools first, then fall through to MCP
         const virtualTool = this.virtualTools.find((t) => t.name === toolName);
+        scheduled.push({
+          index: idx,
+          id: toolCall.id,
+          name: toolName,
+          access: virtualTool
+            ? (toolName === 'interact_with_agent' ? EXCLUSIVE : READS_ALL)
+            : accessFromAnnotations(mcpAnnotations.get(toolName)),
+          run: () => this.runEvaluatorTool(toolName, toolArgs, virtualTool, toolContext),
+        });
+      }
 
-        if (virtualTool) {
-          try {
-            toolResult = await virtualTool.execute(toolArgs, toolContext);
-          } catch (e) {
-            toolResult = `Error executing ${toolName}: ${e instanceof Error ? e.message : String(e)}`;
-          }
-        } else {
-          // MCP tool
-          try {
-            const result = await this.mcpManager.getClient().executeTool(toolName, toolArgs);
-            toolResult = typeof result === 'string' ? result : JSON.stringify(result);
-
-            // Track filesystem reads as evidence
-            if (
-              toolName.includes('read') ||
-              toolName.includes('search') ||
-              toolName.includes('list')
-            ) {
-              const pathArg =
-                (toolArgs.path as string) ||
-                (toolArgs.query as string) ||
-                (toolArgs.pattern as string);
-              if (pathArg) toolContext.onEvidenceFound(pathArg);
-            }
-          } catch (e) {
-            toolResult = `Error executing ${toolName}: ${e instanceof Error ? e.message : String(e)}`;
-          }
-        }
-
-        const toolMessage = formatToolResult(toolCall.id, toolName, toolResult);
-        messages.push(toolMessage);
+      const { outcomes } = await runToolBatch(scheduled, this.toolExecution);
+      for (const o of outcomes) {
+        messages.push(formatToolResult(o.call.id, o.call.name, o.result ?? `Error executing ${o.call.name}: ${String(o.error)}`));
+      }
+      // Every tool_call_id needs a response, even the ones we refused to run.
+      for (const skipped of turnCalls.slice(cutoff)) {
+        messages.push(formatToolResult(skipped.id, skipped.function.name, 'Skipped — doom loop detected, see the instruction that follows.'));
+      }
+      if (doomNote) {
+        messages.push({ role: 'user', content: doomNote });
       }
     }
 

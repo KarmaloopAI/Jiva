@@ -92,6 +92,16 @@ export interface Tool {
     properties: Record<string, any>;
     required?: string[];
   };
+  /**
+   * MCP tool annotations (hints only, never sent to the model). Used by the
+   * tool scheduler: readOnlyHint ⇒ safe to run alongside other reads.
+   */
+  annotations?: {
+    readOnlyHint?: boolean;
+    destructiveHint?: boolean;
+    idempotentHint?: boolean;
+    openWorldHint?: boolean;
+  };
 }
 
 export interface ChatCompletionOptions {

@@ -24,6 +24,7 @@ import { OrchestrationLogger } from '../../utils/orchestration-logger.js';
 import { createModelClient } from '../../models/model-client.js';
 import { modelClientConfigFromStored } from '../../models/client-config.js';
 import { parseSlugList, OPENROUTER_ENDPOINT, type OpenRouterConfig } from '../../models/openrouter.js';
+import { resolveToolExecutionSettings } from '../../core/tool-scheduler.js';
 import { Message } from '../../models/base.js';
 import { PersonaManager } from '../../personas/persona-manager.js';
 import { getDefaultFilesystemAllowedPath } from '../../utils/platform.js';
@@ -381,8 +382,12 @@ export class SessionManager extends EventEmitter {
         }
       }
 
-      // Initialize all MCP servers (base + configured)
-      await mcpManager.initialize(baseMcpServers);
+      // Initialize all MCP servers (base + configured). Code-mode sessions
+      // never receive the MCP manager (CodeAgent uses in-process tools), so
+      // skip the per-session `npx` server startups entirely there.
+      if (!codeModeEnabled) {
+        await mcpManager.initialize(baseMcpServers);
+      }
 
       // Initialize workspace
       // When agentConfig.workspaceDir is supplied, build WorkspaceManager in
@@ -412,18 +417,20 @@ export class SessionManager extends EventEmitter {
       await personaManager.initialize();
 
       // Merge persona MCP servers with session MCP servers
+      // (chat mode only; added concurrently — they're independent processes)
       const personaMCPServers = personaManager.getPersonaMCPServers();
-      if (Object.keys(personaMCPServers).length > 0) {
+      if (!codeModeEnabled && Object.keys(personaMCPServers).length > 0) {
         logger.info(`[SessionManager] Adding ${Object.keys(personaMCPServers).length} MCP servers from active persona`);
-        
-        for (const [name, config] of Object.entries(personaMCPServers)) {
-          try {
-            await mcpManager.addServer(name, config as any);
-            logger.success(`[SessionManager] Added persona MCP server: ${name}`);
-          } catch (error) {
-            logger.warn(`[SessionManager] Failed to add persona MCP server '${name}': ${error instanceof Error ? error.message : String(error)}`);
-          }
-        }
+        await Promise.allSettled(
+          Object.entries(personaMCPServers).map(async ([name, config]) => {
+            try {
+              await mcpManager.addServer(name, config as any);
+              logger.success(`[SessionManager] Added persona MCP server: ${name}`);
+            } catch (error) {
+              logger.warn(`[SessionManager] Failed to add persona MCP server '${name}': ${error instanceof Error ? error.message : String(error)}`);
+            }
+          }),
+        );
       }
 
       // Load or create conversation
@@ -438,6 +445,13 @@ export class SessionManager extends EventEmitter {
 
       // Create agent — CodeAgent for code mode, DualAgent for general mode
       let agent: IAgent;
+      // Per-session parallel tool execution override (env JIVA_PARALLEL_TOOLS /
+      // JIVA_MAX_TOOL_CONCURRENCY are applied inside the agents).
+      const sessionToolExecution =
+        agentConfig?.parallelTools !== undefined
+          ? { ...resolveToolExecutionSettings(), parallel: agentConfig.parallelTools, resolved: true }
+          : undefined;
+
       if (codeModeEnabled) {
         const { CodeAgent } = await import('../../code/agent.js');
         // agentConfig.codeLsp overrides JIVA_CODE_LSP for this session only.
@@ -457,6 +471,7 @@ export class SessionManager extends EventEmitter {
           maxIterations,
           lspEnabled,
           compactionThreshold: envCompactionThreshold ? Number(envCompactionThreshold) : undefined,
+          toolExecution: sessionToolExecution,
         });
         logger.info('[SessionManager] Using CodeAgent (code mode)');
       } else {
@@ -472,6 +487,7 @@ export class SessionManager extends EventEmitter {
           maxIterations,
           autoSave: true,
           orchestrationLogger: orchLogger,
+          toolExecution: sessionToolExecution,
         });
       }
 

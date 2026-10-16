@@ -47,6 +47,7 @@
 - [Configuration Guide](user-guides/CONFIGURATION.md) — Full `config.json` schema, provider examples, environment variables
 - [Benchmark Suite](user-guides/BENCHMARK.md) — `taskstore` (baseline) and `microcrm` (capability) suites
 - [Skills & Personas](user-guides/SKILLS.md) — `SKILL.md` format, persona bundles, slash commands
+- [Parallel Tool Execution](reference/TOOL_EXECUTION.md) — How independent tool calls run concurrently, configuration, measured impact
 - [Agentic Pipeline](reference/AGENTIC_PIPELINE.md) — Deterministic-gather → bounded-AI → deterministic-output pattern
 - [Agent Spawning](reference/AGENT_SPAWNING.md) — Sub-agents with personas
 - [Harnesses](user-guides/HARNESSES.md) — Evaluator-based task validation

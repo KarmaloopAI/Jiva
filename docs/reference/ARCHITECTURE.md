@@ -75,6 +75,7 @@ Response
 | `WorkspaceManager` | Workspace isolation, directive loading |
 | `ConversationManager` | History, save/restore, condensing |
 | `StorageProvider` | Abstract storage (local, GCS, etc.) |
+| Tool scheduler (`src/core/tool-scheduler.ts`) | Runs independent tool calls from one response concurrently, in every agent loop. See [Parallel Tool Execution](TOOL_EXECUTION.md) |
 
 ## Source Map
 

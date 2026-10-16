@@ -96,7 +96,9 @@ jiva benchmark --keep-workspaces     # leave temp workspaces on disk for inspect
 jiva benchmark -c ./my-config.json   # use a specific config file
 ```
 
-Other overrides: `--max-iterations`, `--timeout`, `--lsp`.
+Other overrides: `--max-iterations`, `--timeout`, `--lsp`, `--no-parallel-tools`. The last one runs tool calls one at a time and serves as the A/B baseline for [parallel tool execution](../reference/TOOL_EXECUTION.md).
+
+The report's total line splits wall-clock into model time and tool time, and shows the time saved by parallel execution. The JSON report carries per-task `timing`.
 
 The command exits non-zero if any task fails, so it works directly in CI. The
 output table shows status, iterations, tests, tokens and time per task, plus the

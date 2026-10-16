@@ -257,6 +257,9 @@ export class MCPClient {
         type: 'object',
         properties: {},
       },
+      // Keep annotations (readOnlyHint etc.) so the tool scheduler can run
+      // read-only MCP tools in parallel. Never sent to the model.
+      ...(tool.annotations ? { annotations: tool.annotations } : {}),
     }));
   }
 

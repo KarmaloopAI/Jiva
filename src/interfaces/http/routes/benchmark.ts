@@ -60,6 +60,7 @@ function parseRunOptions(body: any): { options: RunnerOptions; taskIds?: string[
       maxIterations: typeof body?.maxIterations === 'number' ? body.maxIterations : undefined,
       timeoutMs: typeof body?.timeoutMs === 'number' ? body.timeoutMs : undefined,
       lspEnabled: !!body?.lsp,
+      parallelTools: body?.parallelTools !== false,
       continuous: !!body?.continuous,
     },
   };

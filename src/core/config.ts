@@ -161,6 +161,17 @@ const CodeModeConfigSchema = z.object({
   compactionThreshold: z.number().optional(),
 });
 
+/**
+ * How tool calls from one model turn are executed. Independent calls (reads,
+ * searches, edits to different files, read-only MCP tools) run concurrently;
+ * conflicting ones run alone in order. See src/core/tool-scheduler.ts.
+ * Env JIVA_PARALLEL_TOOLS / JIVA_MAX_TOOL_CONCURRENCY override.
+ */
+const ToolExecutionConfigSchema = z.object({
+  parallel: z.boolean().optional(),
+  maxConcurrency: z.number().int().min(1).optional(),
+});
+
 const JivaConfigSchema = z.object({
   models: z.object({
     reasoning: ModelConfigSchema.optional(),
@@ -174,12 +185,14 @@ const JivaConfigSchema = z.object({
   activePersona: z.string().optional(),
   debug: z.boolean().default(false),
   codeMode: CodeModeConfigSchema.optional(),
+  toolExecution: ToolExecutionConfigSchema.optional(),
 });
 
 export type MCPServerConfig = z.infer<typeof MCPServerConfigSchema>;
 export type ModelConfig = z.infer<typeof ModelConfigSchema>;
 export type CodeModeConfig = z.infer<typeof CodeModeConfigSchema>;
 export type JivaConfig = z.infer<typeof JivaConfigSchema>;
+export type ToolExecutionConfig = z.infer<typeof ToolExecutionConfigSchema>;
 
 export class ConfigManager {
   private store: Conf<JivaConfig>;
@@ -296,6 +309,10 @@ export class ConfigManager {
 
   getCodeMode(): CodeModeConfig | undefined {
     return this.store.get('codeMode');
+  }
+
+  getToolExecution(): ToolExecutionConfig | undefined {
+    return this.store.get('toolExecution');
   }
 
   setCodeModeEnabled(enabled: boolean) {

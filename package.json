@@ -14,7 +14,7 @@
   ],
   "type": "module",
   "scripts": {
-    "test": "tsx --test src/**/*.test.ts",
+    "test": "node scripts/run-tests.mjs",
     "test:web": "playwright test",
     "build": "tsc && node scripts/copy-benchmark-assets.mjs",
     "dev": "tsx src/interfaces/cli/index.ts",

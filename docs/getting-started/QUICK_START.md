@@ -188,20 +188,38 @@ All markdown is automatically formatted.
 
 ## Configuration (Optional)
 
-Want to customize? Edit when creating agent:
+Want to customize? When you use Jiva from code, pick the agent that matches the CLI mode:
 
 ```typescript
-const agent = new JivaAgent({
+import { DualAgent, CodeAgent } from 'jiva-core';
+
+// General mode (what `jiva chat` uses): Manager plans, Worker executes MCP tools
+const agent = new DualAgent({
   orchestrator,
   mcpManager,
   workspace,
   conversationManager,
   autoSave: true,              // Default: true
-  condensingThreshold: 30,     // Default: 30 messages
-  maxIterations: 10,           // Default: 10
-  temperature: 0.7,            // Default: 0.7
+  maxIterations: 20,           // Worker iterations per subtask (default: 20)
+  toolExecution: { parallel: true, maxConcurrency: 8 },  // Default
 });
+
+// Code mode (what `jiva chat --code` uses): single loop, in-process tools, LSP
+const coder = new CodeAgent({
+  orchestrator,
+  workspace,
+  conversationManager,
+  maxIterations: 50,           // Default: 50
+  lspEnabled: true,            // Default: true
+});
+
+const reply = await agent.chat('Summarize the README');
+console.log(reply.content);
 ```
+
+Both implement the same `IAgent` interface (`chat`, `cleanup`, `resetConversation`, …). A complete runnable example is in [examples/programmatic-usage.ts](../../examples/programmatic-usage.ts).
+
+> `JivaAgent`, the original single-agent class, is **deprecated**. Use `DualAgent` or `CodeAgent` instead.
 
 ---
 

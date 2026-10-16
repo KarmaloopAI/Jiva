@@ -83,7 +83,34 @@ export class ModelOrchestrator {
     }
 
     this.tokenTracker.record(response.usage, options.messages, response.content);
+    if (response.routing) {
+      this.lastRouting = response.routing;
+      const key = response.routing.provider ?? 'unknown';
+      this.providerCalls.set(key, (this.providerCalls.get(key) ?? 0) + 1);
+    }
     return response;
+  }
+
+  private lastRouting?: { model?: string; provider?: string };
+  private providerCalls = new Map<string, number>();
+
+  /**
+   * Which upstream provider/model served the most recent call (OpenRouter
+   * reports this; other providers leave it undefined). Lets UIs show
+   * "served by" without parsing logs.
+   */
+  getLastRouting(): { model?: string; provider?: string } | undefined {
+    return this.lastRouting;
+  }
+
+  /** Number of calls served per upstream provider since the last reset. */
+  getProviderUsage(): Record<string, number> {
+    return Object.fromEntries(this.providerCalls);
+  }
+
+  /** Clear routing statistics (e.g. at the start of a turn). */
+  resetProviderUsage(): void {
+    this.providerCalls.clear();
   }
 
   /** Return a snapshot of accumulated token usage for this orchestrator instance. */

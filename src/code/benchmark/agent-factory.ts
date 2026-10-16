@@ -16,6 +16,8 @@ export interface BenchmarkAgentOptions {
   workspaceDir: string;
   maxIterations: number;
   lspEnabled?: boolean;
+  /** Parallel tool execution (default true). */
+  parallelTools?: boolean;
 }
 
 export async function buildBenchmarkAgent(opts: BenchmarkAgentOptions): Promise<CodeAgent> {
@@ -27,5 +29,6 @@ export async function buildBenchmarkAgent(opts: BenchmarkAgentOptions): Promise<
     workspace,
     maxIterations: opts.maxIterations,
     lspEnabled: opts.lspEnabled ?? false,
+    toolExecution: opts.parallelTools === undefined ? undefined : { parallel: opts.parallelTools, resolved: true },
   });
 }

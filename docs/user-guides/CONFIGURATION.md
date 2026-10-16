@@ -377,6 +377,7 @@ The HTTP server (Cloud Run) bootstraps a tenant's first config from environment 
 | `JIVA_MODEL_NAME` | Model ID |
 | `JIVA_MODEL_PROVIDER_ORDER` / `JIVA_MODEL_ALLOW_FALLBACKS` | OpenRouter ranked providers / fallback policy |
 | `JIVA_TOOL_CALLING_MODEL_BASE_URL` / `_API_KEY` / `_NAME` | Optional dedicated tool-calling model |
+| `JIVA_PARALLEL_TOOLS` / `JIVA_MAX_TOOL_CONCURRENCY` | Parallel tool execution (CLI and server; overrides `toolExecution`) |
 
 See the [OpenRouter guide](OPENROUTER.md) and [HTTP API](../deployment/HTTP_API.md) for details.
 
@@ -683,6 +684,16 @@ rustup component add rust-analyzer
 ```
 
 For the full reference see [Code Mode Architecture](../reference/CODE_MODE.md).
+
+### Parallel Tool Execution
+
+Independent tool calls from one model response run concurrently in every mode. This covers reads, searches, edits to different files, read-only shell commands, and read-only MCP tools.
+
+```json
+{ "toolExecution": { "parallel": true, "maxConcurrency": 8 } }
+```
+
+To override for one run, set `JIVA_PARALLEL_TOOLS=false` or `JIVA_MAX_TOOL_CONCURRENCY=4`. See [Parallel Tool Execution](../reference/TOOL_EXECUTION.md).
 
 ---
 

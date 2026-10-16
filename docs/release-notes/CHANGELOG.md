@@ -3,6 +3,9 @@
 Consolidated release history. For full per-release details, see the individual files in this directory.
 
 ## v0.3.54 — Latest
+- Deprecated `JivaAgent` (use `DualAgent` / `CodeAgent`); docs and example updated
+- Parallel tool execution across all agent loops (shared scheduler, read-only bash/MCP detection, timing metrics)
+- Latency fixes: async file tools, LSP outside file lock, non-blocking titles, faster startup
 - OpenRouter first-class support: ranked upstream-provider routing, cost/served-by tracking
 - Fix: session restore no longer resets conversation title/tokens; reset starts a new conversation
 - Docker images ship example personas for sub-agent spawning

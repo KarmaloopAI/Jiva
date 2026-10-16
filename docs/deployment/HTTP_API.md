@@ -49,6 +49,7 @@ Health check endpoints (`/health`, `/health/ready`) are unauthenticated.
 | `JIVA_MODEL_ALLOW_FALLBACKS` | — | OpenRouter: `true`/`false` — allow providers outside the ranked list |
 | `JIVA_TOOL_CALLING_MODEL_BASE_URL` / `_API_KEY` / `_NAME` | — | Optional dedicated tool-calling model |
 | `JIVA_TOOL_CALLING_MODEL_PROVIDER_ORDER` / `_ALLOW_FALLBACKS` | — | OpenRouter routing for the tool-calling model |
+| `JIVA_PARALLEL_TOOLS` / `JIVA_MAX_TOOL_CONCURRENCY` | `true` / `8` | Parallel tool execution |
 
 ---
 
@@ -100,6 +101,7 @@ Create or restore a session. Returns session metadata.
 | `toolCallingModel` | string | Tool-calling model name |
 | `providerOrder` | string[] | OpenRouter: ranked provider slugs for the reasoning model |
 | `allowFallbacks` | boolean | OpenRouter: allow providers outside `providerOrder` |
+| `parallelTools` | boolean | Run independent tool calls concurrently (overrides `JIVA_PARALLEL_TOOLS`) |
 | `mcpServers` | `{name,url}[]` | Replaces the default MCP server list |
 | `codeModeEnabled`, `codeLsp` | boolean | Code mode / LSP |
 | `maxIterations` | integer | Iteration cap |

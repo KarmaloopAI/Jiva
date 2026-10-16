@@ -98,6 +98,8 @@ export interface TaskResult {
   tokenUsage?: TokenUsageSnapshot;
   /** Wall-clock duration of the agent turn (not counting verification). */
   wallTimeMs: number;
+  /** Where the agent's time went (model vs tools, parallel savings). */
+  timing?: import('../agent.js').TurnTiming;
   testsPassed: number;
   testsFailed: number;
   /** Names of failing test cases (for scored suites, this is the per-capability gap list). */
@@ -131,6 +133,12 @@ export interface SuiteResult {
   /** Percentage of spec tests passed (0–100). */
   scorePct: number;
   totalWallTimeMs: number;
+  /** Aggregate model / tool time and time saved by parallel tool execution. */
+  totalLlmMs?: number;
+  totalToolMs?: number;
+  totalParallelSavedMs?: number;
+  /** Whether parallel tool execution was enabled for this run. */
+  parallelTools?: boolean;
   totalTokens?: number;
   tasks: TaskResult[];
 }
@@ -147,6 +155,8 @@ export interface RunnerOptions {
   timeoutMs?: number;
   /** Enable LSP during the run (default: off, to reduce variance). */
   lspEnabled?: boolean;
+  /** Run independent tool calls in parallel (default: true). Set false for A/B comparisons. */
+  parallelTools?: boolean;
   /**
    * Carry the agent's own resulting workspace forward to the next tier instead
    * of scaffolding from the canonical golden baseline. Surfaces cascading

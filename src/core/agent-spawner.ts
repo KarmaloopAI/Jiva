@@ -154,14 +154,17 @@ export class AgentSpawner {
       if (Object.keys(personaMCPServers).length > 0) {
         logger.info(`[AgentSpawner] Loading ${Object.keys(personaMCPServers).length} MCP servers from persona`);
         
-        for (const [name, config] of Object.entries(personaMCPServers)) {
-          try {
-            await this.mcpManager.addServer(name, config as any);
-          } catch (error) {
-            // Server might already exist from parent, that's ok
-            logger.debug(`[AgentSpawner] MCP server '${name}' already exists or failed to add`);
-          }
-        }
+        // Independent processes — start them concurrently.
+        await Promise.allSettled(
+          Object.entries(personaMCPServers).map(async ([name, config]) => {
+            try {
+              await this.mcpManager.addServer(name, config as any);
+            } catch (error) {
+              // Server might already exist from parent, that's ok
+              logger.debug(`[AgentSpawner] MCP server '${name}' already exists or failed to add`);
+            }
+          }),
+        );
       }
 
       // Create sub-agent with persona and nested spawner
