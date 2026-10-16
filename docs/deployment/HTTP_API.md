@@ -43,6 +43,12 @@ Health check endpoints (`/health`, `/health/ready`) are unauthenticated.
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 | `JIVA_CODE_MODE` | `false` | Use CodeAgent instead of DualAgent for all sessions |
 | `ALLOWED_ORIGINS` | `http://localhost:3000` | Comma-separated CORS origins |
+| `JIVA_MODEL_PROVIDER` | `sarvam` | Provider label; `openrouter` defaults the endpoint to OpenRouter |
+| `JIVA_MODEL_BASE_URL` / `JIVA_MODEL_API_KEY` / `JIVA_MODEL_NAME` | — | Reasoning model endpoint / key / model (first-session bootstrap) |
+| `JIVA_MODEL_PROVIDER_ORDER` | — | OpenRouter: comma-separated ranked provider slugs |
+| `JIVA_MODEL_ALLOW_FALLBACKS` | — | OpenRouter: `true`/`false` — allow providers outside the ranked list |
+| `JIVA_TOOL_CALLING_MODEL_BASE_URL` / `_API_KEY` / `_NAME` | — | Optional dedicated tool-calling model |
+| `JIVA_TOOL_CALLING_MODEL_PROVIDER_ORDER` / `_ALLOW_FALLBACKS` | — | OpenRouter routing for the tool-calling model |
 
 ---
 
@@ -85,6 +91,21 @@ Create or restore a session. Returns session metadata.
   }
 }
 ```
+
+**Per-session `agentConfig` (optional request body field).** Overrides server defaults for this session only; never persisted, never contains secrets.
+
+| Field | Type | Description |
+|---|---|---|
+| `model` | string | Reasoning model name |
+| `toolCallingModel` | string | Tool-calling model name |
+| `providerOrder` | string[] | OpenRouter: ranked provider slugs for the reasoning model |
+| `allowFallbacks` | boolean | OpenRouter: allow providers outside `providerOrder` |
+| `mcpServers` | `{name,url}[]` | Replaces the default MCP server list |
+| `codeModeEnabled`, `codeLsp` | boolean | Code mode / LSP |
+| `maxIterations` | integer | Iteration cap |
+| `workspaceDir` | string | Session workspace directory |
+
+See the [OpenRouter guide](../user-guides/OPENROUTER.md) for routing semantics.
 
 #### `GET /api/session/:sessionId`
 Get info for an existing session. Returns `404` if not found.

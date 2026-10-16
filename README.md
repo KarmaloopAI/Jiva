@@ -22,7 +22,7 @@ jiva setup
 jiva benchmark
 ```
 
-The setup wizard opens with a provider selection menu. Choose your provider and Jiva auto-fills the endpoint, model name, and tool format — you only supply your API key. Supported providers: **Krutrim**, **Groq**, **Sarvam**, **OpenAI**, and any **OpenAI-compatible** endpoint.
+The setup wizard opens with a provider selection menu. Choose your provider and Jiva auto-fills the endpoint, model name, and tool format — you only supply your API key. Supported providers: **Krutrim**, **Groq**, **Sarvam**, **OpenRouter** (with ranked upstream-provider routing — see the [OpenRouter guide](docs/user-guides/OPENROUTER.md)), **OpenAI**, and any **OpenAI-compatible** endpoint.
 
 After setup, run **`jiva benchmark`** to confirm your chosen model and configuration work optimally in code mode. It runs the **baseline (taskstore) suite** — a deterministic set of coding tasks — against your config; a healthy setup passes all of them. See [Benchmarking](#benchmarking) for tuning and capability comparison.
 

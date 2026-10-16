@@ -11,6 +11,7 @@
 | Install and run in 30 seconds | [Getting Started → Quick Start](getting-started/QUICK_START.md) |
 | Understand the two execution modes | [User Guides → Execution Modes](user-guides/EXECUTION_MODES.md) |
 | Configure your model provider | [User Guides → Configuration](user-guides/CONFIGURATION.md) |
+| Use OpenRouter with ranked providers | [User Guides → OpenRouter](user-guides/OPENROUTER.md) |
 | Try the benchmark suite | [User Guides → Benchmarking](user-guides/BENCHMARK.md) |
 | Learn REPL commands and skills | [User Guides → Skills & Personas](user-guides/SKILLS.md) |
 
@@ -104,7 +105,7 @@ docs/
 
 Both modes share the same `IAgent` interface, the same model orchestrator, and the same workspace/conversation managers. Switching between them requires only a CLI flag or environment variable.
 
-Supported providers: **Krutrim**, **Groq**, **Sarvam**, **OpenAI**, and any **OpenAI-compatible** endpoint. The setup wizard auto-fills endpoint, model name, and tool format based on your selection.
+Supported providers: **Krutrim**, **Groq**, **Sarvam**, **OpenRouter**, **OpenAI**, and any **OpenAI-compatible** endpoint. The setup wizard auto-fills endpoint, model name, and tool format based on your selection.
 
 ---
 

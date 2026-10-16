@@ -1,7 +1,7 @@
 /**
  * Setup Wizard for first-time configuration
  *
- * Provider-aware: Krutrim, Groq, Sarvam, OpenAI-Compatible
+ * Provider-aware: Krutrim, Groq, Sarvam, OpenRouter, OpenAI-Compatible
  * - Auto-fills endpoints and model defaults per provider
  * - Asks API key only once per provider (reuses across model roles)
  * - Sets useHarmonyFormat, reasoningEffortStrategy, defaultMaxTokens automatically
@@ -13,10 +13,17 @@ import { logger } from '../../utils/logger.js';
 import { detectVisionCapability } from '../../utils/vision-detection.js';
 import chalk from 'chalk';
 import type { ModelConfig } from '../../core/config.js';
+import {
+  OPENROUTER_ENDPOINT,
+  parseSlugList,
+  fetchModelProviderEndpoints,
+  findUnknownSlugs,
+  type OpenRouterConfig,
+} from '../../models/openrouter.js';
 
 // ── Provider registry ──────────────────────────────────────────────────────
 
-type ProviderKey = 'krutrim' | 'groq' | 'sarvam' | 'openai-compatible';
+type ProviderKey = 'krutrim' | 'groq' | 'sarvam' | 'openrouter' | 'openai-compatible';
 
 interface ProviderPreset {
   label: string;
@@ -68,6 +75,17 @@ const PROVIDERS: Record<ProviderKey, ProviderPreset> = {
     useHarmonyFormat: false,
     reasoningEffortStrategy: 'api_param',
     hasMultimodal: true,
+  },
+  openrouter: {
+    label: 'OpenRouter',
+    endpoint: OPENROUTER_ENDPOINT,
+    reasoningModel: 'openai/gpt-oss-120b',
+    multimodalModel: 'google/gemini-2.5-flash',
+    toolCallingModel: 'openai/gpt-oss-120b',
+    useHarmonyFormat: false,
+    reasoningEffortStrategy: 'api_param',
+    hasMultimodal: true,
+    note: 'OpenRouter routes to many upstream providers. You can rank provider slugs per model below.',
   },
   'openai-compatible': {
     label: 'OpenAI-Compatible',
@@ -126,6 +144,49 @@ async function askEndpointAndKey(collectedKeys: Map<ProviderKey, string>): Promi
   ]);
   collectedKeys.set('openai-compatible', answers.apiKey);
   return answers;
+}
+
+// ── OpenRouter provider routing prompt ──────────────────────────────────────
+
+/**
+ * Ask for ranked provider slugs + fallback policy for an OpenRouter model.
+ * Returns undefined when the user keeps OpenRouter's default load balancing.
+ */
+async function askOpenRouterRouting(modelName: string, apiKey: string): Promise<OpenRouterConfig | undefined> {
+  console.log(chalk.gray('\n  OpenRouter can route this model to several upstream providers.'));
+  const endpoints = await fetchModelProviderEndpoints(modelName, apiKey);
+  if (endpoints) {
+    console.log(chalk.gray(`  Available providers for ${modelName}:`));
+    console.log(chalk.gray('    ' + endpoints.map((e) => e.slug).join(', ')));
+  }
+
+  const { order } = await inquirer.prompt([
+    {
+      type: 'input',
+      name: 'order',
+      message: 'Rank providers, highest priority first (comma-separated slugs; blank = OpenRouter default routing):',
+    },
+  ]);
+  const providerOrder = parseSlugList(order);
+  if (!providerOrder) return undefined;
+
+  if (endpoints) {
+    const unknown = findUnknownSlugs(providerOrder, endpoints);
+    if (unknown.length > 0) {
+      console.log(chalk.yellow(`  ⚠  Not listed for this model: ${unknown.join(', ')} (kept anyway)`));
+    }
+  }
+
+  const { allowFallbacks } = await inquirer.prompt([
+    {
+      type: 'confirm',
+      name: 'allowFallbacks',
+      message: 'If these providers fail, allow OpenRouter to fall back to other providers?',
+      default: true,
+    },
+  ]);
+
+  return { providerOrder, allowFallbacks };
 }
 
 // ── Vision capability prompt ────────────────────────────────────────────────
@@ -192,6 +253,7 @@ async function setupReasoningModel(collectedKeys: Map<ProviderKey, string>): Pro
   ]);
 
   const hasVision = await askHasVision(model);
+  const openrouter = provider === 'openrouter' ? await askOpenRouterRouting(model, apiKey) : undefined;
 
   const config: ModelConfig = {
     name: 'reasoning',
@@ -204,6 +266,7 @@ async function setupReasoningModel(collectedKeys: Map<ProviderKey, string>): Pro
     ...(preset.defaultMaxTokens ? { defaultMaxTokens: preset.defaultMaxTokens } : {}),
     ...(preset.maxRequestsPerMinute ? { maxRequestsPerMinute: preset.maxRequestsPerMinute } : {}),
     ...(hasVision ? { hasVision: true } : {}),
+    ...(openrouter ? { openrouter } : {}),
   };
 
   return { config, provider: provider as ProviderKey };
@@ -266,12 +329,15 @@ async function setupMultimodalModel(
     },
   ]);
 
+  const openrouter = provider === 'openrouter' ? await askOpenRouterRouting(model, apiKey) : undefined;
+
   return {
     name: 'multimodal',
     endpoint,
     apiKey,
     type: 'multimodal',
     defaultModel: model,
+    ...(openrouter ? { openrouter } : {}),
   };
 }
 
@@ -329,6 +395,7 @@ async function setupToolCallingModel(
   ]);
 
   const hasVision = await askHasVision(model);
+  const openrouter = provider === 'openrouter' ? await askOpenRouterRouting(model, apiKey) : undefined;
 
   return {
     name: 'tool-calling',
@@ -340,6 +407,7 @@ async function setupToolCallingModel(
     ...(preset.defaultMaxTokens ? { defaultMaxTokens: preset.defaultMaxTokens } : {}),
     ...(preset.maxRequestsPerMinute ? { maxRequestsPerMinute: preset.maxRequestsPerMinute } : {}),
     ...(hasVision ? { hasVision: true } : {}),
+    ...(openrouter ? { openrouter } : {}),
   };
 }
 

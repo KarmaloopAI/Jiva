@@ -887,6 +887,8 @@ ${directive ? `\n${directive}` : ''}`;
           role: 'assistant',
           content: response.content || null,
           tool_calls: response.toolCalls,
+          // OpenRouter reasoning blocks must be echoed back unchanged for tool continuity
+          ...(response.reasoningDetails ? { reasoning_details: response.reasoningDetails } : {}),
         });
       } else {
         messages.push({ role: 'assistant', content: response.content });

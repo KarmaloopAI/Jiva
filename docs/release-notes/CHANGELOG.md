@@ -3,6 +3,7 @@
 Consolidated release history. For full per-release details, see the individual files in this directory.
 
 ## v0.3.54 — Latest
+- OpenRouter first-class support: ranked upstream-provider routing, cost/served-by tracking
 - Fix: session restore no longer resets conversation title/tokens; reset starts a new conversation
 - Docker images ship example personas for sub-agent spawning
 - Documentation restructured by audience

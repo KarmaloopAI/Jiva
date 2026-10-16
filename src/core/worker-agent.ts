@@ -661,7 +661,11 @@ Please complete this subtask and report your findings.`,
         role: 'assistant',
         content: isHarmonyResponse ? response.rawHarmonyContent! : response.content,
         ...(!isHarmonyResponse && response.toolCalls && response.toolCalls.length > 0
-          ? { tool_calls: response.toolCalls }
+          ? {
+              tool_calls: response.toolCalls,
+              // OpenRouter reasoning blocks must be echoed back unchanged for tool continuity
+              ...(response.reasoningDetails ? { reasoning_details: response.reasoningDetails } : {}),
+            }
           : {}),
       });
 

@@ -41,6 +41,7 @@ import { EvaluatorHarness } from './harness.js';
 import type { IAgent } from '../core/agent-interface.js';
 import type { MCPServerConfig } from '../core/config.js';
 import type { HarnessOptions } from './types.js';
+import type { OpenRouterConfig } from '../models/openrouter.js';
 
 export interface EvaluatorOrchestratorConfig {
   endpoint: string;
@@ -51,6 +52,11 @@ export interface EvaluatorOrchestratorConfig {
   toolCallingEndpoint?: string;
   toolCallingApiKey?: string;
   toolCallingModel?: string;
+  /** OpenRouter routing / headers so the evaluator uses the same upstream policy as the main agent. */
+  openrouter?: OpenRouterConfig;
+  headers?: Record<string, string>;
+  toolCallingOpenRouter?: OpenRouterConfig;
+  toolCallingHeaders?: Record<string, string>;
 }
 
 /**
@@ -79,6 +85,8 @@ export async function createEvaluatorHarness(
     type: 'reasoning',
     useHarmonyFormat: orchestratorCfg.useHarmonyFormat ?? false,
     defaultReasoningEffort: 'high',
+    openrouter: orchestratorCfg.openrouter,
+    headers: orchestratorCfg.headers,
   });
 
   let toolCallingModel;
@@ -94,6 +102,8 @@ export async function createEvaluatorHarness(
       type: 'tool-calling',
       useHarmonyFormat: false,
       defaultReasoningEffort: 'medium',
+      openrouter: orchestratorCfg.toolCallingOpenRouter,
+      headers: orchestratorCfg.toolCallingHeaders,
     });
   }
 

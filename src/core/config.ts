@@ -5,6 +5,7 @@ import os from 'os';
 import path from 'path';
 import { ConfigurationError } from '../utils/errors.js';
 import { getDefaultFilesystemAllowedPath } from '../utils/platform.js';
+import { OpenRouterConfigSchema } from '../models/openrouter.js';
 
 /**
  * Jiva's per-user data directory. Conversations and logs already live here
@@ -126,6 +127,21 @@ const ModelConfigSchema = z.object({
    * locally falls back to google-auth-library / `gcloud auth application-default`.
    */
   useGoogleADC: z.boolean().optional(),
+  /** Default reasoning effort sent with every call made through this model. */
+  defaultReasoningEffort: z.enum(['low', 'medium', 'high']).optional(),
+  /** Ask the provider to return reasoning tokens (logged at debug level). */
+  includeReasoning: z.boolean().optional(),
+  /**
+   * Extra HTTP headers sent with every request to this model's endpoint
+   * (e.g. gateway/tenant headers). Never overrides Authorization/Content-Type.
+   */
+  headers: z.record(z.string()).optional(),
+  /**
+   * OpenRouter routing policy for this model role — ranked provider slugs,
+   * fallbacks, privacy and price constraints. Only used (and only sent) when
+   * the endpoint is OpenRouter. See src/models/openrouter.ts.
+   */
+  openrouter: OpenRouterConfigSchema.optional(),
 });
 
 const CodeModeConfigSchema = z.object({

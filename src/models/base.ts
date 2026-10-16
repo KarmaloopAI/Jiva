@@ -14,6 +14,13 @@ export interface Message {
    * subsequent role:'tool' results can be matched by tool_call_id.
    */
   tool_calls?: ToolCall[];
+  /**
+   * OpenRouter structured reasoning blocks. Must be sent back unmodified with
+   * the assistant tool-call message for providers that require reasoning
+   * continuity across tool calls (e.g. Claude via OpenRouter). Only forwarded
+   * to OpenRouter endpoints; stripped for every other provider.
+   */
+  reasoning_details?: unknown[];
 }
 
 export interface MessageContent {
@@ -39,7 +46,24 @@ export interface ModelResponse {
     promptTokens: number;
     completionTokens: number;
     totalTokens: number;
+    /** Billed cost in USD, when the provider reports it (OpenRouter). */
+    cost?: number;
+    /** Prompt tokens served from cache, when reported. */
+    cachedTokens?: number;
+    /** Tokens spent on hidden reasoning, when reported. */
+    reasoningTokens?: number;
   };
+  /**
+   * Which upstream provider/model actually served the call. Populated for
+   * OpenRouter, where the served provider/model can differ from what was
+   * requested (provider ranking, model fallbacks).
+   */
+  routing?: {
+    model?: string;
+    provider?: string;
+  };
+  /** OpenRouter reasoning blocks to echo back on the assistant message (see Message.reasoning_details). */
+  reasoningDetails?: unknown[];
   /**
    * The API's own reason the completion stopped, e.g. 'stop' | 'length' | 'tool_calls'.
    * 'length' means the completion hit its max_tokens ceiling — if content and toolCalls

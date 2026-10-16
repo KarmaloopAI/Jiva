@@ -8,6 +8,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { configManager, ConfigManager } from '../../core/config.js';
 import { createModelClient } from '../../models/model-client.js';
+import { modelClientConfigFromStored } from '../../models/client-config.js';
 import { ModelOrchestrator } from '../../models/orchestrator.js';
 import { MCPServerManager } from '../../mcp/server-manager.js';
 import { WorkspaceManager } from '../../core/workspace.js';
@@ -38,6 +39,21 @@ const packageJson = JSON.parse(
 // this only prints the result.
 if (ConfigManager.lastMigrationMessage) {
   console.log(chalk.yellow(`\n⚠  ${ConfigManager.lastMigrationMessage}\n`));
+}
+
+/** Print an OpenRouter routing block (used by `jiva config --show`). */
+function printOpenRouterRouting(or: import('../../models/openrouter.js').OpenRouterConfig | undefined): void {
+  if (!or) return;
+  if (or.providerOrder?.length) {
+    console.log(chalk.gray('  Provider order:'), or.providerOrder.map((p, i) => `${i + 1}. ${p}`).join('  '));
+  }
+  if (or.allowFallbacks !== undefined) {
+    console.log(chalk.gray('  Allow fallbacks:'), or.allowFallbacks ? 'Yes' : 'No (strict)');
+  }
+  if (or.only?.length) console.log(chalk.gray('  Only:'), or.only.join(', '));
+  if (or.ignore?.length) console.log(chalk.gray('  Ignore:'), or.ignore.join(', '));
+  if (or.sort) console.log(chalk.gray('  Sort:'), or.sort);
+  if (or.modelFallbacks?.length) console.log(chalk.gray('  Model fallbacks:'), or.modelFallbacks.join(', '));
 }
 
 const program = new Command();
@@ -81,6 +97,7 @@ program
           console.log(chalk.bold('Reasoning Model:'));
           console.log(chalk.gray('  Endpoint:'), config.models.reasoning.endpoint);
           console.log(chalk.gray('  Model:'), config.models.reasoning.defaultModel);
+          printOpenRouterRouting(config.models.reasoning.openrouter);
           console.log(chalk.gray('  Harmony Format:'), config.models.reasoning.useHarmonyFormat ? 'Yes' : 'No');
           console.log(chalk.gray('  Vision:'), config.models.reasoning.hasVision ? 'Yes' : 'No');
           console.log();
@@ -90,6 +107,7 @@ program
           console.log(chalk.bold('Multimodal Model:'));
           console.log(chalk.gray('  Endpoint:'), config.models.multimodal.endpoint);
           console.log(chalk.gray('  Model:'), config.models.multimodal.defaultModel);
+          printOpenRouterRouting(config.models.multimodal.openrouter);
           console.log();
         }
 
@@ -97,6 +115,7 @@ program
           console.log(chalk.bold('Tool-Calling Model:'), chalk.green('(primary for tool calls)'));
           console.log(chalk.gray('  Endpoint:'), config.models.toolCalling.endpoint);
           console.log(chalk.gray('  Model:'), config.models.toolCalling.defaultModel);
+          printOpenRouterRouting(config.models.toolCalling.openrouter);
           console.log(chalk.gray('  Vision:'), config.models.toolCalling.hasVision ? 'Yes' : 'No');
           console.log();
         }
@@ -192,29 +211,17 @@ program
         throw new Error('Reasoning model configuration is required');
       }
       const reasoningModelConfig = modelConfig.reasoning;
-      const reasoningModel = createModelClient({
-        endpoint: reasoningModelConfig.endpoint,
-        apiKey: reasoningModelConfig.apiKey,
-        model: reasoningModelConfig.defaultModel,
-        type: 'reasoning',
-        useHarmonyFormat: reasoningModelConfig.useHarmonyFormat,
-        hasVision: reasoningModelConfig.hasVision,
-        defaultReasoningEffort: reasoningModelConfig.defaultReasoningEffort ?? undefined,
-        reasoningEffortStrategy: reasoningModelConfig.reasoningEffortStrategy,
-        defaultMaxTokens: reasoningModelConfig.defaultMaxTokens,
-        maxRequestsPerMinute: reasoningModelConfig.maxRequestsPerMinute,
-      });
+      const reasoningModel = createModelClient(
+        modelClientConfigFromStored(reasoningModelConfig, 'reasoning'),
+      );
 
       let multimodalModel;
       const multimodalModelConfig = modelConfig.multimodal;
       if (multimodalModelConfig) {
-        multimodalModel = createModelClient({
-          endpoint: multimodalModelConfig.endpoint,
-          apiKey: multimodalModelConfig.apiKey,
-          model: multimodalModelConfig.defaultModel,
-          type: 'multimodal',
-          // reasoning_effort not applicable for multimodal models
-        });
+        // reasoning_effort not applicable for multimodal models
+        multimodalModel = createModelClient(
+          modelClientConfigFromStored(multimodalModelConfig, 'multimodal'),
+        );
       }
 
       // Tool-calling LLM: optional fallback for when the reasoning model generates
@@ -222,17 +229,12 @@ program
       let toolCallingModel;
       const toolCallingModelConfig = modelConfig.toolCalling;
       if (toolCallingModelConfig) {
-        toolCallingModel = createModelClient({
-          endpoint: toolCallingModelConfig.endpoint,
-          apiKey: toolCallingModelConfig.apiKey,
-          model: toolCallingModelConfig.defaultModel,
-          type: 'tool-calling',
-          useHarmonyFormat: toolCallingModelConfig.useHarmonyFormat,
-          hasVision: toolCallingModelConfig.hasVision,
-          defaultReasoningEffort: 'medium',
-          defaultMaxTokens: toolCallingModelConfig.defaultMaxTokens,
-          maxRequestsPerMinute: toolCallingModelConfig.maxRequestsPerMinute,
-        });
+        toolCallingModel = createModelClient(
+          modelClientConfigFromStored(toolCallingModelConfig, 'tool-calling', {
+            defaultReasoningEffort: 'medium',
+            reasoningEffortStrategy: undefined,
+          }),
+        );
       }
 
       // Test model connectivity before proceeding
@@ -426,10 +428,14 @@ program
           apiKey: modelConfig.reasoning.apiKey,
           model: modelConfig.reasoning.defaultModel,
           useHarmonyFormat: modelConfig.reasoning.useHarmonyFormat,
+          openrouter: modelConfig.reasoning.openrouter,
+          headers: modelConfig.reasoning.headers,
           ...(modelConfig.toolCalling && {
             toolCallingEndpoint: modelConfig.toolCalling.endpoint,
             toolCallingApiKey: modelConfig.toolCalling.apiKey,
             toolCallingModel: modelConfig.toolCalling.defaultModel,
+            toolCallingOpenRouter: modelConfig.toolCalling.openrouter,
+            toolCallingHeaders: modelConfig.toolCalling.headers,
           }),
         };
         harness = await createEvaluatorHarness(agent, mcpServers, evalOrchestratorCfg);
@@ -711,28 +717,16 @@ program
         throw new Error('Reasoning model configuration is required');
       }
       const reasoningModelConfig = modelConfig.reasoning;
-      const reasoningModel = createModelClient({
-        endpoint: reasoningModelConfig.endpoint,
-        apiKey: reasoningModelConfig.apiKey,
-        model: reasoningModelConfig.defaultModel,
-        type: 'reasoning',
-        useHarmonyFormat: reasoningModelConfig.useHarmonyFormat,
-        hasVision: reasoningModelConfig.hasVision,
-        defaultReasoningEffort: reasoningModelConfig.defaultReasoningEffort ?? undefined,
-        reasoningEffortStrategy: reasoningModelConfig.reasoningEffortStrategy,
-        defaultMaxTokens: reasoningModelConfig.defaultMaxTokens,
-        maxRequestsPerMinute: reasoningModelConfig.maxRequestsPerMinute,
-      });
+      const reasoningModel = createModelClient(
+        modelClientConfigFromStored(reasoningModelConfig, 'reasoning'),
+      );
 
       let multimodalModel;
       const multimodalModelConfig = configManager.getMultimodalModel();
       if (multimodalModelConfig) {
-        multimodalModel = createModelClient({
-          endpoint: multimodalModelConfig.endpoint,
-          apiKey: multimodalModelConfig.apiKey,
-          model: multimodalModelConfig.model || multimodalModelConfig.defaultModel || '',
-          type: 'multimodal',
-        });
+        multimodalModel = createModelClient(
+          modelClientConfigFromStored(multimodalModelConfig, 'multimodal'),
+        );
       }
 
       // Tool-calling LLM: optional fallback for when the reasoning model generates
@@ -740,17 +734,12 @@ program
       let toolCallingModel;
       const toolCallingModelCfg = configManager.getToolCallingModel();
       if (toolCallingModelCfg) {
-        toolCallingModel = createModelClient({
-          endpoint: toolCallingModelCfg.endpoint,
-          apiKey: toolCallingModelCfg.apiKey,
-          model: toolCallingModelCfg.model || toolCallingModelCfg.defaultModel || '',
-          type: 'tool-calling',
-          useHarmonyFormat: toolCallingModelCfg.useHarmonyFormat,
-          hasVision: toolCallingModelCfg.hasVision,
-          defaultReasoningEffort: 'medium',
-          defaultMaxTokens: toolCallingModelCfg.defaultMaxTokens,
-          maxRequestsPerMinute: toolCallingModelCfg.maxRequestsPerMinute,
-        });
+        toolCallingModel = createModelClient(
+          modelClientConfigFromStored(toolCallingModelCfg, 'tool-calling', {
+            defaultReasoningEffort: 'medium',
+            reasoningEffortStrategy: undefined,
+          }),
+        );
       }
 
       // Test model connectivity before proceeding

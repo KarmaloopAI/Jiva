@@ -371,6 +371,7 @@ export class EvaluatorAgent {
           role: 'assistant',
           content: response.content || null,
           tool_calls: response.toolCalls,
+          ...(response.reasoningDetails ? { reasoning_details: response.reasoningDetails } : {}),
         } as any);
       } else {
         messages.push({ role: 'assistant', content: response.content });

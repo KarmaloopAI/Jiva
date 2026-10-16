@@ -22,6 +22,8 @@ import { StorageProvider } from '../../storage/provider.js';
 import { logger } from '../../utils/logger.js';
 import { OrchestrationLogger } from '../../utils/orchestration-logger.js';
 import { createModelClient } from '../../models/model-client.js';
+import { modelClientConfigFromStored } from '../../models/client-config.js';
+import { parseSlugList, OPENROUTER_ENDPOINT, type OpenRouterConfig } from '../../models/openrouter.js';
 import { Message } from '../../models/base.js';
 import { PersonaManager } from '../../personas/persona-manager.js';
 import { getDefaultFilesystemAllowedPath } from '../../utils/platform.js';
@@ -56,6 +58,15 @@ interface ActiveSession {
   orchestrationLogger: OrchestrationLogger;
   info: SessionInfo;
   idleTimer?: NodeJS.Timeout;
+}
+
+/** Parse a boolean env var ("true"/"false"/"1"/"0"); undefined when unset or unrecognised. */
+function parseBoolEnv(value: string | undefined): boolean | undefined {
+  if (value === undefined) return undefined;
+  const v = value.trim().toLowerCase();
+  if (['true', '1', 'yes'].includes(v)) return true;
+  if (['false', '0', 'no'].includes(v)) return false;
+  return undefined;
 }
 
 export class SessionManager extends EventEmitter {
@@ -189,6 +200,8 @@ export class SessionManager extends EventEmitter {
           useGoogleADC?: boolean;
           reasoningEffortStrategy?: 'api_param' | 'system_prompt' | 'both';
           defaultMaxTokens?: number;
+          headers?: Record<string, string>;
+          openrouter?: OpenRouterConfig;
         };
         multimodal: null;
       }>('models');
@@ -206,11 +219,24 @@ export class SessionManager extends EventEmitter {
           reasoning: {
             provider: process.env.JIVA_MODEL_PROVIDER || 'sarvam',
             apiKey: envApiKey || '',
-            endpoint: envEndpoint || 'https://api.sarvam.ai/v1/chat/completions',
+            endpoint:
+              envEndpoint ||
+              (process.env.JIVA_MODEL_PROVIDER === 'openrouter'
+                ? OPENROUTER_ENDPOINT
+                : 'https://api.sarvam.ai/v1/chat/completions'),
             model: envModel || 'sarvam-105b',
             useHarmonyFormat: false,
             reasoningEffortStrategy: 'api_param' as const,
             defaultMaxTokens: 4096,
+            // OpenRouter routing from env (ignored for other endpoints)
+            ...(process.env.JIVA_MODEL_PROVIDER_ORDER || process.env.JIVA_MODEL_ALLOW_FALLBACKS
+              ? {
+                  openrouter: {
+                    providerOrder: parseSlugList(process.env.JIVA_MODEL_PROVIDER_ORDER),
+                    allowFallbacks: parseBoolEnv(process.env.JIVA_MODEL_ALLOW_FALLBACKS),
+                  },
+                }
+              : {}),
           },
           multimodal: null,
         };
@@ -225,19 +251,30 @@ export class SessionManager extends EventEmitter {
       // for this session only — the endpoint/apiKey/strategy still come from the
       // tenant's stored config (secrets are never part of agentConfig).
       const reasoningModelName = agentConfig?.model ?? rm.model ?? rm.defaultModel;
-      const reasoningModel = createModelClient({
-        endpoint: rm.endpoint,
-        apiKey: rm.apiKey || '',
-        model: reasoningModelName,
-        type: 'reasoning',
-        useHarmonyFormat: rm.useHarmonyFormat ?? false,
-        useGoogleADC: rm.useGoogleADC ?? false,
-        hasVision: rm.hasVision ?? false,
-        reasoningEffortStrategy: rm.reasoningEffortStrategy,
-        defaultReasoningEffort: 'high',
-        defaultMaxTokens: rm.defaultMaxTokens,
-        maxRequestsPerMinute: rm.maxRequestsPerMinute,
-      });
+      // Per-session OpenRouter overrides (agentConfig) layered over stored routing.
+      const reasoningOpenRouter: OpenRouterConfig | undefined =
+        agentConfig?.providerOrder !== undefined || agentConfig?.allowFallbacks !== undefined
+          ? {
+              ...(rm.openrouter ?? {}),
+              ...(agentConfig?.providerOrder !== undefined
+                ? { providerOrder: agentConfig.providerOrder }
+                : {}),
+              ...(agentConfig?.allowFallbacks !== undefined
+                ? { allowFallbacks: agentConfig.allowFallbacks }
+                : {}),
+            }
+          : rm.openrouter;
+      const reasoningModel = createModelClient(
+        modelClientConfigFromStored(rm, 'reasoning', {
+          model: reasoningModelName,
+          apiKey: rm.apiKey || '',
+          useHarmonyFormat: rm.useHarmonyFormat ?? false,
+          useGoogleADC: rm.useGoogleADC ?? false,
+          hasVision: rm.hasVision ?? false,
+          defaultReasoningEffort: 'high',
+          openrouter: reasoningOpenRouter,
+        }),
+      );
 
       // Tool-calling model: when configured, serves as the PRIMARY model for tool-call
       // execution (reliable standard-JSON tool formatting). The reasoning model acts as
@@ -262,6 +299,16 @@ export class SessionManager extends EventEmitter {
             // IS reasoning-capable can still opt in explicitly via its config.
             defaultReasoningEffort: undefined,
             reasoningEffortStrategy: undefined,
+            // OpenRouter routing for the tool-calling model (env; ignored elsewhere)
+            ...(process.env.JIVA_TOOL_CALLING_MODEL_PROVIDER_ORDER ||
+            process.env.JIVA_TOOL_CALLING_MODEL_ALLOW_FALLBACKS
+              ? {
+                  openrouter: {
+                    providerOrder: parseSlugList(process.env.JIVA_TOOL_CALLING_MODEL_PROVIDER_ORDER),
+                    allowFallbacks: parseBoolEnv(process.env.JIVA_TOOL_CALLING_MODEL_ALLOW_FALLBACKS),
+                  },
+                }
+              : {}),
           })
         : undefined;
 

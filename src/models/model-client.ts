@@ -24,6 +24,15 @@ import {
 import { ModelError } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
 import { getGoogleADCToken } from './google-adc.js';
+import {
+  OpenRouterConfig,
+  isOpenRouterModel,
+  buildOpenRouterRouting,
+  buildOpenRouterHeaders,
+  extractRoutingInfo,
+  parseOpenRouterErrorBody,
+  describeOpenRouterHttpError,
+} from './openrouter.js';
 
 export interface ModelClientConfig {
   endpoint: string;
@@ -120,6 +129,42 @@ export interface ModelClientConfig {
    * Default: false
    */
   hasVision?: boolean;
+
+  /** Extra HTTP headers for every request (never overrides Authorization/Content-Type). */
+  headers?: Record<string, string>;
+
+  /**
+   * OpenRouter routing policy (ranked providers, fallbacks, privacy/price
+   * constraints). Applied only when the endpoint is OpenRouter — see
+   * src/models/openrouter.ts.
+   */
+  openrouter?: OpenRouterConfig;
+}
+
+/**
+ * Result of building a chat-completions request: the JSON body plus the flags
+ * the caller needs to parse the response.
+ */
+export interface BuiltChatRequest {
+  requestBody: any;
+  useHarmony: boolean;
+  useStream: boolean;
+}
+
+/** Map an OpenAI-style `usage` object (plus OpenRouter extras) to ModelResponse.usage. */
+export function parseUsage(usage: any): ModelResponse['usage'] {
+  if (!usage) return undefined;
+  const cost = typeof usage.cost === 'number' ? usage.cost : undefined;
+  const cached = usage.prompt_tokens_details?.cached_tokens;
+  const reasoning = usage.completion_tokens_details?.reasoning_tokens;
+  return {
+    promptTokens: usage.prompt_tokens || 0,
+    completionTokens: usage.completion_tokens || 0,
+    totalTokens: usage.total_tokens || 0,
+    ...(cost !== undefined ? { cost } : {}),
+    ...(typeof cached === 'number' ? { cachedTokens: cached } : {}),
+    ...(typeof reasoning === 'number' ? { reasoningTokens: reasoning } : {}),
+  };
 }
 
 export class ModelClient implements IModel {
@@ -138,6 +183,11 @@ export class ModelClient implements IModel {
 
   constructor(config: ModelClientConfig) {
     this.config = config;
+  }
+
+  /** True when this model is served through OpenRouter (routing block or openrouter.ai endpoint). */
+  isOpenRouter(): boolean {
+    return isOpenRouterModel(this.config);
   }
 
   supportsVision(): boolean {
@@ -188,7 +238,9 @@ export class ModelClient implements IModel {
     const isReasoningModel = this.config.type === 'reasoning' || this.config.type === 'tool-calling';
 
     // Retry logic for transient errors (WAF/rate limiting/server errors)
-    const maxRetries = 4;
+    // OpenRouter already fails over between upstream providers server-side
+    // (before any tokens are sent), so fewer client-side retries are needed.
+    const maxRetries = this.isOpenRouter() ? 2 : 4;
     let lastError: Error | null = null;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -227,7 +279,8 @@ export class ModelClient implements IModel {
         if (error instanceof ModelError) {
           const is429 = error.message.includes('(429)');
           const shouldRetry =
-            error.message.includes('(403)') ||  // WAF blocking
+            (!this.isOpenRouter() && error.message.includes('(403)')) ||  // WAF blocking (on OpenRouter 403 = moderation/budget: not transient)
+            error.message.includes('(408)') ||  // Request timeout (OpenRouter)
             is429 ||                            // Rate limiting
             error.message.includes('(500)') ||  // Internal server error
             error.message.includes('(502)') ||  // Bad gateway
@@ -241,6 +294,7 @@ export class ModelClient implements IModel {
           // Log the error type for debugging
           let errorType = 'Unknown error';
           if (error.message.includes('(403)')) errorType = '403 Access Denied (WAF)';
+          else if (error.message.includes('(408)')) errorType = '408 Request Timeout';
           else if (is429) errorType = '429 Rate Limited';
           else if (error.message.includes('(500)')) errorType = '500 Internal Server Error';
           else if (error.message.includes('(502)')) errorType = '502 Bad Gateway';
@@ -262,7 +316,7 @@ export class ModelClient implements IModel {
             this._lastRetryWait = retryAfterMs ?? exponential;
             logger.warn(`Got ${errorType}, will retry in ${(this._lastRetryWait / 1000).toFixed(1)}s (attempt ${attempt + 1}/${maxRetries + 1})...`);
           } else {
-            const waitTime = Math.min(Math.pow(2, attempt) * 1000, 30_000);
+            const waitTime = error.retryAfterMs ?? Math.min(Math.pow(2, attempt) * 1000, 30_000);
             this._lastRetryWait = waitTime;
             logger.warn(`Got ${errorType}, will retry in ${waitTime / 1000}s (attempt ${attempt + 1}/${maxRetries + 1})...`);
           }
@@ -313,6 +367,10 @@ export class ModelClient implements IModel {
     let reasoning = '';
     let finishReason: string | null = null;
     let usage: any = undefined;
+    // OpenRouter extras captured from the stream
+    let servedModel: string | undefined;
+    let servedProvider: string | undefined;
+    const reasoningDetails: unknown[] = [];
     // tool_calls indexed by their delta index, accumulated across chunks
     const toolCallsByIndex = new Map<number, { id: string; type: 'function'; function: { name: string; arguments: string } }>();
 
@@ -342,6 +400,21 @@ export class ModelClient implements IModel {
               continue;
             }
 
+            if (typeof chunk.model === 'string') servedModel = chunk.model;
+            if (typeof chunk.provider === 'string') servedProvider = chunk.provider;
+
+            // Mid-stream failure (OpenRouter): top-level `error` on a chunk, after
+            // the HTTP 200 was already sent. Nothing more follows.
+            if (chunk.error) {
+              const orError = parseOpenRouterErrorBody(chunk);
+              throw new ModelError(
+                `API error (${orError?.code ?? 502}): ${orError?.message ?? JSON.stringify(chunk.error)}` +
+                  (orError?.providerName ? ` [provider: ${orError.providerName}]` : '') +
+                  ' (mid-stream)',
+                this.config.model,
+              );
+            }
+
             if (chunk.usage) usage = chunk.usage;
 
             const choice = chunk.choices?.[0];
@@ -352,6 +425,7 @@ export class ModelClient implements IModel {
               // Reasoning/thinking tokens (Groq: reasoning, Sarvam/others: reasoning_content)
               const r = delta.reasoning_content ?? delta.reasoning;
               if (typeof r === 'string') reasoning += r;
+              if (Array.isArray(delta.reasoning_details)) reasoningDetails.push(...delta.reasoning_details);
               if (Array.isArray(delta.tool_calls)) {
                 for (const tc of delta.tool_calls) {
                   const idx = tc.index ?? 0;
@@ -387,127 +461,164 @@ export class ModelClient implements IModel {
             role: 'assistant',
             content: content || null,
             ...(reasoning ? { reasoning_content: reasoning } : {}),
+            ...(reasoningDetails.length > 0 ? { reasoning_details: reasoningDetails } : {}),
             ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
           },
           finish_reason: finishReason ?? 'stop',
         },
       ],
+      ...(servedModel ? { model: servedModel } : {}),
+      ...(servedProvider ? { provider: servedProvider } : {}),
       ...(usage ? { usage } : {}),
     };
   }
 
-  private async attemptChat(options: ChatCompletionOptions, isReasoningModel: boolean): Promise<ModelResponse> {
-    try {
-      let messages: any[];
-      let tools: HarmonyToolDefinition[] | undefined;
-      const useHarmony = this.config.useHarmonyFormat ?? false;
+  /**
+   * Build the chat-completions request body for `options`. Pure with respect to
+   * I/O (no network), so request shaping — including OpenRouter routing — can
+   * be unit-tested directly.
+   */
+  buildRequestBody(options: ChatCompletionOptions, isReasoningModel: boolean): BuiltChatRequest {
+    let messages: any[];
+    let tools: HarmonyToolDefinition[] | undefined;
+    const useHarmony = this.config.useHarmonyFormat ?? false;
 
-      if (isReasoningModel && options.tools && options.tools.length > 0) {
-        if (useHarmony) {
-          // Harmony format (Krutrim gpt-oss-120b only)
-          // Tools are embedded in the developer message as XML/TypeScript signatures
-          tools = options.tools.map(t => ({
-            name: t.name,
-            description: t.description,
-            parameters: t.parameters,
-          }));
+    if (isReasoningModel && options.tools && options.tools.length > 0) {
+      if (useHarmony) {
+        // Harmony format (Krutrim gpt-oss-120b only)
+        // Tools are embedded in the developer message as XML/TypeScript signatures
+        tools = options.tools.map(t => ({
+          name: t.name,
+          description: t.description,
+          parameters: t.parameters,
+        }));
 
-          messages = formatMessagesForHarmony(
-            options.messages as HarmonyMessage[],
-            tools
-          );
-        } else {
-          // Standard OpenAI format - tools sent as separate request field
-          messages = options.messages;
-        }
+        messages = formatMessagesForHarmony(
+          options.messages as HarmonyMessage[],
+          tools
+        );
       } else {
+        // Standard OpenAI format - tools sent as separate request field
         messages = options.messages;
       }
+    } else {
+      messages = options.messages;
+    }
 
-      // All OpenAI-compatible APIs support standard roles: system, user, assistant, tool
-      // Convert 'developer' role to 'system' for API compatibility
-      const apiMessages: any[] = messages.map((msg: any) => {
-        if (msg.role === 'developer') {
-          return { ...msg, role: 'system' };
-        }
-        return msg;
-      });
-
-      // ── Reasoning effort ────────────────────────────────────────────────────
-      // Per-call value takes precedence over model-level default.
-      const effort = options.reasoningEffort ?? this.config.defaultReasoningEffort;
-      const strategy = this.config.reasoningEffortStrategy ?? 'both';
-
-      // System-prompt injection: prepend "Reasoning: <level>" as the very first
-      // system message. Required for gpt-oss-120b on Krutrim (it strips the API param).
-      if (effort && isReasoningModel && (strategy === 'system_prompt' || strategy === 'both')) {
-        apiMessages.unshift({ role: 'system', content: `Reasoning: ${effort}` });
+    // All OpenAI-compatible APIs support standard roles: system, user, assistant, tool
+    // Convert 'developer' role to 'system' for API compatibility
+    const isOpenRouter = this.isOpenRouter();
+    const apiMessages: any[] = messages.map((msg: any) => {
+      let out = msg;
+      if (out.role === 'developer') {
+        out = { ...out, role: 'system' };
       }
-
-      const requestBody: any = {
-        model: options.model || this.config.model,
-        messages: apiMessages,
-        temperature: options.temperature ?? 0.2, // Lower default to reduce hallucination
-      };
-
-      // max_tokens: explicit call option > config default
-      // Config default is important for reasoning models (Sarvam-105B) that need
-      // a large token budget to finish their thinking chain before producing output.
-      const maxTokens = options.maxTokens ?? this.config.defaultMaxTokens;
-      if (maxTokens) {
-        requestBody.max_tokens = maxTokens;
+      // reasoning_details is an OpenRouter-only field; other providers may 400 on it.
+      if (!isOpenRouter && out.reasoning_details !== undefined) {
+        const { reasoning_details: _drop, ...rest } = out;
+        out = rest;
       }
+      return out;
+    });
 
-      // API param: supported natively by Groq and Sarvam; silently ignored elsewhere.
-      if (effort && isReasoningModel && (strategy === 'api_param' || strategy === 'both')) {
+    // ── Reasoning effort ────────────────────────────────────────────────────
+    // Per-call value takes precedence over model-level default.
+    const effort = options.reasoningEffort ?? this.config.defaultReasoningEffort;
+    // OpenRouter normalises reasoning control itself, so default to the API
+    // param there rather than also injecting a "Reasoning: x" system message.
+    const strategy = this.config.reasoningEffortStrategy ?? (isOpenRouter ? 'api_param' : 'both');
+
+    // System-prompt injection: prepend "Reasoning: <level>" as the very first
+    // system message. Required for gpt-oss-120b on Krutrim (it strips the API param).
+    if (effort && isReasoningModel && (strategy === 'system_prompt' || strategy === 'both')) {
+      apiMessages.unshift({ role: 'system', content: `Reasoning: ${effort}` });
+    }
+
+    const requestBody: any = {
+      model: options.model || this.config.model,
+      messages: apiMessages,
+      temperature: options.temperature ?? 0.2, // Lower default to reduce hallucination
+    };
+
+    // max_tokens: explicit call option > config default
+    // Config default is important for reasoning models (Sarvam-105B) that need
+    // a large token budget to finish their thinking chain before producing output.
+    const maxTokens = options.maxTokens ?? this.config.defaultMaxTokens;
+    if (maxTokens) {
+      requestBody.max_tokens = maxTokens;
+    }
+
+    // API param: supported natively by Groq and Sarvam; silently ignored elsewhere.
+    if (effort && isReasoningModel && (strategy === 'api_param' || strategy === 'both')) {
+      if (isOpenRouter) {
+        // OpenRouter's unified reasoning control.
+        requestBody.reasoning = { effort };
+      } else {
         requestBody.reasoning_effort = effort;
       }
+    }
 
-      // include_reasoning: request thinking tokens in the response (Groq-specific).
-      // Sarvam always returns reasoning_content regardless of this flag.
-      if (this.config.includeReasoning && isReasoningModel) {
-        requestBody.include_reasoning = true;
-      }
+    // include_reasoning: request thinking tokens in the response (Groq-specific).
+    // Sarvam always returns reasoning_content regardless of this flag.
+    if (this.config.includeReasoning && isReasoningModel) {
+      requestBody.include_reasoning = true;
+    }
 
-      // Disable the model's thinking chain. Send both toggle flags — `thinking:false`
-      // (GLM) and `enable_thinking:false` (Qwen3) — since each family reads only its
-      // own; other providers ignore chat_template_kwargs entirely.
-      if (options.disableThinking) {
-        requestBody.chat_template_kwargs = {
-          thinking: false,
-          enable_thinking: false,
-        };
-      }
-      // ────────────────────────────────────────────────────────────────────────
+    // Disable the model's thinking chain. Send both toggle flags — `thinking:false`
+    // (GLM) and `enable_thinking:false` (Qwen3) — since each family reads only its
+    // own; other providers ignore chat_template_kwargs entirely.
+    if (options.disableThinking) {
+      requestBody.chat_template_kwargs = {
+        thinking: false,
+        enable_thinking: false,
+      };
+    }
+    // ────────────────────────────────────────────────────────────────────────
 
-      // Send tools in standard OpenAI format if not using Harmony
-      if (!useHarmony && isReasoningModel && options.tools && options.tools.length > 0) {
-        requestBody.tools = options.tools.map(t => ({
-          type: 'function',
-          function: {
-            name: t.name,
-            description: t.description,
-            parameters: t.parameters,
-          },
-        }));
-        requestBody.tool_choice = 'auto';
-      }
+    // Send tools in standard OpenAI format if not using Harmony
+    if (!useHarmony && isReasoningModel && options.tools && options.tools.length > 0) {
+      requestBody.tools = options.tools.map(t => ({
+        type: 'function',
+        function: {
+          name: t.name,
+          description: t.description,
+          parameters: t.parameters,
+        },
+      }));
+      requestBody.tool_choice = 'auto';
+    }
 
-      // Streaming: some providers/models only accept streaming requests
-      // (e.g. Qwen/Qwen3.7-Plus on Together AI returns 400 "streaming_required"
-      // otherwise). `_streamingRequired` is auto-set the first time such an
-      // error is seen (see chat()); a caller may also force it per-call via
-      // `options.stream`. When streaming, the response is consumed as SSE and
-      // reassembled below into the same shape as a non-streaming response.
-      const useStream = this._streamingRequired || options.stream === true;
-      if (useStream) {
-        requestBody.stream = true;
-        // Together AI (and OpenAI) emit a final chunk carrying the total usage
-        // only when `stream_options.include_usage` is set; without it the
-        // reassembled response would have no usage and TokenTracker would fall
-        // back to local estimation. Harmless on providers that ignore it.
-        requestBody.stream_options = { include_usage: true };
-      }
+    // OpenRouter routing policy: ranked providers, fallbacks, privacy/price
+    // constraints, model fallbacks. Never sent to other endpoints.
+    if (isOpenRouter) {
+      const hasTools = Array.isArray(requestBody.tools) && requestBody.tools.length > 0;
+      const routing = buildOpenRouterRouting(this.config.openrouter, hasTools);
+      if (routing.provider) requestBody.provider = routing.provider;
+      if (routing.models) requestBody.models = routing.models;
+    }
+
+    // Streaming: some providers/models only accept streaming requests
+    // (e.g. Qwen/Qwen3.7-Plus on Together AI returns 400 "streaming_required"
+    // otherwise). `_streamingRequired` is auto-set the first time such an
+    // error is seen (see chat()); a caller may also force it per-call via
+    // `options.stream`. When streaming, the response is consumed as SSE and
+    // reassembled below into the same shape as a non-streaming response.
+    const useStream = this._streamingRequired || options.stream === true;
+    if (useStream) {
+      requestBody.stream = true;
+      // Together AI (and OpenAI) emit a final chunk carrying the total usage
+      // only when `stream_options.include_usage` is set; without it the
+      // reassembled response would have no usage and TokenTracker would fall
+      // back to local estimation. Harmless on providers that ignore it.
+      requestBody.stream_options = { include_usage: true };
+    }
+
+    return { requestBody, useHarmony, useStream };
+  }
+
+  private async attemptChat(options: ChatCompletionOptions, isReasoningModel: boolean): Promise<ModelResponse> {
+    try {
+      const { requestBody, useHarmony, useStream } = this.buildRequestBody(options, isReasoningModel);
 
       // Log full request for debugging
       logger.debug('API Request:', JSON.stringify(requestBody, null, 2));
@@ -522,6 +633,10 @@ export class ModelClient implements IModel {
       const response = await fetch(this.config.endpoint, {
         method: 'POST',
         headers: {
+          // Attribution + user headers first so they can never override the
+          // protocol/auth headers below.
+          ...(this.isOpenRouter() ? buildOpenRouterHeaders(this.config.openrouter) : {}),
+          ...(this.config.headers ?? {}),
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${authToken}`,
           'User-Agent': 'Jiva/0.1.0',
@@ -572,8 +687,16 @@ export class ModelClient implements IModel {
           }
         }
 
+        // 429 and 503 both carry Retry-After on OpenRouter (see its error docs).
+        if (retryAfterMs === undefined && response.status === 503) {
+          const h = Number(response.headers.get('retry-after'));
+          if (Number.isFinite(h) && h > 0) retryAfterMs = h * 1000;
+        }
+
         throw new ModelError(
-          `API error (${response.status}): ${errorText}`,
+          this.isOpenRouter()
+            ? describeOpenRouterHttpError(response.status, errorText, this.config.openrouter)
+            : `API error (${response.status}): ${errorText}`,
           this.config.model,
           retryAfterMs,
         );
@@ -583,6 +706,20 @@ export class ModelClient implements IModel {
         ? await this.parseSSEStream(response)
         : await response.json();
       logger.debug('API Response:', JSON.stringify(data, null, 2));
+
+      // OpenRouter reports generation-time failures as HTTP 200 with an `error`
+      // object (and no `choices`). Surface it with the upstream status code in
+      // "(NNN)" form so the retry logic treats it like a real HTTP error.
+      if (this.isOpenRouter()) {
+        const orError = parseOpenRouterErrorBody(data);
+        if (orError) {
+          throw new ModelError(
+            `API error (${orError.code ?? 502}): ${orError.message}` +
+              (orError.providerName ? ` [provider: ${orError.providerName}]` : ''),
+            this.config.model,
+          );
+        }
+      }
 
       if (!data.choices || data.choices.length === 0) {
         throw new ModelError('No choices in response', this.config.model);
@@ -598,6 +735,25 @@ export class ModelClient implements IModel {
         choice.message?.reasoning_content ?? choice.message?.reasoning;
       if (reasoningTokens) {
         logger.debug(`[Model reasoning] ${reasoningTokens.substring(0, 2000)}${reasoningTokens.length > 2000 ? '…' : ''}`);
+      }
+
+      // OpenRouter extras: which upstream served the call, and reasoning blocks
+      // that must be echoed back on the assistant message for tool continuity.
+      const routingInfo = extractRoutingInfo(data);
+      const reasoningDetails: unknown[] | undefined =
+        Array.isArray(choice.message?.reasoning_details) && choice.message.reasoning_details.length > 0
+          ? choice.message.reasoning_details
+          : undefined;
+      const extras = {
+        ...(routingInfo ? { routing: routingInfo } : {}),
+        ...(reasoningDetails ? { reasoningDetails } : {}),
+      };
+      if (routingInfo) {
+        const cost = data.usage?.cost;
+        logger.debug(
+          `[ModelClient] served by ${routingInfo.provider ?? 'unknown provider'} (${routingInfo.model ?? this.config.model})` +
+            (typeof cost === 'number' ? `, cost $${cost}` : ''),
+        );
       }
 
       // Parse response based on format used.
@@ -626,11 +782,8 @@ export class ModelClient implements IModel {
           // to see their own token markers in history.
           rawHarmonyContent: messageContent,
           toolCalls: parsed.toolCalls.length > 0 ? parsed.toolCalls : undefined,
-          usage: data.usage ? {
-            promptTokens: data.usage.prompt_tokens || 0,
-            completionTokens: data.usage.completion_tokens || 0,
-            totalTokens: data.usage.total_tokens || 0,
-          } : undefined,
+          usage: parseUsage(data.usage),
+          ...extras,
           finishReason: choice.finish_reason,
           raw: {
             ...data,
@@ -675,11 +828,8 @@ export class ModelClient implements IModel {
         return {
           content: contentText,
           toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
-          usage: data.usage ? {
-            promptTokens: data.usage.prompt_tokens || 0,
-            completionTokens: data.usage.completion_tokens || 0,
-            totalTokens: data.usage.total_tokens || 0,
-          } : undefined,
+          usage: parseUsage(data.usage),
+          ...extras,
           finishReason: choice.finish_reason,
           raw: data,
         };

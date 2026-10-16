@@ -36,6 +36,8 @@ export interface TokenUsageSnapshot {
   lastPromptTokens: number;
   /** Total tokens (prompt + completion) for the most recent individual call. */
   lastTotalTokens: number;
+  /** Lifetime billed cost in USD, summed over calls whose provider reported a cost (OpenRouter). */
+  totalCostUsd: number;
 }
 
 // ─── TokenTracker ─────────────────────────────────────────────────────────────
@@ -45,6 +47,7 @@ export class TokenTracker {
   private _completionTokens = 0;
   private _lastPromptTokens = 0;
   private _lastTotalTokens = 0;
+  private _costUsd = 0;
 
   /**
    * Record token usage from a model API response.
@@ -58,7 +61,7 @@ export class TokenTracker {
    * @param responseContent The raw response text (used for completion fallback)
    */
   record(
-    usage: { promptTokens?: number; completionTokens?: number; totalTokens?: number } | undefined,
+    usage: { promptTokens?: number; completionTokens?: number; totalTokens?: number; cost?: number } | undefined,
     messages?: Message[],
     responseContent?: string,
   ): void {
@@ -73,6 +76,7 @@ export class TokenTracker {
       completion = TokenTracker.estimateTokens(responseContent);
     }
 
+    if (typeof usage?.cost === 'number') this._costUsd += usage.cost;
     this._promptTokens += prompt;
     this._completionTokens += completion;
     this._lastPromptTokens = prompt;
@@ -87,6 +91,7 @@ export class TokenTracker {
       totalTokens: this._promptTokens + this._completionTokens,
       lastPromptTokens: this._lastPromptTokens,
       lastTotalTokens: this._lastTotalTokens,
+      totalCostUsd: this._costUsd,
     };
   }
 
@@ -96,6 +101,7 @@ export class TokenTracker {
     this._completionTokens = 0;
     this._lastPromptTokens = 0;
     this._lastTotalTokens = 0;
+    this._costUsd = 0;
   }
 
   // ─── Static helpers ────────────────────────────────────────────────────────

@@ -1,0 +1,18 @@
+{
+  "models": {
+    "reasoning": {
+      "name": "reasoning",
+      "endpoint": "https://openrouter.ai/api/v1/chat/completions",
+      "apiKey": "YOUR_OPENROUTER_API_KEY_HERE",
+      "type": "reasoning",
+      "defaultModel": "openai/gpt-oss-120b",
+      "useHarmonyFormat": false,
+      "reasoningEffortStrategy": "api_param",
+      "openrouter": {
+        "providerOrder": ["fireworks", "together", "deepinfra/turbo"],
+        "allowFallbacks": true,
+        "dataCollection": "deny"
+      }
+    }
+  }
+}
