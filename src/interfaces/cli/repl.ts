@@ -170,6 +170,19 @@ export async function startREPL(options: REPLOptions): Promise<void> {
         continue;
       }
 
+      if (command === 'compact') {
+        const spinner = ora('Compacting conversation...').start();
+        try {
+          const r = await agent.compact();
+          spinner.stop();
+          console.log(chalk.yellow(`\n✓ Context compacted: ${k(r.beforeTokens)} → ${k(r.afterTokens)} tokens (${r.beforeMessages} → ${r.afterMessages} messages)\n`));
+        } catch (e) {
+          spinner.stop();
+          console.log(chalk.red(`\n✗ Compaction failed: ${e instanceof Error ? e.message : String(e)}\n`));
+        }
+        continue;
+      }
+
       if (command === 'history') {
         showHistory(agent);
         continue;
@@ -371,10 +384,8 @@ export async function startREPL(options: REPLOptions): Promise<void> {
 
           console.log(chalk.gray(`[Iterations: ${response.iterations}]`));
 
-          if (response.tokenUsage) {
-            const k = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
-            const tu = response.tokenUsage;
-            console.log(chalk.gray(`[Tokens: ${k(tu.promptTokens)}p + ${k(tu.completionTokens)}c = ${k(tu.totalTokens)} total (this turn: ${k(tu.lastPromptTokens)}p prompt)]`));
+          if (response.turnUsage || response.tokenUsage) {
+            console.log(chalk.gray(formatUsageLine(response)));
           }
 
           console.log('');
@@ -424,6 +435,7 @@ function showHelp() {
   console.log('  /help          - Show this help message');
   console.log('  /reset         - Reset conversation history');
   console.log('  /history       - Show conversation history');
+  console.log('  /compact       - Summarise older turns to shrink the context');
   console.log('  /tools         - Show available tools');
   console.log('  /servers       - Show MCP server status');
   console.log('  /save          - Save current conversation');
@@ -617,4 +629,34 @@ async function handleListConversations(agent: IAgent) {
     console.log(chalk.red('\n✗ Failed to list conversations:'), error instanceof Error ? error.message : String(error));
     console.log('');
   }
+}
+
+const k = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+
+/** One-line usage summary: this turn's tokens + cost (with its source), context size, session total. */
+function formatUsageLine(response: {
+  turnUsage?: import('../../models/token-tracker.js').TurnUsage;
+  tokenUsage?: import('../../models/token-tracker.js').TokenUsageSnapshot;
+  contextTokens?: number;
+}): string {
+  const parts: string[] = [];
+  const t = response.turnUsage;
+  if (t) {
+    const cached = t.cachedTokens ? ` (${k(t.cachedTokens)} cached)` : '';
+    const est = t.estimated ? ' ~est' : '';
+    let cost = '';
+    if (typeof t.costUsd === 'number') {
+      const src = t.costSource === 'provider' ? '' : t.costSource === 'catalog' ? ' price list' : t.costSource === 'config' ? ' your price' : ' mixed';
+      cost = ` · $${t.costUsd < 0.01 ? t.costUsd.toPrecision(2) : t.costUsd.toFixed(3)}${src}`;
+    } else {
+      cost = ' · cost unknown';
+    }
+    parts.push(`turn: ${k(t.promptTokens)} in${cached} + ${k(t.completionTokens)} out${est}${cost}`);
+  }
+  if (typeof response.contextTokens === 'number') parts.push(`context: ${k(response.contextTokens)}`);
+  if (response.tokenUsage) {
+    const total = response.tokenUsage.totalCostUsd ? ` / $${response.tokenUsage.totalCostUsd.toFixed(3)}` : '';
+    parts.push(`session: ${k(response.tokenUsage.totalTokens)}${total}`);
+  }
+  return `[${parts.join(' · ')}]`;
 }

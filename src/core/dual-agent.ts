@@ -6,6 +6,10 @@
  * - Worker: Task execution with tools
  */
 
+import { condenseHistory, COMPACTION_MARKER } from './summarize.js';
+import type { CompactionResult } from './agent-interface.js';
+import { TokenTracker, type TurnUsage } from '../models/token-tracker.js';
+import { turnTokenUsage } from './conversation-manager.js';
 import { ModelOrchestrator } from '../models/orchestrator.js';
 import { MCPServerManager } from '../mcp/server-manager.js';
 import { WorkspaceManager } from './workspace.js';
@@ -64,7 +68,12 @@ export interface DualAgentResponse {
     subtasks: string[];
     reasoning: string;
   };
+  /** Orchestrator lifetime totals (all turns). */
   tokenUsage?: import('../models/token-tracker.js').TokenUsageSnapshot;
+  /** Usage of THIS turn only — tokens, cost and cost source. */
+  turnUsage?: TurnUsage;
+  /** Estimated tokens of the conversation carried into the next turn. */
+  contextTokens?: number;
 }
 
 export class DualAgent {
@@ -175,7 +184,9 @@ export class DualAgent {
     let summary: string | undefined;
     if (this.conversationManager) {
       const summaryMsg = this.userConversationHistory.find(
-        m => m.role === 'system' && typeof m.content === 'string' && m.content.startsWith('[Previous conversation summary]')
+        m => typeof m.content === 'string' &&
+          (m.content.startsWith(COMPACTION_MARKER) ||
+            (m.role === 'system' && m.content.startsWith('[Previous conversation summary]')))
       );
       if (summaryMsg && typeof summaryMsg.content === 'string') {
         summary = summaryMsg.content;
@@ -250,6 +261,56 @@ VALIDATION GUIDANCE:
   }
 
   async chat(userMessage: string): Promise<DualAgentResponse> {
+    // Meter the whole turn: Manager, Worker, review, synthesis, condense,
+    // sub-agents sharing this orchestrator. Nested turns share the outer one.
+    this.orchestrator.beginTurn();
+    let result: DualAgentResponse;
+    try {
+      result = await this.runTurn(userMessage);
+    } finally {
+      this._lastTurnUsage = this.orchestrator.endTurn();
+    }
+    return { ...result, turnUsage: this._lastTurnUsage, contextTokens: this.getContextSize().tokens };
+  }
+
+  private _lastTurnUsage?: TurnUsage;
+
+  /**
+   * Size of the conversation carried into the next turn (user + final
+   * assistant messages; Worker tool traffic is not carried across turns).
+   */
+  getContextSize(): { tokens: number; messages: number } {
+    const h = this.userConversationHistory;
+    return { tokens: h.length ? TokenTracker.estimateMessagesTokens(h) : 0, messages: h.length };
+  }
+
+  /**
+   * Compact the carried conversation now: everything but the most recent
+   * exchanges is replaced by one structured summary. Returns before/after
+   * context sizes (estimated tokens).
+   */
+  async compact(opts: { keepMessages?: number } = {}): Promise<CompactionResult> {
+    const before = this.getContextSize();
+    const keep = Math.max(2, opts.keepMessages ?? 6);
+    this.orchestrator.beginTurn();
+    try {
+      this.userConversationHistory = await condenseHistory(this.userConversationHistory, this.orchestrator, keep + 1, {
+        directive: this.workspace.getDirectivePrompt() || undefined,
+      });
+    } finally {
+      this._lastTurnUsage = this.orchestrator.endTurn();
+    }
+    const after = this.getContextSize();
+    if (this.autoSave && this.conversationManager && after.messages !== before.messages) {
+      await this.conversationManager.autoSave(
+        this.userConversationHistory, this.workspace.getWorkspaceDir(), this.orchestrator, 'chat',
+        turnTokenUsage(this._lastTurnUsage),
+      );
+    }
+    return { beforeTokens: before.tokens, afterTokens: after.tokens, beforeMessages: before.messages, afterMessages: after.messages, usage: this._lastTurnUsage };
+  }
+
+  private async runTurn(userMessage: string): Promise<DualAgentResponse> {
     this._stopped = false; // reset for new turn
     logger.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     logger.info(`>> User: ${userMessage}`);
@@ -260,18 +321,20 @@ VALIDATION GUIDANCE:
     // Check if conversation needs condensing BEFORE adding new message.
     // Token-based trigger: compacts when the last prompt was close to the context limit.
     // Message-count fallback: triggers when API omits usage data.
-    if (this.conversationManager) {
-      const snapshot = this.orchestrator.getTokenUsage();
-      const byTokens = snapshot.lastPromptTokens > 0 &&
-                       snapshot.lastPromptTokens > this.compactionThreshold;
+    // Trigger on the size of the history we actually carry (estimated) — the
+    // tracker's lastPromptTokens can describe a Worker call with tool traffic,
+    // which condensing this history would not shrink.
+    {
+      const contextTokens = this.getContextSize().tokens;
+      const byTokens = this.compactionThreshold > 0 && contextTokens > this.compactionThreshold;
       const byMessages = this.userConversationHistory.length > this.maxMessagesBeforeCondense;
 
       if (byTokens || byMessages) {
         const reason = byTokens
-          ? `${snapshot.lastPromptTokens.toLocaleString()} prompt tokens > ${this.compactionThreshold.toLocaleString()} threshold`
+          ? `${contextTokens.toLocaleString()} context tokens > ${this.compactionThreshold.toLocaleString()} threshold`
           : `${this.userConversationHistory.length} messages > ${this.maxMessagesBeforeCondense} threshold`;
         logger.info(`[DualAgent] Condensing — ${reason}`);
-        this.userConversationHistory = await this.conversationManager.condenseConversation(
+        this.userConversationHistory = await condenseHistory(
           this.userConversationHistory,
           this.orchestrator,
           Math.floor(this.maxMessagesBeforeCondense * 0.7),
@@ -322,7 +385,7 @@ VALIDATION GUIDANCE:
       this.userConversationHistory.push({ role: 'assistant', content: directReply });
 
       if (this.autoSave && this.conversationManager) {
-        const tokenSnap = this.orchestrator.getTokenUsage();
+        const tokenSnap = turnTokenUsage(this.orchestrator.peekTurn());
         await this.conversationManager.autoSave(
           this.userConversationHistory,
           this.workspace.getWorkspaceDir(),
@@ -432,7 +495,7 @@ VALIDATION GUIDANCE:
 
     // Auto-save if enabled
     if (this.autoSave && this.conversationManager) {
-      const tokenSnap = this.orchestrator.getTokenUsage();
+      const tokenSnap = turnTokenUsage(this.orchestrator.peekTurn());
       await this.conversationManager.autoSave(
         this.userConversationHistory,
         this.workspace.getWorkspaceDir(),

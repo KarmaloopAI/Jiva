@@ -46,8 +46,12 @@ export interface ModelResponse {
     promptTokens: number;
     completionTokens: number;
     totalTokens: number;
-    /** Billed cost in USD, when the provider reports it (OpenRouter). */
+    /** Cost in USD: reported by the provider, or computed from a known price (see costSource). */
     cost?: number;
+    /** Where `cost` came from: 'provider' (in the response), 'catalog' (provider price list), 'config' (user price). */
+    costSource?: 'provider' | 'catalog' | 'config' | 'unknown';
+    /** True when token counts are a local estimate rather than provider-reported. */
+    estimated?: boolean;
     /** Prompt tokens served from cache, when reported. */
     cachedTokens?: number;
     /** Tokens spent on hidden reasoning, when reported. */
@@ -126,6 +130,14 @@ export interface ChatCompletionOptions {
    * ignore it. For models that can't disable thinking, pair with reasoningEffort:'low'.
    */
   disableThinking?: boolean;
+
+  /**
+   * 'auxiliary' for side calls (conversation titles, compaction summaries,
+   * host-side planning calls): billed and counted, but they do not overwrite
+   * the tracker's `lastPromptTokens`, which describes the agent's own context.
+   * Default 'agent'.
+   */
+  purpose?: 'agent' | 'auxiliary';
 }
 
 export interface IModel {

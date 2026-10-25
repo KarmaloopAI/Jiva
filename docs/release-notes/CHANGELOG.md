@@ -3,6 +3,9 @@
 Consolidated release history. For full per-release details, see the individual files in this directory.
 
 ## v0.3.54 — Latest
+- Truthful per-turn usage/cost (provider → price list → your price → unknown), context size, saved-totals fix
+- Compaction: manual `compact()` / `/compact`, code-mode cross-turn compaction, chat condense fixes
+- Process safety: the agent can no longer kill its own Node.js process
 - Deprecated `JivaAgent` (use `DualAgent` / `CodeAgent`); docs and example updated
 - Parallel tool execution across all agent loops (shared scheduler, read-only bash/MCP detection, timing metrics)
 - Latency fixes: async file tools, LSP outside file lock, non-blocking titles, faster startup

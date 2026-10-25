@@ -4,6 +4,7 @@
  * Manages connections to MCP servers and provides tool discovery/execution.
  */
 
+import { checkShellCommand, isShellToolName } from '../core/process-guard.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
@@ -194,6 +195,16 @@ export class MCPClient {
   async executeTool(toolName: string, args: Record<string, any>): Promise<any> {
     // Parse server name and actual tool name
     const [serverName, ...toolParts] = toolName.split('__');
+
+    // Shell-type MCP tools (e.g. mcp-shell-server__shell_exec) get the same
+    // self-kill guard as code mode's bash tool. Covers the Worker, its repair
+    // path, code-mode MCP adapters, the evaluator and ClientAgent.
+    if (isShellToolName(toolName)) {
+      const guard = checkShellCommand(args?.command ?? args?.cmd);
+      if (guard.blocked) {
+        throw new MCPError(`${guard.reason} ${guard.suggestion}`, serverName);
+      }
+    }
     const actualToolName = toolParts.join('__');
 
     const connection = this.connections.get(serverName);

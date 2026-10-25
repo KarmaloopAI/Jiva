@@ -24,6 +24,7 @@ import {
 import { ModelError } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
 import { getGoogleADCToken } from './google-adc.js';
+import { resolveModelPrice, computeCost, type ModelPricing, type ResolvedPrice } from './pricing.js';
 import {
   OpenRouterConfig,
   isOpenRouterModel,
@@ -139,6 +140,13 @@ export interface ModelClientConfig {
    * src/models/openrouter.ts.
    */
   openrouter?: OpenRouterConfig;
+
+  /**
+   * Price for this model, used only when the provider does not report the
+   * cost of a call itself (and its /models price list has no entry).
+   * USD per million tokens. See src/models/pricing.ts.
+   */
+  pricing?: ModelPricing;
 }
 
 /**
@@ -183,6 +191,46 @@ export class ModelClient implements IModel {
 
   constructor(config: ModelClientConfig) {
     this.config = config;
+  }
+
+  /** Price resolution, started lazily the first time a response arrives without a cost. */
+  private pricePromise?: Promise<ResolvedPrice | undefined>;
+
+  /**
+   * Make the response's cost truthful:
+   *   - provider reported a cost → keep it, mark source 'provider';
+   *   - otherwise price it from the provider's price list or the user's
+   *     configured price (source 'catalog' / 'config');
+   *   - otherwise mark the cost 'unknown' (never $0).
+   */
+  private async applyPricing(response: ModelResponse, model: string): Promise<ModelResponse> {
+    const usage = response.usage;
+    if (!usage) return response;
+    usage.estimated = false; // came from the provider's usage block
+    if (typeof usage.cost === 'number') {
+      usage.costSource = usage.costSource ?? 'provider';
+      return response;
+    }
+    if (!this.pricePromise) {
+      this.pricePromise = resolveModelPrice(
+        this.config.endpoint,
+        model,
+        this.config.useGoogleADC ? undefined : this.config.apiKey,
+        this.config.pricing,
+      ).catch(() => undefined);
+    }
+    // Never hold a turn up for long on a price lookup.
+    const price = await Promise.race([
+      this.pricePromise,
+      new Promise<undefined>((r) => setTimeout(() => r(undefined), 2000).unref?.()),
+    ]);
+    if (price) {
+      usage.cost = computeCost(usage, price);
+      usage.costSource = price.source;
+    } else {
+      usage.costSource = 'unknown';
+    }
+    return response;
   }
 
   /** True when this model is served through OpenRouter (routing block or openrouter.ai endpoint). */
@@ -250,7 +298,7 @@ export class ModelClient implements IModel {
 
       try {
         await this.throttleIfNeeded();
-        return await this.attemptChat(options, isReasoningModel);
+        return await this.applyPricing(await this.attemptChat(options, isReasoningModel), options.model || this.config.model);
       } catch (error) {
         lastError = error as Error;
 

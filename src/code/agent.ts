@@ -10,7 +10,12 @@ import { WorkspaceManager } from '../core/workspace.js';
 import { ConversationManager } from '../core/conversation-manager.js';
 import { formatToolResult, ensureToolResultPairing } from '../models/harmony.js';
 import type { Message, Tool } from '../models/base.js';
+import { TokenTracker, type TurnUsage } from '../models/token-tracker.js';
+import { turnTokenUsage } from '../core/conversation-manager.js';
+import { condenseHistory } from '../core/summarize.js';
+import type { CompactionResult } from '../core/agent-interface.js';
 import { logger, formatToolCallArgs } from '../utils/logger.js';
+import { describeHostForPrompt } from '../core/process-guard.js';
 import { splitRoundsForCompaction } from './rounds.js';
 import type { PersonaManager } from '../personas/persona-manager.js';
 import type { MCPServerManager } from '../mcp/server-manager.js';
@@ -57,6 +62,13 @@ export interface AgentResponse {
   stopReason?: 'completed' | 'max-iterations' | 'stopped';
   /** Wall-clock breakdown of the turn — where the time went. */
   timing?: TurnTiming;
+  /**
+   * Usage of THIS turn only: tokens (incl. cached/reasoning), cost and where
+   * the cost came from. `tokenUsage` above is the orchestrator's lifetime total.
+   */
+  turnUsage?: TurnUsage;
+  /** Estimated size (tokens) of the context carried into the next turn — see getContextSize(). */
+  contextTokens?: number;
 }
 
 export interface TurnTiming {
@@ -177,6 +189,8 @@ export interface CodeAgentConfig {
 }
 
 const DEFAULT_MAX_ITERATIONS = 50;
+/** Recent history messages kept verbatim when the carried conversation is compacted. */
+const DEFAULT_KEEP_HISTORY_MESSAGES = 6;
 const DOOM_LOOP_THRESHOLD = 3;
 /** Max consecutive read_file calls before injecting an "act, don't just read" nudge. */
 const MAX_CONSECUTIVE_READS = 15;
@@ -264,6 +278,8 @@ You have direct access to code tools — use them to explore, understand, and mo
 WORKSPACE: ${workspaceDir}
 All relative paths are resolved relative to the workspace directory above.
 Use absolute paths for all file operations.
+
+${describeHostForPrompt()}
 
 PERSISTENCE AND COMPLETION:
 - Keep going until the user's query is completely resolved before ending your turn.
@@ -560,6 +576,68 @@ ${directive ? `\n${directive}` : ''}`;
    * Runs the model → tools → model loop until no more tool calls or max iterations.
    */
   async chat(userMessage: string, onChunk?: (text: string) => void): Promise<AgentResponse> {
+    // Meter the whole turn (agent calls, compaction summaries, child agents
+    // sharing this orchestrator). Nested turns — e.g. a host's Deep Run turn
+    // wrapping this call — share the outer accumulator.
+    this.orchestrator.beginTurn();
+    let result: AgentResponse;
+    try {
+      result = await this.runTurn(userMessage, onChunk);
+    } finally {
+      this._lastTurnUsage = this.orchestrator.endTurn();
+    }
+    return { ...result, turnUsage: this._lastTurnUsage, contextTokens: this.getContextSize().tokens };
+  }
+
+  private _lastTurnUsage?: TurnUsage;
+  /** System prompt of the most recent turn (for context-size estimates). */
+  private _lastSystemPrompt = '';
+
+  /**
+   * Size of the context this agent carries into its next turn — system prompt
+   * plus the user/assistant history. Tool calls and results are not carried
+   * across turns, so this is the "context without tool calls".
+   */
+  getContextSize(): { tokens: number; messages: number } {
+    const msgs: Message[] = [
+      ...(this._lastSystemPrompt ? [{ role: 'system' as const, content: this._lastSystemPrompt }] : []),
+      ...this.history,
+    ];
+    return { tokens: msgs.length ? TokenTracker.estimateMessagesTokens(msgs) : 0, messages: this.history.length };
+  }
+
+  /**
+   * Compact the carried conversation now: older exchanges become one
+   * structured summary, the most recent ones stay verbatim. Returns
+   * before/after context sizes (estimated tokens).
+   */
+  async compact(opts: { keepMessages?: number } = {}): Promise<CompactionResult> {
+    const before = this.getContextSize();
+    this.orchestrator.beginTurn();
+    let usage: TurnUsage;
+    try {
+      await this.compactHistory(Math.max(2, opts.keepMessages ?? DEFAULT_KEEP_HISTORY_MESSAGES));
+    } finally {
+      usage = this.orchestrator.endTurn();
+    }
+    const after = this.getContextSize();
+    if (this.conversationManager && after.messages !== before.messages) {
+      await this.conversationManager.autoSave(
+        this.history, this.workspace.getWorkspaceDir(), this.orchestrator, 'code', turnTokenUsage(usage),
+        { mcpServers: this._mcpServerNames, maxIterations: this.maxIterations, harness: this._harness },
+      );
+    }
+    return { beforeTokens: before.tokens, afterTokens: after.tokens, beforeMessages: before.messages, afterMessages: after.messages, usage };
+  }
+
+  private async compactHistory(keepMessages: number, currentGoal?: string): Promise<void> {
+    this.history = await condenseHistory(this.history, this.orchestrator, keepMessages + 1, {
+      directive: this.workspace.getDirectivePrompt() || undefined,
+      currentGoal,
+    });
+  }
+
+  private async runTurn(userMessage: string, onChunk?: (text: string) => void): Promise<AgentResponse> {
     // Code mode has no persona concept, but `logger`'s persona context is a
     // process-wide singleton that Chat mode sets and never resets — an
     // embedding app running both modes in the same long-lived process (e.g.
@@ -575,7 +653,14 @@ ${directive ? `\n${directive}` : ''}`;
       ? this.tools.filter((t) => t.name.includes('__')).map((t) => t.name)
       : undefined;
     const outputTokenBudget = this.orchestrator.getReasoningModel().getDefaultMaxTokens();
-    const systemPrompt = _getSystemPromptBase(this.workspace.getWorkspaceDir(), directive || undefined, skillsBlock, mcpToolNames, outputTokenBudget);
+    const systemPrompt = this._lastSystemPrompt = _getSystemPromptBase(this.workspace.getWorkspaceDir(), directive || undefined, skillsBlock, mcpToolNames, outputTokenBudget);
+
+    // Cross-turn compaction: this.history (user messages + final answers) grows
+    // every turn and was never compacted — only the in-loop message array was.
+    if (this.compactionThreshold > 0 && this.getContextSize().tokens > this.compactionThreshold) {
+      logger.info(`[CodeAgent] Carried context over ${this.compactionThreshold} tokens — compacting history before this turn`);
+      await this.compactHistory(DEFAULT_KEEP_HISTORY_MESSAGES, userMessage);
+    }
 
     // Build message history: system + history + new user message
     const messages: Message[] = [
@@ -985,8 +1070,7 @@ ${directive ? `\n${directive}` : ''}`;
       if (
         this.compactionThreshold > 0 &&
         promptTokens > this.compactionThreshold &&
-        !compactedThisIteration &&
-        this.conversationManager
+        !compactedThisIteration
       ) {
         logger.warn(
           `[CodeAgent] Context at ${promptTokens} tokens (threshold: ${this.compactionThreshold}) — compacting in-loop history`,
@@ -1054,7 +1138,7 @@ ${directive ? `\n${directive}` : ''}`;
           //   2. Anything else — the model is genuinely stuck/confused; a nudge is the
           //      right tool.
           const isLengthStarved = response.finishReason === 'length';
-          if (isLengthStarved && !compactedThisIteration && this.conversationManager) {
+          if (isLengthStarved && !compactedThisIteration) {
             logger.warn(
               '[CodeAgent] Empty response with finishReason=length — model ran out of completion budget ' +
               'while thinking. Forcing context compaction instead of a text nudge.',
@@ -1247,7 +1331,7 @@ ${directive ? `\n${directive}` : ''}`;
         this.workspace.getWorkspaceDir(),
         this.orchestrator,
         'code',
-        this.orchestrator.getTokenUsage(),
+        turnTokenUsage(this.orchestrator.peekTurn()),
         {
           mcpServers: this._mcpServerNames,
           maxIterations: this.maxIterations,
@@ -1358,6 +1442,7 @@ Keep the summary concise but complete. Focus on what would help continue the wor
     let summaryContent: string;
     try {
       const summaryResponse = await this.orchestrator.chat({
+        purpose: 'auxiliary',
         messages: [{ role: 'user', content: compactionPrompt }],
         temperature: 0.1,
         maxTokens: 1500,

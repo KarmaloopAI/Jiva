@@ -40,6 +40,16 @@ export {
 } from './models/openrouter.js';
 export type { OpenRouterConfig, OpenRouterProviderEndpoint, OpenRouterRoutingInfo, OpenRouterModelInfo } from './models/openrouter.js';
 
+// Usage, cost and pricing (per-turn accounting; truthful cost sources)
+export { TokenTracker } from './models/token-tracker.js';
+export type { TurnUsage, CostSource, TokenUsageSnapshot, CallPurpose } from './models/token-tracker.js';
+export { resolveModelPrice, computeCost, parsePricing } from './models/pricing.js';
+export type { ModelPricing, ResolvedPrice } from './models/pricing.js';
+
+// Process self-protection (embedding apps register their identity once)
+export { registerHostIdentity, getHostIdentity, checkShellCommand, isShellToolName, describeHostForPrompt } from './core/process-guard.js';
+export type { HostIdentity, ShellCheck } from './core/process-guard.js';
+
 // Parallel tool execution
 export { resolveToolExecutionSettings, DEFAULT_MAX_TOOL_CONCURRENCY } from './core/tool-scheduler.js';
 export type { ToolExecutionSettingsInput, ToolAccess } from './core/tool-scheduler.js';

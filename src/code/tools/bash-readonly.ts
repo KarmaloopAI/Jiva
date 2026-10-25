@@ -11,6 +11,8 @@
  * no redirection, substitution, backgrounding, chaining or newlines.
  */
 
+import { splitWords } from './shell-parse.js';
+
 /** Characters/sequences that make a command non-trivial to reason about. */
 const FORBIDDEN = [
   '>', '<', '`', '$(', '${', ';', '&', '\n', '\r', '||',
@@ -39,31 +41,6 @@ const GIT_READONLY = new Set([
 
 /** find actions that write or execute. */
 const FIND_FORBIDDEN = new Set(['-exec', '-execdir', '-ok', '-okdir', '-delete', '-fprint', '-fprint0', '-fprintf', '-fls']);
-
-/** Split a command into whitespace-separated words, honouring simple quotes. */
-function splitWords(cmd: string): string[] | null {
-  const words: string[] = [];
-  let cur = '';
-  let quote: '"' | "'" | null = null;
-  for (const ch of cmd) {
-    if (quote) {
-      if (ch === quote) quote = null;
-      else cur += ch;
-    } else if (ch === '"' || ch === "'") {
-      quote = ch;
-    } else if (/\s/.test(ch)) {
-      if (cur) {
-        words.push(cur);
-        cur = '';
-      }
-    } else {
-      cur += ch;
-    }
-  }
-  if (quote) return null; // unbalanced quotes
-  if (cur) words.push(cur);
-  return words;
-}
 
 function isReadOnlySimpleCommand(segment: string): boolean {
   const words = splitWords(segment.trim());

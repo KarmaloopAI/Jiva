@@ -29,6 +29,7 @@ export function modelClientConfigFromStored(
     maxRequestsPerMinute: cfg.maxRequestsPerMinute,
     headers: cfg.headers,
     openrouter: cfg.openrouter,
+    pricing: cfg.pricing,
   };
 
   // Multimodal (image captioning) models intentionally don't get reasoning

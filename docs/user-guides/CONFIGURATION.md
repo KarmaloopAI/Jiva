@@ -378,6 +378,7 @@ The HTTP server (Cloud Run) bootstraps a tenant's first config from environment 
 | `JIVA_MODEL_PROVIDER_ORDER` / `JIVA_MODEL_ALLOW_FALLBACKS` | OpenRouter ranked providers / fallback policy |
 | `JIVA_TOOL_CALLING_MODEL_BASE_URL` / `_API_KEY` / `_NAME` | Optional dedicated tool-calling model |
 | `JIVA_PARALLEL_TOOLS` / `JIVA_MAX_TOOL_CONCURRENCY` | Parallel tool execution (CLI and server; overrides `toolExecution`) |
+| `JIVA_COMPACTION_THRESHOLD` | Chat-mode conversation compaction threshold (tokens) on the HTTP server |
 
 See the [OpenRouter guide](OPENROUTER.md) and [HTTP API](../deployment/HTTP_API.md) for details.
 
@@ -684,6 +685,16 @@ rustup component add rust-analyzer
 ```
 
 For the full reference see [Code Mode Architecture](../reference/CODE_MODE.md).
+
+### Usage, Cost and Compaction
+
+Per-turn tokens and cost are reported after every reply, along with where the cost came from: the provider, the provider's price list, or your price. If a provider reports no cost and publishes no price list, set one on the model:
+
+```json
+{ "models": { "reasoning": { "pricing": { "promptPerM": 0.15, "completionPerM": 0.6 } } } }
+```
+
+Chat-mode compaction: `"compaction": { "threshold": 100000, "maxMessages": 60 }`. Compact on demand with `/compact` in the REPL. See [Usage, Cost & Compaction](../reference/USAGE_AND_COST.md).
 
 ### Parallel Tool Execution
 

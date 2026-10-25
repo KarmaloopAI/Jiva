@@ -5,6 +5,7 @@
  * Now uses StorageProvider abstraction for cloud-native support.
  */
 
+import { condenseHistory, type CompactionContext } from './summarize.js';
 import { randomUUID } from 'node:crypto';
 import { Message } from '../models/base.js';
 import { logger } from '../utils/logger.js';
@@ -18,6 +19,28 @@ import { SavedConversation } from '../storage/types.js';
 // the kind of drift that motivated unifying them).
 export type { ConversationMetadata, CodeConversationMeta } from '../storage/types.js';
 import type { ConversationMetadata, CodeConversationMeta } from '../storage/types.js';
+
+/**
+ * Usage of ONE turn, added to the conversation's stored totals on save.
+ * (Passing the orchestrator's lifetime snapshot here used to inflate the saved
+ * totals quadratically — every save re-added everything so far.)
+ */
+export interface TurnTokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  costUsd?: number;
+}
+
+/** Map an orchestrator TurnUsage to what saveConversation adds to stored totals. */
+export function turnTokenUsage(t: { promptTokens: number; completionTokens: number; totalTokens: number; costUsd?: number }): TurnTokenUsage {
+  return {
+    promptTokens: t.promptTokens,
+    completionTokens: t.completionTokens,
+    totalTokens: t.totalTokens,
+    ...(typeof t.costUsd === 'number' ? { costUsd: t.costUsd } : {}),
+  };
+}
 
 export class ConversationManager {
   private storageProvider: StorageProvider;
@@ -48,7 +71,7 @@ export class ConversationManager {
     conversationId?: string,
     orchestrator?: ModelOrchestrator,
     type?: 'chat' | 'code',
-    tokenUsage?: { promptTokens: number; completionTokens: number; totalTokens: number },
+    tokenUsage?: TurnTokenUsage,
     codeMeta?: CodeConversationMeta
   ): Promise<string> {
     // Saves (and background title patches) are serialized so a late title
@@ -114,7 +137,7 @@ export class ConversationManager {
     conversationId?: string,
     orchestrator?: ModelOrchestrator,
     type?: 'chat' | 'code',
-    tokenUsage?: { promptTokens: number; completionTokens: number; totalTokens: number },
+    tokenUsage?: TurnTokenUsage,
     codeMeta?: CodeConversationMeta
   ): Promise<string> {
     const finalId = conversationId || this.currentConversationId || this.defaultConversationId || this.generateConversationId();
@@ -163,6 +186,9 @@ export class ConversationManager {
       totalPromptTokens: (existingData?.metadata?.totalPromptTokens ?? 0) + (tokenUsage?.promptTokens ?? 0),
       totalCompletionTokens: (existingData?.metadata?.totalCompletionTokens ?? 0) + (tokenUsage?.completionTokens ?? 0),
       totalTokens: (existingData?.metadata?.totalTokens ?? 0) + (tokenUsage?.totalTokens ?? 0),
+      ...(typeof tokenUsage?.costUsd === 'number' || existingData?.metadata?.totalCostUsd !== undefined
+        ? { totalCostUsd: (existingData?.metadata?.totalCostUsd ?? 0) + (tokenUsage?.costUsd ?? 0) }
+        : {}),
       mcpServers: codeMeta?.mcpServers ?? existingData?.metadata?.mcpServers,
       maxIterations: codeMeta?.maxIterations ?? existingData?.metadata?.maxIterations,
       harness: codeMeta?.harness ?? existingData?.metadata?.harness,
@@ -264,124 +290,13 @@ export class ConversationManager {
     messages: Message[],
     orchestrator: ModelOrchestrator,
     targetMessageCount: number = 20,
-    compactionContext?: { directive?: string; currentGoal?: string }
+    compactionContext?: CompactionContext
   ): Promise<Message[]> {
-    if (messages.length <= targetMessageCount) {
-      return messages;
-    }
-
-    logger.info(`Condensing conversation: ${messages.length} → ${targetMessageCount} messages`);
-
-    // Keep system and developer messages (first 2) - these are the base messages WITHOUT directive
-    // The agent will dynamically add the directive when constructing messages for the API
-    const systemMessage = messages[0];
-    const developerMessage = messages[1];
-
-    // Keep recent messages (last 10)
-    const recentCount = 10;
-    const recentMessages = messages.slice(-recentCount);
-
-    // Messages to condense (middle section)
-    const middleMessages = messages.slice(2, -recentCount);
-
-    if (middleMessages.length === 0) {
-      return messages;
-    }
-
-    try {
-      // Create a summary of the middle section using opencode's structured template
-      const conversationText = middleMessages
-        .map(msg => {
-          if (msg.role === 'tool') {
-            const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
-            return `[Tool result]: ${content.substring(0, 300)}${content.length > 300 ? '...' : ''}`;
-          }
-          const role = msg.role === 'assistant' ? 'Assistant' : msg.role === 'user' ? 'User' : msg.role;
-          const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
-          return `${role}: ${content}`;
-        })
-        .join('\n\n');
-
-      // Build optional context block so the LLM can prioritise what to keep
-      const contextParts: string[] = [];
-      if (compactionContext?.directive) {
-        contextParts.push(`WORKSPACE DIRECTIVE (prioritise retaining context aligned with this):\n${compactionContext.directive}`);
-      }
-      if (compactionContext?.currentGoal) {
-        contextParts.push(`CURRENT GOAL:\n${compactionContext.currentGoal}`);
-      }
-      const contextBlock = contextParts.length > 0
-        ? contextParts.join('\n\n') + '\n\nWhen summarising, prioritise information that directly supports the directive and current goal above.\n\n---\n\n'
-        : '';
-
-      // Structured compaction prompt (ported from opencode's compaction.ts)
-      const summaryPrompt = `${contextBlock}Provide a detailed summary for continuing our conversation. The summary will be used so another agent can read it and continue the work.
-
-When constructing the summary, follow this template:
-
-## Goal
-
-[What goal(s) is the user trying to accomplish?]
-
-## Instructions
-
-- [What important instructions did the user give that are still relevant]
-- [If there is a plan or spec, include information about it so the next agent can continue using it]
-
-## Discoveries
-
-[What notable things were learned during this conversation that would be useful for the next agent to know when continuing the work]
-
-## Accomplished
-
-[What work has been completed, what work is still in progress, and what work is left?]
-
-## Relevant files / directories
-
-[Construct a structured list of relevant files that have been read, edited, or created that pertain to the task at hand. If all the files in a directory are relevant, include the path to the directory.]
-
----
-
-Conversation to summarise:
-${conversationText}
-
-Keep the summary focused and complete — include file paths, function names, and specific changes made.`;
-
-      const response = await orchestrator.chat({
-        messages: [
-          { role: 'user', content: summaryPrompt }
-        ],
-        temperature: 0.1, // Low temperature for deterministic summarisation
-        maxTokens: 1500,
-      });
-
-      // Create condensed message (role: 'user' so it's valid in all API formats)
-      const condensedMessage: Message = {
-        role: 'user',
-        content: `[Context compacted — previous conversation history summarised]\n\n${response.content}\n\n[Continuing conversation...]`,
-      };
-
-      // Return: system + developer + condensed summary + recent messages
-      // Note: directive is NOT included here - agent adds it dynamically
-      const result = [
-        systemMessage,
-        developerMessage,
-        condensedMessage,
-        ...recentMessages,
-      ];
-
-      logger.success(`Conversation condensed: ${messages.length} → ${result.length} messages`);
-
-      return result;
-    } catch (error) {
-      logger.error('Failed to condense conversation', error);
-      // Fall back to simple trimming
-      return [
-        systemMessage,
-        developerMessage,
-        ...messages.slice(-targetMessageCount + 2),
-      ];
-    }
+    // Shared implementation (src/core/summarize.ts). Previously this always
+    // pinned messages[0] and [1] as "system/developer" — in user/assistant
+    // histories that pinned the first exchange forever — and ignored
+    // targetMessageCount except for the early return.
+    return condenseHistory(messages, orchestrator, targetMessageCount, compactionContext);
   }
 
   /**
@@ -409,6 +324,7 @@ Keep the summary focused and complete — include file paths, function names, an
       const titlePrompt = `Create a short 3-5 word title for this message. Just output the title, nothing else:\n\n${userMessage.substring(0, 200)}`;
 
       const response = await orchestrator.chat({
+        purpose: 'auxiliary',
         messages: [{ role: 'user', content: titlePrompt }],
         temperature: 0.1, // Low temperature for deterministic title generation
         // Reasoning models can exhaust max_tokens on thinking, returning empty
@@ -483,7 +399,7 @@ Keep the summary focused and complete — include file paths, function names, an
     workspace?: string,
     orchestrator?: ModelOrchestrator,
     type?: 'chat' | 'code',
-    tokenUsage?: { promptTokens: number; completionTokens: number; totalTokens: number },
+    tokenUsage?: TurnTokenUsage,
     codeMeta?: CodeConversationMeta
   ): Promise<void> {
     try {

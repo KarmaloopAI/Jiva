@@ -427,7 +427,7 @@ program
           mcpManager: codeMcpServerNames.length > 0 ? mcpManager : undefined,
           mcpServerNames: codeMcpServerNames,
           harness: options.harness === 'evaluator' ? 'evaluator' : undefined,
-          compactionThreshold: codeModeConfig?.compactionThreshold,
+          compactionThreshold: codeModeConfig?.compactionThreshold ?? configManager.getCompaction()?.threshold,
           toolExecution: configManager.getToolExecution(),
         });
 
@@ -446,6 +446,8 @@ program
           maxIterations: options.maxIterations || 20, // Worker's iteration limit per subtask
           autoSave: true,
           condensingThreshold: options.condensingThreshold ?? 30,
+          compactionThreshold: configManager.getCompaction()?.threshold,
+          maxMessagesBeforeCondense: configManager.getCompaction()?.maxMessages,
           toolExecution: configManager.getToolExecution(),
         });
       }
@@ -919,7 +921,7 @@ program
           lspEnabled: lspEnabledRun,
           mcpManager: codeMcpServerNamesRun.length > 0 ? mcpManager : undefined,
           mcpServerNames: codeMcpServerNamesRun,
-          compactionThreshold: codeModeConfigRun?.compactionThreshold,
+          compactionThreshold: codeModeConfigRun?.compactionThreshold ?? configManager.getCompaction()?.threshold,
           toolExecution: configManager.getToolExecution(),
         });
 
@@ -938,6 +940,8 @@ program
           maxToolCalls: options.maxToolCalls || 30, // Maximum tool calls per subtask
           autoSave: true,
           condensingThreshold: options.condensingThreshold ?? 30,
+          compactionThreshold: configManager.getCompaction()?.threshold,
+          maxMessagesBeforeCondense: configManager.getCompaction()?.maxMessages,
           toolExecution: configManager.getToolExecution(),
         });
       }

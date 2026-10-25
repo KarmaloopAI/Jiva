@@ -37,6 +37,9 @@ function fakeOrchestrator(script: ModelResponse[]) {
       },
       getReasoningModel: () => ({ getDefaultMaxTokens: () => undefined }),
       hasToolCallingModel: () => false,
+      beginTurn: () => {},
+      endTurn: () => ({ calls: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0, cachedTokens: 0, reasoningTokens: 0, costSource: 'unknown', estimated: false }),
+      peekTurn: () => ({ calls: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0, cachedTokens: 0, reasoningTokens: 0, costSource: 'unknown', estimated: false }),
       getTokenUsage: () => ({ promptTokens: 0, completionTokens: 0, totalTokens: 0, lastPromptTokens: 0, lastTotalTokens: 0, totalCostUsd: 0 }),
     } as any,
   };

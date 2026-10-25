@@ -487,6 +487,8 @@ export class SessionManager extends EventEmitter {
           maxIterations,
           autoSave: true,
           orchestrationLogger: orchLogger,
+          // Chat-mode compaction (code mode reads JIVA_CODE_COMPACTION_THRESHOLD)
+          ...(process.env.JIVA_COMPACTION_THRESHOLD ? { compactionThreshold: Number(process.env.JIVA_COMPACTION_THRESHOLD) } : {}),
           toolExecution: sessionToolExecution,
         });
       }
@@ -539,16 +541,25 @@ export class SessionManager extends EventEmitter {
       // Persist conversation state
       const conversationHistory = session.agent.getConversationHistory();
       if (conversationHistory.length > 0) {
+        // The agents' autoSave already accumulates per-turn token/cost totals
+        // (and the title) on the stored conversation — keep that metadata and
+        // only refresh messages. Lifetime counters are used only when nothing
+        // was saved yet (overwriting them with this session's lifetime totals
+        // would drop everything from before a restore).
+        const existing = await storageProvider.loadConversation(sessionId).catch(() => null);
         const tokenUsage = session.agent.getTokenUsage();
         await storageProvider.saveConversation({
           metadata: {
+            ...(existing?.metadata ?? {
+              totalPromptTokens: tokenUsage.promptTokens,
+              totalCompletionTokens: tokenUsage.completionTokens,
+              totalTokens: tokenUsage.totalTokens,
+              ...(tokenUsage.totalCostUsd ? { totalCostUsd: tokenUsage.totalCostUsd } : {}),
+            }),
             id: sessionId,
-            created: session.info.createdAt.toISOString(),
+            created: existing?.metadata?.created ?? session.info.createdAt.toISOString(),
             updated: new Date().toISOString(),
             messageCount: conversationHistory.length,
-            totalPromptTokens: tokenUsage.promptTokens,
-            totalCompletionTokens: tokenUsage.completionTokens,
-            totalTokens: tokenUsage.totalTokens,
           },
           messages: conversationHistory,
         });

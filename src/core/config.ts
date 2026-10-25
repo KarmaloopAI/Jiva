@@ -142,6 +142,18 @@ const ModelConfigSchema = z.object({
    * the endpoint is OpenRouter. See src/models/openrouter.ts.
    */
   openrouter: OpenRouterConfigSchema.optional(),
+  /**
+   * Price of this model in USD per million tokens. Used only when the
+   * provider neither reports a call's cost nor lists a price for the model
+   * on its /models endpoint (see src/models/pricing.ts).
+   */
+  pricing: z
+    .object({
+      promptPerM: z.number().min(0),
+      completionPerM: z.number().min(0),
+      cachedPromptPerM: z.number().min(0).optional(),
+    })
+    .optional(),
 });
 
 const CodeModeConfigSchema = z.object({
@@ -172,6 +184,17 @@ const ToolExecutionConfigSchema = z.object({
   maxConcurrency: z.number().int().min(1).optional(),
 });
 
+/**
+ * Chat-mode (DualAgent) conversation compaction. Code mode uses
+ * codeMode.compactionThreshold (falls back to compaction.threshold).
+ */
+const CompactionConfigSchema = z.object({
+  /** Estimated carried-context tokens above which the conversation is condensed. */
+  threshold: z.number().int().min(0).optional(),
+  /** Message count above which the conversation is condensed. */
+  maxMessages: z.number().int().min(4).optional(),
+});
+
 const JivaConfigSchema = z.object({
   models: z.object({
     reasoning: ModelConfigSchema.optional(),
@@ -186,6 +209,7 @@ const JivaConfigSchema = z.object({
   debug: z.boolean().default(false),
   codeMode: CodeModeConfigSchema.optional(),
   toolExecution: ToolExecutionConfigSchema.optional(),
+  compaction: CompactionConfigSchema.optional(),
 });
 
 export type MCPServerConfig = z.infer<typeof MCPServerConfigSchema>;
@@ -309,6 +333,10 @@ export class ConfigManager {
 
   getCodeMode(): CodeModeConfig | undefined {
     return this.store.get('codeMode');
+  }
+
+  getCompaction(): { threshold?: number; maxMessages?: number } | undefined {
+    return this.store.get('compaction');
   }
 
   getToolExecution(): ToolExecutionConfig | undefined {

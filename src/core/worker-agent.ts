@@ -17,6 +17,7 @@ import { AgentContext } from './types/agent-context.js';
 import { Message, MessageContent, ModelResponse, Tool } from '../models/base.js';
 import { formatToolResult, ensureToolResultPairing } from '../models/harmony.js';
 import { logger, formatToolCallArgs } from '../utils/logger.js';
+import { describeHostForPrompt } from './process-guard.js';
 import { OrchestrationLogger, orchestrationLogger } from '../utils/orchestration-logger.js';
 import {
   runToolBatch,
@@ -276,6 +277,8 @@ You execute specific subtasks using available tools. You do NOT plan or make hig
 WORKSPACE:
 Current working directory: ${this.workspace.getWorkspaceDir()}
 When users refer to "current directory", "workspace", "current workspace", or "here", they mean: ${this.workspace.getWorkspaceDir()}
+
+${describeHostForPrompt()}
 
 CRITICAL - File Paths:
 - DEFAULT to workspace paths: When user mentions relative paths like "src/core" or "./src/core", they mean ${this.workspace.getWorkspaceDir()}/src/core
