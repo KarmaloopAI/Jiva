@@ -170,11 +170,35 @@ export function setupSessionRoutes(app: Express, sessionManager: SessionManager)
         res.status(404).json({ error: 'No active session found' });
         return;
       }
-      res.status(200).json({ success: true, sessionId, tokenUsage: agent.getTokenUsage() });
+      res.status(200).json({ success: true, sessionId, tokenUsage: agent.getTokenUsage(), context: agent.getContextSize() });
     } catch (error) {
       logger.error('[API] Failed to get token usage:', error);
       res.status(500).json({
         error: 'Failed to get token usage',
+        message: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  });
+
+  /**
+   * Compact the active session's conversation now (summary + recent exchanges)
+   * POST /api/session/compact   body: { keepMessages?: number }
+   */
+  app.post('/api/session/compact', async (req: Request, res: Response) => {
+    try {
+      const { tenantId, sessionId } = req.auth!;
+      const agent = sessionManager.getActiveAgent(tenantId, sessionId);
+      if (!agent) {
+        res.status(404).json({ error: 'No active session found' });
+        return;
+      }
+      const keepMessages = Number(req.body?.keepMessages) || undefined;
+      const result = await agent.compact({ keepMessages });
+      res.status(200).json({ success: true, sessionId, ...result });
+    } catch (error) {
+      logger.error('[API] Failed to compact conversation:', error);
+      res.status(500).json({
+        error: 'Failed to compact conversation',
         message: error instanceof Error ? error.message : 'Unknown error',
       });
     }

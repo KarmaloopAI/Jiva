@@ -415,7 +415,7 @@ gsutil cp config.json gs://your-bucket/my-tenant/config.json
 
 ### Session Isolation Model
 
-Every HTTP session gets its own storage provider instance that shares the stateless GCS client and per-tenant config cache, but holds a fixed, immutable context (`tenantId` + `sessionId`). Concurrent requests from different tenants can never corrupt each other's GCS paths. See [release notes v0.3.46](../release_notes/v0.3.46.md) for full details.
+Every HTTP session gets its own storage provider instance that shares the stateless GCS client and per-tenant config cache, but holds a fixed, immutable context (`tenantId` + `sessionId`). Concurrent requests from different tenants can never corrupt each other's GCS paths. See [release notes v0.3.46](../release-notes/v0.3.46.md) for full details.
 
 ### Per-Tenant Directives
 

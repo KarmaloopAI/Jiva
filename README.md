@@ -22,7 +22,7 @@ jiva setup
 jiva benchmark
 ```
 
-The setup wizard opens with a provider selection menu. Choose your provider and Jiva auto-fills the endpoint, model name, and tool format — you only supply your API key. Supported providers: **Krutrim**, **Groq**, **Sarvam**, **OpenAI**, and any **OpenAI-compatible** endpoint.
+The setup wizard opens with a provider selection menu. Choose your provider and Jiva auto-fills the endpoint, model name, and tool format — you only supply your API key. Supported providers: **Krutrim**, **Groq**, **Sarvam**, **OpenRouter** (with ranked upstream-provider routing — see the [OpenRouter guide](docs/user-guides/OPENROUTER.md)), **OpenAI**, and any **OpenAI-compatible** endpoint.
 
 After setup, run **`jiva benchmark`** to confirm your chosen model and configuration work optimally in code mode. It runs the **baseline (taskstore) suite** — a deterministic set of coding tasks — against your config; a healthy setup passes all of them. See [Benchmarking](#benchmarking) for tuning and capability comparison.
 
@@ -147,7 +147,7 @@ go install golang.org/x/tools/gopls@latest             # Go
 rustup component add rust-analyzer                     # Rust
 ```
 
-For a complete technical reference see [Code Mode Architecture](docs/architecture/CODE_MODE.md).
+For a complete technical reference see [Code Mode Architecture](docs/reference/CODE_MODE.md).
 
 ---
 
@@ -244,7 +244,7 @@ Any other OpenAI-compatible endpoint works the same way — set `endpoint`, `api
 }
 ```
 
-Full configuration reference: [Configuration Guide](docs/guides/CONFIGURATION.md)
+Full configuration reference: [Configuration Guide](docs/user-guides/CONFIGURATION.md)
 
 ---
 
@@ -268,7 +268,7 @@ Two suites, two purposes:
 
 The report shows per-task iterations, tokens, and wall-time, lists exactly which spec tests were missed, and flags failures caused by a model's **output-token limit** as `[output-limited]` (distinct from logic failures). Run it after `jiva setup`, and re-run it as you tune `defaultMaxTokens`, `maxIterations`, or switch models — the config with the best score-per-token is your optimal setup.
 
-Full guide: [Benchmark Suite](docs/guides/benchmark-suite.md)
+Full guide: [Benchmark Suite](docs/user-guides/BENCHMARK.md)
 
 ---
 
@@ -386,7 +386,7 @@ jiva persona activate data-analyst
 jiva persona create-skill my-skill --description "Custom capability" --author "Your Name"
 ```
 
-Skills bundle MCP servers, directives, and model behavior overrides into portable `.skill` files. See [Personas Guide](docs/guides/PERSONAS.md).
+Skills bundle MCP servers, directives, and model behavior overrides into portable `.skill` files. See [Personas Guide](docs/user-guides/SKILLS.md).
 
 ---
 
@@ -445,13 +445,13 @@ npm run type-check   # type-check without emit
 
 | Document | Description |
 |----------|-------------|
-| [Quick Start](docs/guides/QUICKSTART.md) | Get running in 30 seconds |
-| [Configuration Guide](docs/guides/CONFIGURATION.md) | All config options and provider examples |
-| [Code Mode Architecture](docs/architecture/CODE_MODE.md) | How code mode works internally |
+| [Quick Start](docs/getting-started/QUICK_START.md) | Get running in 30 seconds |
+| [Configuration Guide](docs/user-guides/CONFIGURATION.md) | All config options and provider examples |
+| [Code Mode Architecture](docs/reference/CODE_MODE.md) | How code mode works internally |
 | [Cloud Run Deployment](docs/deployment/CLOUD_RUN_DEPLOYMENT.md) | Production deployment guide |
-| [Personas Guide](docs/guides/PERSONAS.md) | Skills and persona system |
-| [Troubleshooting](docs/guides/TROUBLESHOOTING.md) | Common issues and fixes |
-| [Release Notes](docs/release_notes/) | Version history |
+| [Personas Guide](docs/user-guides/SKILLS.md) | Skills and persona system |
+| [Troubleshooting](docs/user-guides/TROUBLESHOOTING.md) | Common issues and fixes |
+| [Release Notes](docs/release-notes/CHANGELOG.md) | Version history |
 
 ---
 

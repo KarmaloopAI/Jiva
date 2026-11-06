@@ -105,10 +105,10 @@ examples/personas/
 
 ## Documentation
 
-- **[Personas Guide](docs/guides/PERSONAS.md)** - Complete user guide
-- **[v0.3.1 Release Notes](docs/release_notes/v0.3.1.md)** - Updated with personas feature
-- **[README.md](README.md)** - Updated with personas quick start
-- **[Example Persona](examples/personas/code-reviewer/)** - Working code reviewer
+- **[Personas Guide](../user-guides/SKILLS.md)** - Complete user guide
+- **[v0.3.1 Release Notes](../release-notes/v0.3.1.md)** - Updated with personas feature
+- **[README.md](../../README.md)** - Updated with personas quick start
+- **[Example Persona](../../examples/personas/code-reviewer/)** - Working code reviewer
 
 ## Dependencies Added
 
@@ -167,7 +167,6 @@ jiva chat
 - [Claude Skills Documentation](https://code.claude.com/docs/en/skills)
 - [Claude Plugins Reference](https://code.claude.com/docs/en/plugins)
 - [Anthropic Skills Repository](https://github.com/anthropics/skills)
-- [Implementation Guide](jiva-skills-plugins-guide.md) (attached)
 
 ---
 

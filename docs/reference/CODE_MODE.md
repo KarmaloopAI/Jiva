@@ -213,6 +213,7 @@ interface ICodeTool {
   description: string
   parameters: object            // JSON Schema
   execute(args, ctx: CodeToolContext): Promise<string>
+  access?(args, ctx): ToolAccess   // scheduling hint; omitted ⇒ runs alone
 }
 
 interface CodeToolContext {
@@ -221,6 +222,8 @@ interface CodeToolContext {
   signal: AbortSignal
 }
 ```
+
+Several tool calls in one model response are executed by the shared tool scheduler. Independent calls run concurrently; conflicting ones run in order. Results are always returned in call order. See [Parallel Tool Execution](TOOL_EXECUTION.md).
 
 Built-in tools run **in-process** — no subprocess, no JSON serialization overhead, direct Node.js `fs` access. Opt-in MCP tools run through their respective server subprocesses (same as general mode) and are dispatched via the shared `MCPServerManager`.
 
@@ -305,7 +308,7 @@ rustup component add rust-analyzer
 
 ## File Locking
 
-`FileLock` (`src/code/file-lock.ts`) is a per-path async mutex. When the model emits multiple tool calls in a single response that target the same file, they are serialized through the lock to prevent interleaved writes.
+`FileLock` (`src/code/file-lock.ts`) is a per-path async mutex. The scheduler already serializes conflicting calls on the same path; the lock is the backstop, for example across sub-agents. Only read→modify→write happens under the lock. LSP diagnostics are collected after it is released, so a slow language server never holds up other edits.
 
 ```typescript
 // All edits to the same path are queued automatically

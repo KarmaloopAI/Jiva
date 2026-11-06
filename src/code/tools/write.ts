@@ -2,7 +2,9 @@ import path from 'path';
 import fs from 'fs';
 import { createTwoFilesPatch, diffLines } from 'diff';
 import { fileLock } from '../file-lock.js';
-import type { ICodeTool, CodeToolContext } from './index.js';
+import { resolveToolPath, type ICodeTool, type CodeToolContext } from './index.js';
+import { collectDiagnostics } from './diagnostics.js';
+import { EXCLUSIVE, writesPath } from '../../core/tool-scheduler.js';
 
 export const WriteFileTool: ICodeTool = {
   name: 'write_file',
@@ -38,6 +40,11 @@ Returns a summary of changes and LSP diagnostics (if any errors).`,
     required: ['content'],
   },
 
+  access(args, ctx) {
+    const p = resolveToolPath(args.file_path ?? args.path, ctx.workspaceDir);
+    return p ? writesPath(p) : EXCLUSIVE;
+  },
+
   async execute(args, ctx: CodeToolContext): Promise<string> {
     const rawPath = (args.file_path ?? args.path) as string | undefined;
     if (typeof rawPath !== 'string' || rawPath.trim() === '') {
@@ -46,7 +53,7 @@ Returns a summary of changes and LSP diagnostics (if any errors).`,
     const filePath = path.isAbsolute(rawPath) ? rawPath : path.resolve(ctx.workspaceDir, rawPath);
     const content = args.content as string;
 
-    return fileLock.withLock(filePath, async () => {
+    const locked = await fileLock.withLock(filePath, async (): Promise<{ ok: boolean; text: string }> => {
       // Read existing content for diff
       let before = '';
       const existed = fs.existsSync(filePath);
@@ -64,7 +71,7 @@ Returns a summary of changes and LSP diagnostics (if any errors).`,
         fs.mkdirSync(dir, { recursive: true });
         fs.writeFileSync(filePath, content, 'utf-8');
       } catch (e) {
-        return `Error writing file: ${e instanceof Error ? e.message : String(e)}`;
+        return { ok: false, text: `Error writing file: ${e instanceof Error ? e.message : String(e)}` };
       }
 
       // Count changes
@@ -78,19 +85,11 @@ Returns a summary of changes and LSP diagnostics (if any errors).`,
       const relPath = path.relative(ctx.workspaceDir, filePath);
       const action = existed ? 'Updated' : 'Created';
 
-      // LSP diagnostics
-      let diagnosticsOutput = '';
-      try {
-        await ctx.lsp.touchFile(filePath);
-        const errors = ctx.lsp.getErrorsForFile(filePath);
-        if (errors) {
-          diagnosticsOutput = `\n\nLSP errors detected — please fix:\n<diagnostics file="${filePath}">\n${errors}\n</diagnostics>`;
-        }
-      } catch {
-        // LSP should not block the write result
-      }
-
-      return `${action} ${relPath} (+${additions}/-${deletions} lines).${diagnosticsOutput}`;
+      return { ok: true, text: `${action} ${relPath} (+${additions}/-${deletions} lines).` };
     });
+
+    if (!locked.ok) return locked.text;
+    // Diagnostics outside the lock — see edit.ts.
+    return locked.text + (await collectDiagnostics(ctx, filePath));
   },
 };

@@ -76,6 +76,10 @@ export function formatReportForCLI(suite: SuiteResult): string {
   lines.push(
     chalk.gray(
       `  total time: ${fmtMs(suite.totalWallTimeMs)}` +
+        (suite.totalLlmMs !== undefined
+          ? `  (model ${fmtMs(suite.totalLlmMs)}, tools ${fmtMs(suite.totalToolMs ?? 0)}` +
+            `, parallel ${suite.parallelTools === false ? 'off' : `on, saved ${fmtMs(suite.totalParallelSavedMs ?? 0)}`})`
+          : '') +
         (suite.totalTokens ? `  ·  total tokens: ${suite.totalTokens}` : ''),
     ),
   );

@@ -38,8 +38,12 @@ export class LspManager {
     const client = await this.getOrStartClient(serverId);
     if (!client) return;
 
+    // Register the diagnostics listener BEFORE notifying: a fast server can
+    // publish diagnostics before notify.open() returns, and a listener added
+    // afterwards would miss them and sit out the full 3s timeout.
+    const diagnosticsReady = client.waitForDiagnostics(absPath);
     await client.notify.open(absPath);
-    await client.waitForDiagnostics(absPath);
+    await diagnosticsReady;
   }
 
   /**

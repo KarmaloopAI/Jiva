@@ -14,6 +14,13 @@ export interface Message {
    * subsequent role:'tool' results can be matched by tool_call_id.
    */
   tool_calls?: ToolCall[];
+  /**
+   * OpenRouter structured reasoning blocks. Must be sent back unmodified with
+   * the assistant tool-call message for providers that require reasoning
+   * continuity across tool calls (e.g. Claude via OpenRouter). Only forwarded
+   * to OpenRouter endpoints; stripped for every other provider.
+   */
+  reasoning_details?: unknown[];
 }
 
 export interface MessageContent {
@@ -39,7 +46,28 @@ export interface ModelResponse {
     promptTokens: number;
     completionTokens: number;
     totalTokens: number;
+    /** Cost in USD: reported by the provider, or computed from a known price (see costSource). */
+    cost?: number;
+    /** Where `cost` came from: 'provider' (in the response), 'catalog' (provider price list), 'config' (user price). */
+    costSource?: 'provider' | 'catalog' | 'config' | 'unknown';
+    /** True when token counts are a local estimate rather than provider-reported. */
+    estimated?: boolean;
+    /** Prompt tokens served from cache, when reported. */
+    cachedTokens?: number;
+    /** Tokens spent on hidden reasoning, when reported. */
+    reasoningTokens?: number;
   };
+  /**
+   * Which upstream provider/model actually served the call. Populated for
+   * OpenRouter, where the served provider/model can differ from what was
+   * requested (provider ranking, model fallbacks).
+   */
+  routing?: {
+    model?: string;
+    provider?: string;
+  };
+  /** OpenRouter reasoning blocks to echo back on the assistant message (see Message.reasoning_details). */
+  reasoningDetails?: unknown[];
   /**
    * The API's own reason the completion stopped, e.g. 'stop' | 'length' | 'tool_calls'.
    * 'length' means the completion hit its max_tokens ceiling — if content and toolCalls
@@ -68,6 +96,16 @@ export interface Tool {
     properties: Record<string, any>;
     required?: string[];
   };
+  /**
+   * MCP tool annotations (hints only, never sent to the model). Used by the
+   * tool scheduler: readOnlyHint ⇒ safe to run alongside other reads.
+   */
+  annotations?: {
+    readOnlyHint?: boolean;
+    destructiveHint?: boolean;
+    idempotentHint?: boolean;
+    openWorldHint?: boolean;
+  };
 }
 
 export interface ChatCompletionOptions {
@@ -92,6 +130,14 @@ export interface ChatCompletionOptions {
    * ignore it. For models that can't disable thinking, pair with reasoningEffort:'low'.
    */
   disableThinking?: boolean;
+
+  /**
+   * 'auxiliary' for side calls (conversation titles, compaction summaries,
+   * host-side planning calls): billed and counted, but they do not overwrite
+   * the tracker's `lastPromptTokens`, which describes the agent's own context.
+   * Default 'agent'.
+   */
+  purpose?: 'agent' | 'auxiliary';
 }
 
 export interface IModel {

@@ -96,6 +96,7 @@ The setup wizard automatically sets the correct format based on provider selecti
 | Krutrim | `true` |
 | Groq | `false` |
 | Sarvam | `false` |
+| OpenRouter | `false` (see [OpenRouter guide](OPENROUTER.md)) |
 | OpenAI-Compatible | `false` |
 
 ## Reasoning Effort Strategy
@@ -134,6 +135,29 @@ The setup wizard sets this automatically. You can override it in the config file
       "type": "reasoning",
       "useHarmonyFormat": true,
       "reasoningEffortStrategy": "system_prompt"
+    }
+  }
+}
+```
+
+### OpenRouter
+
+Routes to many upstream providers; rank them per model with the `openrouter` block. Full reference: [OpenRouter guide](OPENROUTER.md).
+
+```json
+{
+  "models": {
+    "reasoning": {
+      "endpoint": "https://openrouter.ai/api/v1/chat/completions",
+      "apiKey": "sk-or-...",
+      "defaultModel": "openai/gpt-oss-120b",
+      "type": "reasoning",
+      "reasoningEffortStrategy": "api_param",
+      "openrouter": {
+        "providerOrder": ["fireworks", "together"],
+        "allowFallbacks": true,
+        "dataCollection": "deny"
+      }
     }
   }
 }
@@ -341,18 +365,22 @@ Debug mode logs:
 
 ## Environment Variables
 
-You can override config with environment variables:
+The CLI reads its model settings from `config.json` (use `jiva setup` / `jiva config`).
 
-```bash
-# Override reasoning model endpoint
-export JIVA_REASONING_ENDPOINT="https://api.groq.com/openai/v1/chat/completions"
+The HTTP server (Cloud Run) bootstraps a tenant's first config from environment variables:
 
-# Override API key
-export JIVA_API_KEY="your-api-key"
+| Variable | Purpose |
+|---|---|
+| `JIVA_MODEL_PROVIDER` | Provider label (`sarvam`, `openrouter`, …); `openrouter` defaults the endpoint |
+| `JIVA_MODEL_BASE_URL` | Chat-completions endpoint |
+| `JIVA_MODEL_API_KEY` | API key |
+| `JIVA_MODEL_NAME` | Model ID |
+| `JIVA_MODEL_PROVIDER_ORDER` / `JIVA_MODEL_ALLOW_FALLBACKS` | OpenRouter ranked providers / fallback policy |
+| `JIVA_TOOL_CALLING_MODEL_BASE_URL` / `_API_KEY` / `_NAME` | Optional dedicated tool-calling model |
+| `JIVA_PARALLEL_TOOLS` / `JIVA_MAX_TOOL_CONCURRENCY` | Parallel tool execution (CLI and server; overrides `toolExecution`) |
+| `JIVA_COMPACTION_THRESHOLD` | Chat-mode conversation compaction threshold (tokens) on the HTTP server |
 
-# Enable debug mode
-export JIVA_DEBUG=true
-```
+See the [OpenRouter guide](OPENROUTER.md) and [HTTP API](../deployment/HTTP_API.md) for details.
 
 ## Configuration Best Practices
 
@@ -535,7 +563,7 @@ The custom config file uses the same format as the default configuration:
 }
 ```
 
-See [examples/jiva-config.example.json](../examples/jiva-config.example.json) for a complete template.
+See [examples/jiva-config.example.json](../../examples/jiva-config.example.json) for a complete template.
 
 ### Use Cases for Custom Config Files
 
@@ -656,7 +684,27 @@ go install golang.org/x/tools/gopls@latest
 rustup component add rust-analyzer
 ```
 
-For the full reference see [Code Mode Architecture](../architecture/CODE_MODE.md).
+For the full reference see [Code Mode Architecture](../reference/CODE_MODE.md).
+
+### Usage, Cost and Compaction
+
+Per-turn tokens and cost are reported after every reply, along with where the cost came from: the provider, the provider's price list, or your price. If a provider reports no cost and publishes no price list, set one on the model:
+
+```json
+{ "models": { "reasoning": { "pricing": { "promptPerM": 0.15, "completionPerM": 0.6 } } } }
+```
+
+Chat-mode compaction: `"compaction": { "threshold": 100000, "maxMessages": 60 }`. Compact on demand with `/compact` in the REPL. See [Usage, Cost & Compaction](../reference/USAGE_AND_COST.md).
+
+### Parallel Tool Execution
+
+Independent tool calls from one model response run concurrently in every mode. This covers reads, searches, edits to different files, read-only shell commands, and read-only MCP tools.
+
+```json
+{ "toolExecution": { "parallel": true, "maxConcurrency": 8 } }
+```
+
+To override for one run, set `JIVA_PARALLEL_TOOLS=false` or `JIVA_MAX_TOOL_CONCURRENCY=4`. See [Parallel Tool Execution](../reference/TOOL_EXECUTION.md).
 
 ---
 
@@ -731,7 +779,7 @@ If you're stuck:
 
 ## Related Documentation
 
-- [Quick Start Guide](QUICKSTART.md)
+- [Quick Start Guide](../getting-started/QUICK_START.md)
 - [Troubleshooting](TROUBLESHOOTING.md)
 - [MCP Servers](https://github.com/modelcontextprotocol/servers)
-- [Programmatic Usage](../examples/programmatic-usage.ts)
+- [Programmatic Usage](../../examples/programmatic-usage.ts)

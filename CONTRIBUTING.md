@@ -25,7 +25,7 @@ Be respectful and constructive in your interactions with other contributors.
 
 ## Development Workflow
 
-See [docs/guides/DEV_WORKFLOW.md](docs/guides/DEV_WORKFLOW.md) for detailed development instructions.
+See [docs/developer-guides/DEV_WORKFLOW.md](docs/developer-guides/DEV_WORKFLOW.md) for detailed development instructions.
 
 ### Quick Commands
 
@@ -69,7 +69,7 @@ npm test                  # Run tests (when available)
 
 1. **Update documentation** for any changed functionality
 2. **Update README.md** if adding new features
-3. **Add release notes** in `docs/release_notes/` if applicable
+3. **Add release notes** in `docs/release-notes/` if applicable
 4. **Create pull request** with clear description of changes
 5. **Link related issues** in the PR description
 

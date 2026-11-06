@@ -9,7 +9,7 @@ import { ModelClient } from './model-client.js';
 import { Message, MessageContent, ChatCompletionOptions, ModelResponse, Tool } from './base.js';
 import { logger } from '../utils/logger.js';
 import { ModelError } from '../utils/errors.js';
-import { TokenTracker, TokenUsageSnapshot } from './token-tracker.js';
+import { TokenTracker, TokenUsageSnapshot, type TurnUsage } from './token-tracker.js';
 
 export interface OrchestratorConfig {
   reasoningModel: ModelClient;
@@ -82,8 +82,53 @@ export class ModelOrchestrator {
       response = await this.reasoningModel.chat(options);
     }
 
-    this.tokenTracker.record(response.usage, options.messages, response.content);
+    this.tokenTracker.record(response.usage, options.messages, response.content, options.purpose ?? 'agent');
+    if (response.routing) {
+      this.lastRouting = response.routing;
+      const key = response.routing.provider ?? 'unknown';
+      this.providerCalls.set(key, (this.providerCalls.get(key) ?? 0) + 1);
+    }
     return response;
+  }
+
+  private lastRouting?: { model?: string; provider?: string };
+  private providerCalls = new Map<string, number>();
+
+  /**
+   * Which upstream provider/model served the most recent call (OpenRouter
+   * reports this; other providers leave it undefined). Lets UIs show
+   * "served by" without parsing logs.
+   */
+  getLastRouting(): { model?: string; provider?: string } | undefined {
+    return this.lastRouting;
+  }
+
+  /** Number of calls served per upstream provider since the last reset. */
+  getProviderUsage(): Record<string, number> {
+    return Object.fromEntries(this.providerCalls);
+  }
+
+  /** Clear routing statistics (e.g. at the start of a turn). */
+  resetProviderUsage(): void {
+    this.providerCalls.clear();
+  }
+
+  /**
+   * Start accounting a user turn. Nested begin/end pairs (e.g. an embedding
+   * app's Deep Run turn wrapping several agent turns) share one accumulator.
+   */
+  beginTurn(): void {
+    this.tokenTracker.beginTurn();
+  }
+
+  /** Finish the turn and return its usage (tokens, cached/reasoning, cost + source). */
+  endTurn(): TurnUsage {
+    return this.tokenTracker.endTurn();
+  }
+
+  /** Usage of the turn in progress (or the last finished one), without ending it. */
+  peekTurn(): TurnUsage {
+    return this.tokenTracker.peekTurn();
   }
 
   /** Return a snapshot of accumulated token usage for this orchestrator instance. */
@@ -132,6 +177,9 @@ export class ModelOrchestrator {
           messages: [msg],
           temperature: options.temperature,
         });
+        // Caption calls are billable too — record them (auxiliary: they don't
+        // describe the agent's context size).
+        this.tokenTracker.record(response.usage, [msg], response.content, 'auxiliary');
 
         imageDescriptions.set(index, response.content);
         logger.debug(`Image description: ${response.content.substring(0, 100)}...`);

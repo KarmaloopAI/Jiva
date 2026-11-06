@@ -6,23 +6,23 @@ This document summarizes the Cloud Run implementation for Jiva that enables stat
 
 ### ✅ New HTTP/WebSocket Interface
 
-**Location**: [src/interfaces/http/](src/interfaces/http/)
+**Location**: [src/interfaces/http/](../../src/interfaces/http/)
 
-- **Entry Point** ([index.ts](src/interfaces/http/index.ts)): Express + WebSocket server with health checks, CORS, and graceful shutdown
-- **Session Manager** ([session-manager.ts](src/interfaces/http/session-manager.ts)): Manages DualAgent lifecycle, per-session MCP servers, idle timeouts, and state persistence
-- **WebSocket Handler** ([websocket-handler.ts](src/interfaces/http/websocket-handler.ts)): Real-time bidirectional communication with heartbeat monitoring
-- **Auth Middleware** ([middleware/auth.ts](src/interfaces/http/middleware/auth.ts)): JWT verification supporting Firebase Auth, custom JWT, and dev mode
+- **Entry Point** ([index.ts](../../src/interfaces/http/index.ts)): Express + WebSocket server with health checks, CORS, and graceful shutdown
+- **Session Manager** ([session-manager.ts](../../src/interfaces/http/session-manager.ts)): Manages DualAgent lifecycle, per-session MCP servers, idle timeouts, and state persistence
+- **WebSocket Handler** ([websocket-handler.ts](../../src/interfaces/http/websocket-handler.ts)): Real-time bidirectional communication with heartbeat monitoring
+- **Auth Middleware** ([middleware/auth.ts](../../src/interfaces/http/middleware/auth.ts)): JWT verification supporting Firebase Auth, custom JWT, and dev mode
 - **REST API Routes**:
-  - [routes/health.ts](src/interfaces/http/routes/health.ts): `/health`, `/ready`, `/startup` for Cloud Run probes
-  - [routes/session.ts](src/interfaces/http/routes/session.ts): Session CRUD operations
-  - [routes/chat.ts](src/interfaces/http/routes/chat.ts): Chat endpoints with SSE streaming support
+  - [routes/health.ts](../../src/interfaces/http/routes/health.ts): `/health`, `/ready`, `/startup` for Cloud Run probes
+  - [routes/session.ts](../../src/interfaces/http/routes/session.ts): Session CRUD operations
+  - [routes/chat.ts](../../src/interfaces/http/routes/chat.ts): Chat endpoints with SSE streaming support
 
 ### ✅ Storage Abstraction Integration
 
 **Refactored Components**:
 
-- **ConversationManager** ([src/core/conversation-manager.ts](src/core/conversation-manager.ts)): Now uses `StorageProvider` instead of direct filesystem access
-- **WorkspaceManager** ([src/core/workspace.ts](src/core/workspace.ts)): Supports both local filesystem and `StorageProvider` for directive loading
+- **ConversationManager** ([src/core/conversation-manager.ts](../../src/core/conversation-manager.ts)): Now uses `StorageProvider` instead of direct filesystem access
+- **WorkspaceManager** ([src/core/workspace.ts](../../src/core/workspace.ts)): Supports both local filesystem and `StorageProvider` for directive loading
 
 **Benefits**:
 - Seamless switching between local (CLI) and cloud (GCS) storage
@@ -47,7 +47,7 @@ This document summarizes the Cloud Run implementation for Jiva that enables stat
 
 ### ✅ Package Updates
 
-**[package.json](package.json)**:
+**[package.json](../../package.json)**:
 
 - Added dependencies: `express`, `ws`, `jsonwebtoken`
 - Added devDependencies: `@types/express`, `@types/ws`, `@types/jsonwebtoken`
@@ -55,7 +55,7 @@ This document summarizes the Cloud Run implementation for Jiva that enables stat
 - New scripts:
   - `dev:http`: Run HTTP server in development
   - `serve`: Run production HTTP server
-- Exported storage module in [src/index.ts](src/index.ts)
+- Exported storage module in [src/index.ts](../../src/index.ts)
 
 ## Architecture
 
@@ -172,7 +172,7 @@ chmod +x deploy.sh
 
 ### Manual Steps
 
-See [docs/CLOUD_RUN_DEPLOYMENT.md](docs/CLOUD_RUN_DEPLOYMENT.md) for comprehensive guide.
+See [docs/CLOUD_RUN_DEPLOYMENT.md](CLOUD_RUN_DEPLOYMENT.md) for comprehensive guide.
 
 ### Local Testing
 
@@ -377,4 +377,4 @@ curl https://jiva.run.app/api/chat
 
 For issues, questions, or contributions:
 - GitHub Issues: https://github.com/KarmaloopAI/Jiva/issues
-- Deployment Guide: [docs/CLOUD_RUN_DEPLOYMENT.md](docs/CLOUD_RUN_DEPLOYMENT.md)
+- Deployment Guide: [docs/CLOUD_RUN_DEPLOYMENT.md](CLOUD_RUN_DEPLOYMENT.md)

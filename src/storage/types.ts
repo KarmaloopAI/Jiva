@@ -51,6 +51,8 @@ export interface ConversationMetadata {
   totalCompletionTokens?: number;
   /** totalPromptTokens + totalCompletionTokens */
   totalTokens?: number;
+  /** Lifetime cost in USD, summed over turns whose cost was known. */
+  totalCostUsd?: number;
   /** Code-mode specific context — see CodeConversationMeta. Only meaningful when type === 'code'. */
   mcpServers?: string[];
   maxIterations?: number;

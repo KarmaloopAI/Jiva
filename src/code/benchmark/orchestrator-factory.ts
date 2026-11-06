@@ -7,6 +7,8 @@
 
 import { createModelClient } from '../../models/model-client.js';
 import { ModelOrchestrator } from '../../models/orchestrator.js';
+import { modelClientConfigFromStored } from '../../models/client-config.js';
+import type { OpenRouterConfig } from '../../models/openrouter.js';
 
 /** Subset of the stored ModelConfig shape we need to build a client. */
 export interface ModelConfigInput {
@@ -20,6 +22,12 @@ export interface ModelConfigInput {
   reasoningEffortStrategy?: 'api_param' | 'system_prompt' | 'both';
   defaultMaxTokens?: number;
   useGoogleADC?: boolean;
+  hasVision?: boolean;
+  maxRequestsPerMinute?: number;
+  includeReasoning?: boolean;
+  headers?: Record<string, string>;
+  /** OpenRouter provider routing — benchmark runs go through the same routing as real sessions. */
+  openrouter?: OpenRouterConfig;
 }
 
 export interface OrchestratorInput {
@@ -43,17 +51,7 @@ function resolveModelId(cfg: ModelConfigInput): string {
 }
 
 function buildClient(cfg: ModelConfigInput, type: 'reasoning' | 'multimodal' | 'tool-calling') {
-  return createModelClient({
-    endpoint: cfg.endpoint,
-    apiKey: cfg.apiKey ?? '',
-    model: resolveModelId(cfg),
-    type,
-    useHarmonyFormat: cfg.useHarmonyFormat,
-    defaultReasoningEffort: cfg.defaultReasoningEffort,
-    reasoningEffortStrategy: cfg.reasoningEffortStrategy,
-    defaultMaxTokens: cfg.defaultMaxTokens,
-    useGoogleADC: cfg.useGoogleADC,
-  });
+  return createModelClient(modelClientConfigFromStored(cfg, type));
 }
 
 export async function createOrchestrator(input: OrchestratorInput): Promise<OrchestratorBundle> {

@@ -14,6 +14,9 @@ RUN npm ci --ignore-scripts
 # Copy source code
 COPY src ./src
 
+# Copy scripts directory (required for build process)
+COPY scripts ./scripts
+
 # Build TypeScript
 RUN npm run build
 
@@ -36,6 +39,9 @@ RUN npm install -g @modelcontextprotocol/server-filesystem
 
 # Copy built application from builder
 COPY --from=builder /app/dist ./dist
+
+# Copy example personas (required for WorkerAgent sub-agent spawning)
+COPY examples/personas /app/.jiva/personas
 
 # Create workspace directory and set permissions
 RUN mkdir -p /workspace && \

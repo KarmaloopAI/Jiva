@@ -1,6 +1,7 @@
 import path from 'path';
 import fs from 'fs';
 import type { ICodeTool, CodeToolContext } from './index.js';
+import { READS_ALL } from '../../core/tool-scheduler.js';
 
 export const GlobTool: ICodeTool = {
   name: 'glob',
@@ -11,7 +12,8 @@ Examples:
 - "src/**/*.test.ts" — all test files under src/
 - "*.json" — JSON files in the workspace root
 
-Returns file paths relative to the workspace directory, sorted by modification time (newest first).`,
+Returns file paths relative to the workspace directory, sorted by modification time (newest first).
+Several independent glob searches can be issued in the same response — they run in parallel.`,
 
   parameters: {
     type: 'object',
@@ -27,6 +29,8 @@ Returns file paths relative to the workspace directory, sorted by modification t
     },
     required: ['pattern'],
   },
+
+  access: () => READS_ALL,
 
   async execute(args, ctx: CodeToolContext): Promise<string> {
     const pattern = args.pattern as string;
@@ -48,16 +52,18 @@ Returns file paths relative to the workspace directory, sorted by modification t
       }
 
       // Sort by mtime (newest first)
-      const withMtime = matches
-        .map((f) => {
-          try {
-            const stat = fs.statSync(path.join(cwd, f));
-            return { file: f, mtime: stat.mtimeMs };
-          } catch {
-            return { file: f, mtime: 0 };
-          }
-        })
-        .sort((a, b) => b.mtime - a.mtime);
+      const withMtime = (
+        await Promise.all(
+          matches.map(async (f) => {
+            try {
+              const stat = await fs.promises.stat(path.join(cwd, f));
+              return { file: f, mtime: stat.mtimeMs };
+            } catch {
+              return { file: f, mtime: 0 };
+            }
+          }),
+        )
+      ).sort((a, b) => b.mtime - a.mtime);
 
       return withMtime.map((f) => f.file).join('\n');
     } catch (e) {

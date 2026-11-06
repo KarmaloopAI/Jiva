@@ -32,6 +32,16 @@ export interface AgentConfig {
   model?: string;
   /** Tool-calling model name. */
   toolCallingModel?: string;
+  /**
+   * OpenRouter only: priority-ranked provider slugs for the reasoning model
+   * (e.g. ["fireworks", "together"]). Overrides the stored routing order for
+   * this session. Ignored for non-OpenRouter endpoints.
+   */
+  providerOrder?: string[];
+  /** OpenRouter only: allow fallback to providers outside `providerOrder`. */
+  allowFallbacks?: boolean;
+  /** Run independent tool calls in parallel (default true; overrides JIVA_PARALLEL_TOOLS for this session). */
+  parallelTools?: boolean;
   /** MCP server list — replaces filesystem default + stored config for this session. */
   mcpServers?: AgentConfigMCPServer[];
   /** Whether code mode is enabled (overrides JIVA_CODE_MODE). */
@@ -81,6 +91,26 @@ export function validateAgentConfig(config: unknown): { valid: boolean; errors: 
     if (typeof c.toolCallingModel !== 'string' || c.toolCallingModel.trim() === '') {
       errors.push('agentConfig.toolCallingModel must be a non-empty string');
     }
+  }
+
+  // providerOrder: optional array of non-empty slug strings
+  if ('providerOrder' in c && c.providerOrder !== undefined) {
+    if (
+      !Array.isArray(c.providerOrder) ||
+      c.providerOrder.some((p: unknown) => typeof p !== 'string' || p.trim() === '')
+    ) {
+      errors.push('agentConfig.providerOrder must be an array of non-empty strings');
+    }
+  }
+
+  // allowFallbacks: optional boolean
+  if ('allowFallbacks' in c && c.allowFallbacks !== undefined && typeof c.allowFallbacks !== 'boolean') {
+    errors.push('agentConfig.allowFallbacks must be a boolean');
+  }
+
+  // parallelTools: optional boolean
+  if ('parallelTools' in c && c.parallelTools !== undefined && typeof c.parallelTools !== 'boolean') {
+    errors.push('agentConfig.parallelTools must be a boolean');
   }
 
   // mcpServers: optional array of { name, url }

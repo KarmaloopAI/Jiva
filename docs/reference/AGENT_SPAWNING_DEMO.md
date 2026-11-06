@@ -226,5 +226,5 @@ Expected flow:
 ## Learn More
 
 - [Agent Spawning Guide](./AGENT_SPAWNING.md) - Complete system documentation
-- [Persona System](./PERSONAS.md) - How personas work
+- [Persona System](../user-guides/SKILLS.md) - How personas work
 - [Example Personas](../../examples/personas/) - Reference implementations

@@ -10,12 +10,25 @@ import { WorkspaceManager } from '../core/workspace.js';
 import { ConversationManager } from '../core/conversation-manager.js';
 import { formatToolResult, ensureToolResultPairing } from '../models/harmony.js';
 import type { Message, Tool } from '../models/base.js';
+import { TokenTracker, type TurnUsage } from '../models/token-tracker.js';
+import { turnTokenUsage } from '../core/conversation-manager.js';
+import { condenseHistory } from '../core/summarize.js';
+import type { CompactionResult } from '../core/agent-interface.js';
 import { logger, formatToolCallArgs } from '../utils/logger.js';
+import { describeHostForPrompt } from '../core/process-guard.js';
 import { splitRoundsForCompaction } from './rounds.js';
 import type { PersonaManager } from '../personas/persona-manager.js';
 import type { MCPServerManager } from '../mcp/server-manager.js';
 import { LspManager } from './lsp/manager.js';
 import type { CodeToolContext, ICodeTool } from './tools/index.js';
+import {
+  runToolBatch,
+  resolveToolExecutionSettings,
+  accessFromAnnotations,
+  EXCLUSIVE,
+  type ScheduledCall,
+  type ToolAccess,
+} from '../core/tool-scheduler.js';
 import {
   ReadFileTool,
   EditFileTool,
@@ -47,6 +60,32 @@ export interface AgentResponse {
    *   'stopped'        — the user cooperatively stopped the run.
    */
   stopReason?: 'completed' | 'max-iterations' | 'stopped';
+  /** Wall-clock breakdown of the turn — where the time went. */
+  timing?: TurnTiming;
+  /**
+   * Usage of THIS turn only: tokens (incl. cached/reasoning), cost and where
+   * the cost came from. `tokenUsage` above is the orchestrator's lifetime total.
+   */
+  turnUsage?: TurnUsage;
+  /** Estimated size (tokens) of the context carried into the next turn — see getContextSize(). */
+  contextTokens?: number;
+}
+
+export interface TurnTiming {
+  /** Whole chat() call. */
+  totalMs: number;
+  /** Time spent waiting on the model (all chat calls, incl. retries). */
+  llmMs: number;
+  /** Wall time spent executing tool batches. */
+  toolMs: number;
+  /** Number of tool batches (one per model response that requested tools). */
+  toolBatches: number;
+  /** Largest number of tool calls that ran concurrently in one group. */
+  maxBatchSize: number;
+  /** Largest number of tool calls the model issued in a single response. */
+  maxCallsPerResponse: number;
+  /** Sum of individual tool durations minus batch wall time — time saved by running calls in parallel. */
+  parallelSavedMs: number;
 }
 
 /**
@@ -142,9 +181,16 @@ export interface CodeAgentConfig {
    * does not change CodeAgent's own behavior.
    */
   harness?: string;
+  /**
+   * Parallel tool execution settings (config `toolExecution`). Env
+   * JIVA_PARALLEL_TOOLS / JIVA_MAX_TOOL_CONCURRENCY override. Default: parallel, 8.
+   */
+  toolExecution?: import('../core/tool-scheduler.js').ToolExecutionSettingsInput;
 }
 
 const DEFAULT_MAX_ITERATIONS = 50;
+/** Recent history messages kept verbatim when the carried conversation is compacted. */
+const DEFAULT_KEEP_HISTORY_MESSAGES = 6;
 const DOOM_LOOP_THRESHOLD = 3;
 /** Max consecutive read_file calls before injecting an "act, don't just read" nudge. */
 const MAX_CONSECUTIVE_READS = 15;
@@ -233,12 +279,15 @@ WORKSPACE: ${workspaceDir}
 All relative paths are resolved relative to the workspace directory above.
 Use absolute paths for all file operations.
 
+${describeHostForPrompt()}
+
 PERSISTENCE AND COMPLETION:
 - Keep going until the user's query is completely resolved before ending your turn.
 - You MUST iterate and keep going until the problem is solved.
 - NEVER end your turn without having truly and completely solved the problem.
 - When you say you are going to make a tool call, you MUST actually make the tool call.
 - Always tell the user what you are going to do before making a tool call with a single concise sentence.
+- You can call multiple tools in one response. When calls are independent — reading several files, running several searches, \`git status\` and \`git diff\` — issue them together in a single response: they run in parallel and save a full round-trip each. When one call needs another's result (e.g. read a file, then edit it), call them sequentially.
 - If the user says "resume", "continue", or "try again", check the conversation history to find the last incomplete step and continue from there.
 - Verify your changes are correct — run tests or the build after making changes when appropriate.
 - If a tool call fails or returns an error, DO NOT STOP. Analyse the error, try a different approach or arguments, and keep going. Errors are expected — your job is to recover and complete the task.
@@ -309,6 +358,8 @@ function buildMCPAdapters(mcpManager: MCPServerManager | undefined, serverNames:
         name: tool.name,
         description: tool.description,
         parameters: tool.parameters,
+        // MCP servers declare read-only tools via annotations.readOnlyHint
+        access: () => accessFromAnnotations(tool.annotations),
         async execute(args: Record<string, unknown>): Promise<string> {
           try {
             const result = await client.executeTool(tool.name, args);
@@ -344,6 +395,9 @@ export class CodeAgent {
   private _mcpServerNames: string[] = [];
   private _harness?: string;
   private _stopped = false;
+  private toolExecution: { parallel: boolean; maxConcurrency: number };
+  /** Aborted by stop(): kills running commands and skips queued tool calls. */
+  private _turnAbort?: AbortController;
 
   constructor(config: CodeAgentConfig) {
     this.orchestrator = config.orchestrator;
@@ -363,6 +417,7 @@ export class CodeAgent {
     this._mcpManager = config.mcpManager;
     this._mcpServerNames = config.mcpServerNames ?? [];
     this._harness = config.harness;
+    this.toolExecution = resolveToolExecutionSettings(config.toolExecution);
 
     this.tools = [
       ReadFileTool,
@@ -400,6 +455,8 @@ AVAILABLE TOOLS (read-only — exploration only):
 - grep: Search file contents with regex
 
 DO NOT call edit_file, write_file, or bash. You are planning, not implementing.
+
+Explore efficiently: when you need several files or searches, request them all in the same response — they run in parallel.
 
 After exploring, output your plan using EXACTLY this format:
 
@@ -469,7 +526,8 @@ ${directive ? `\n${directive}` : ''}`;
         return response.content || '[No plan generated]';
       }
 
-      // Execute read-only tool calls
+      // Execute read-only tool calls — all planning tools are read-only, so a
+      // whole batch normally runs concurrently. Results keep call order.
       const ctx: CodeToolContext = {
         workspaceDir,
         lsp: this.lsp,
@@ -477,22 +535,36 @@ ${directive ? `\n${directive}` : ''}`;
         maxDepth: this.maxDepth,
       };
 
-      for (const toolCall of response.toolCalls) {
+      const scheduled: ScheduledCall<string>[] = response.toolCalls.map((toolCall, index) => {
         const toolName = toolCall.function.name;
         const tool = READ_ONLY_TOOLS.find((t) => t.name === toolName);
-
-        let result: string;
-        if (!tool) {
-          result = `[Planning mode: tool "${toolName}" is not available — only read_file, glob, and grep may be used during planning]`;
-        } else {
-          try {
-            const args = JSON.parse(toolCall.function.arguments);
-            result = await tool.execute(args, ctx);
-          } catch (e) {
-            result = `Error: ${e instanceof Error ? e.message : String(e)}`;
-          }
+        let args: Record<string, unknown> | undefined;
+        try {
+          args = JSON.parse(toolCall.function.arguments);
+        } catch {
+          args = undefined;
         }
-        messages.push(formatToolResult(toolCall.id, toolName, result));
+        return {
+          index,
+          id: toolCall.id,
+          name: toolName,
+          access: tool && args ? this.accessFor(tool, args) : EXCLUSIVE,
+          run: async (signal: AbortSignal): Promise<string> => {
+            if (!tool) {
+              return `[Planning mode: tool "${toolName}" is not available — only read_file, glob, and grep may be used during planning]`;
+            }
+            try {
+              if (!args) JSON.parse(toolCall.function.arguments); // rethrow the parse error
+              return await tool.execute(args!, { ...ctx, signal });
+            } catch (e) {
+              return `Error: ${e instanceof Error ? e.message : String(e)}`;
+            }
+          },
+        };
+      });
+      const { outcomes } = await runToolBatch(scheduled, this.toolExecution);
+      for (const o of outcomes) {
+        messages.push(formatToolResult(o.call.id, o.call.name, o.result ?? `Error: ${String(o.error)}`));
       }
     }
 
@@ -504,6 +576,68 @@ ${directive ? `\n${directive}` : ''}`;
    * Runs the model → tools → model loop until no more tool calls or max iterations.
    */
   async chat(userMessage: string, onChunk?: (text: string) => void): Promise<AgentResponse> {
+    // Meter the whole turn (agent calls, compaction summaries, child agents
+    // sharing this orchestrator). Nested turns — e.g. a host's Deep Run turn
+    // wrapping this call — share the outer accumulator.
+    this.orchestrator.beginTurn();
+    let result: AgentResponse;
+    try {
+      result = await this.runTurn(userMessage, onChunk);
+    } finally {
+      this._lastTurnUsage = this.orchestrator.endTurn();
+    }
+    return { ...result, turnUsage: this._lastTurnUsage, contextTokens: this.getContextSize().tokens };
+  }
+
+  private _lastTurnUsage?: TurnUsage;
+  /** System prompt of the most recent turn (for context-size estimates). */
+  private _lastSystemPrompt = '';
+
+  /**
+   * Size of the context this agent carries into its next turn — system prompt
+   * plus the user/assistant history. Tool calls and results are not carried
+   * across turns, so this is the "context without tool calls".
+   */
+  getContextSize(): { tokens: number; messages: number } {
+    const msgs: Message[] = [
+      ...(this._lastSystemPrompt ? [{ role: 'system' as const, content: this._lastSystemPrompt }] : []),
+      ...this.history,
+    ];
+    return { tokens: msgs.length ? TokenTracker.estimateMessagesTokens(msgs) : 0, messages: this.history.length };
+  }
+
+  /**
+   * Compact the carried conversation now: older exchanges become one
+   * structured summary, the most recent ones stay verbatim. Returns
+   * before/after context sizes (estimated tokens).
+   */
+  async compact(opts: { keepMessages?: number } = {}): Promise<CompactionResult> {
+    const before = this.getContextSize();
+    this.orchestrator.beginTurn();
+    let usage: TurnUsage;
+    try {
+      await this.compactHistory(Math.max(2, opts.keepMessages ?? DEFAULT_KEEP_HISTORY_MESSAGES));
+    } finally {
+      usage = this.orchestrator.endTurn();
+    }
+    const after = this.getContextSize();
+    if (this.conversationManager && after.messages !== before.messages) {
+      await this.conversationManager.autoSave(
+        this.history, this.workspace.getWorkspaceDir(), this.orchestrator, 'code', turnTokenUsage(usage),
+        { mcpServers: this._mcpServerNames, maxIterations: this.maxIterations, harness: this._harness },
+      );
+    }
+    return { beforeTokens: before.tokens, afterTokens: after.tokens, beforeMessages: before.messages, afterMessages: after.messages, usage };
+  }
+
+  private async compactHistory(keepMessages: number, currentGoal?: string): Promise<void> {
+    this.history = await condenseHistory(this.history, this.orchestrator, keepMessages + 1, {
+      directive: this.workspace.getDirectivePrompt() || undefined,
+      currentGoal,
+    });
+  }
+
+  private async runTurn(userMessage: string, onChunk?: (text: string) => void): Promise<AgentResponse> {
     // Code mode has no persona concept, but `logger`'s persona context is a
     // process-wide singleton that Chat mode sets and never resets — an
     // embedding app running both modes in the same long-lived process (e.g.
@@ -519,7 +653,14 @@ ${directive ? `\n${directive}` : ''}`;
       ? this.tools.filter((t) => t.name.includes('__')).map((t) => t.name)
       : undefined;
     const outputTokenBudget = this.orchestrator.getReasoningModel().getDefaultMaxTokens();
-    const systemPrompt = _getSystemPromptBase(this.workspace.getWorkspaceDir(), directive || undefined, skillsBlock, mcpToolNames, outputTokenBudget);
+    const systemPrompt = this._lastSystemPrompt = _getSystemPromptBase(this.workspace.getWorkspaceDir(), directive || undefined, skillsBlock, mcpToolNames, outputTokenBudget);
+
+    // Cross-turn compaction: this.history (user messages + final answers) grows
+    // every turn and was never compacted — only the in-loop message array was.
+    if (this.compactionThreshold > 0 && this.getContextSize().tokens > this.compactionThreshold) {
+      logger.info(`[CodeAgent] Carried context over ${this.compactionThreshold} tokens — compacting history before this turn`);
+      await this.compactHistory(DEFAULT_KEEP_HISTORY_MESSAGES, userMessage);
+    }
 
     // Build message history: system + history + new user message
     const messages: Message[] = [
@@ -567,6 +708,10 @@ ${directive ? `\n${directive}` : ''}`;
 
     // Reset stop flag at the start of each chat() so the agent is immediately reusable
     this._stopped = false;
+    const turnAbort = new AbortController();
+    this._turnAbort = turnAbort;
+    const turnStart = Date.now();
+    const timing: TurnTiming = { totalMs: 0, llmMs: 0, toolMs: 0, toolBatches: 0, maxBatchSize: 0, maxCallsPerResponse: 0, parallelSavedMs: 0 };
 
     for (let i = 0; i < this.maxIterations; i++) {
       // Cooperative stop: set by stop() (Ctrl+C or HTTP stop endpoint)
@@ -627,12 +772,17 @@ ${directive ? `\n${directive}` : ''}`;
       let response;
       try {
         messages.splice(0, messages.length, ...ensureToolResultPairing(messages));
-        response = await this.orchestrator.chatWithFallback({
-          messages,
-          // Strip tools in the final phase so the model is forced to produce a text response
-          tools: isFinalPhase ? [] : toolDefs,
-          temperature: 0.2,
-        }, false);
+        const llmStart = Date.now();
+        try {
+          response = await this.orchestrator.chatWithFallback({
+            messages,
+            // Strip tools in the final phase so the model is forced to produce a text response
+            tools: isFinalPhase ? [] : toolDefs,
+            temperature: 0.2,
+          }, false);
+        } finally {
+          timing.llmMs += Date.now() - llmStart;
+        }
         consecutiveApiErrors = 0; // reset on success
         consecutiveToolCallErrors = 0; // reset on success
       } catch (error) {
@@ -887,6 +1037,8 @@ ${directive ? `\n${directive}` : ''}`;
           role: 'assistant',
           content: response.content || null,
           tool_calls: response.toolCalls,
+          // OpenRouter reasoning blocks must be echoed back unchanged for tool continuity
+          ...(response.reasoningDetails ? { reasoning_details: response.reasoningDetails } : {}),
         });
       } else {
         messages.push({ role: 'assistant', content: response.content });
@@ -918,8 +1070,7 @@ ${directive ? `\n${directive}` : ''}`;
       if (
         this.compactionThreshold > 0 &&
         promptTokens > this.compactionThreshold &&
-        !compactedThisIteration &&
-        this.conversationManager
+        !compactedThisIteration
       ) {
         logger.warn(
           `[CodeAgent] Context at ${promptTokens} tokens (threshold: ${this.compactionThreshold}) — compacting in-loop history`,
@@ -987,7 +1138,7 @@ ${directive ? `\n${directive}` : ''}`;
           //   2. Anything else — the model is genuinely stuck/confused; a nudge is the
           //      right tool.
           const isLengthStarved = response.finishReason === 'length';
-          if (isLengthStarved && !compactedThisIteration && this.conversationManager) {
+          if (isLengthStarved && !compactedThisIteration) {
             logger.warn(
               '[CodeAgent] Empty response with finishReason=length — model ran out of completion budget ' +
               'while thinking. Forcing context compaction instead of a text nudge.',
@@ -1039,21 +1190,29 @@ ${directive ? `\n${directive}` : ''}`;
         break;
       }
 
-      // Execute tool calls. Indexed, not for...of — the doom-loop and
-      // excessive-reads branches below need to know which tool calls in
-      // this batch (response.toolCalls can hold several, issued as one
-      // parallel group) still haven't been answered when they decide to
-      // bail out early, so every one of them can still get a stub tool
-      // result before we stop. Skipping that was a real bug: providers that
-      // validate parallel tool-calling strictly reject the *next* request
-      // outright with "incomplete parallel tool-call group: tool call 'X'
-      // has no tool response" the moment any tool_call_id from an assistant
-      // turn is missing its matching tool message — which silently broke
-      // every session that happened to hit a doom-loop or 15-consecutive-
-      // reads nudge in the middle of a multi-call batch, not just at the
-      // end of one.
-      for (let toolCallIndex = 0; toolCallIndex < response.toolCalls.length; toolCallIndex++) {
-        const toolCall = response.toolCalls[toolCallIndex];
+      // ── Execute this turn's tool calls ──────────────────────────────────
+      // Three phases (see src/core/tool-scheduler.ts):
+      //   1. Pre-pass, in call order: parse args, run the doom-loop window and
+      //      the consecutive-read counter, and decide a cutoff. Calls at or
+      //      after the cutoff are never executed — but every tool_call_id the
+      //      model issued still gets a tool-role response (a stub), or
+      //      providers that validate parallel tool-calling strictly reject the
+      //      next request ("incomplete parallel tool-call group").
+      //   2. Execute the surviving calls with the scheduler: independent calls
+      //      (reads, searches, edits to different files) run concurrently;
+      //      conflicting/exclusive ones run alone, never reordered.
+      //   3. Post-pass, in call order: push tool results, then stubs, then any
+      //      instruction for the model — user notes always come AFTER the last
+      //      tool result so the tool-call group stays contiguous.
+      const turnCalls = response.toolCalls;
+      timing.maxCallsPerResponse = Math.max(timing.maxCallsPerResponse, turnCalls.length);
+      const scheduled: ScheduledCall<string>[] = [];
+      let cutoff = turnCalls.length;
+      let cutoffStub = '';
+      let postBatchNote: string | null = null;
+
+      for (let toolCallIndex = 0; toolCallIndex < turnCalls.length; toolCallIndex++) {
+        const toolCall = turnCalls[toolCallIndex];
         const toolName = toolCall.function.name;
         let toolArgs: Record<string, unknown> = {};
         try {
@@ -1069,7 +1228,7 @@ ${directive ? `\n${directive}` : ''}`;
           consecutiveReadCount = 0;
         }
 
-        // Doom loop check
+        // Doom loop check — this call (and everything after it) is not executed.
         const callSig = `${toolName}:${JSON.stringify(toolArgs)}`;
         recentCalls.push(callSig);
         if (recentCalls.length > DOOM_LOOP_THRESHOLD) recentCalls.shift();
@@ -1079,95 +1238,68 @@ ${directive ? `\n${directive}` : ''}`;
           recentCalls.every((c) => c === recentCalls[0])
         ) {
           logger.warn(`[CodeAgent] Doom loop detected for tool: ${toolName}`);
-          // This call (and anything still queued after it in the same
-          // batch) never gets executed — but every tool_call_id the model
-          // issued still needs a tool-role response before the next
-          // non-tool message, or the request becomes malformed.
-          for (const skipped of response.toolCalls.slice(toolCallIndex)) {
-            messages.push(formatToolResult(skipped.id, skipped.function.name, 'Skipped — doom loop detected, see the instruction that follows.'));
-          }
-          messages.push({
-            role: 'user',
-            content: `STOP: You are calling \`${toolName}\` with the same arguments repeatedly. This action is not making progress. Stop and reassess your approach — try a different strategy or report what is blocking you.`,
-          });
+          cutoff = toolCallIndex;
+          cutoffStub = 'Skipped — doom loop detected, see the instruction that follows.';
+          postBatchNote = `STOP: You are calling \`${toolName}\` with the same arguments repeatedly. This action is not making progress. Stop and reassess your approach — try a different strategy or report what is blocking you.`;
           break;
         }
 
         logger.info(`[CodeAgent] Tool: ${toolName} ${formatToolCallArgs(toolArgs)}`);
         toolsUsed.push(toolName);
+        scheduled.push(this.scheduleToolCall(toolCallIndex, toolCall.id, toolName, toolArgs));
 
-        const tool = this.tools.find((t) => t.name === toolName);
-        let toolResult: string;
-
-        if (!tool) {
-          toolResult = `Error: Unknown tool "${toolName}". Available tools: ${this.tools.map((t) => t.name).join(', ')}`;
-        } else {
-          try {
-            const ctx: CodeToolContext = {
-              workspaceDir: this.workspace.getWorkspaceDir(),
-              lsp: this.lsp,
-              depth: this.depth,
-              maxDepth: this.maxDepth,
-              spawnChildAgent: this.depth < this.maxDepth
-                ? async (task, context) => {
-                    const child = new CodeAgent({
-                      orchestrator: this.orchestrator,
-                      workspace: this.workspace,
-                      maxIterations: this.maxIterations,
-                      lspEnabled: true,
-                      depth: this.depth + 1,
-                      maxDepth: this.maxDepth,
-                    });
-                    // Share the parent's LSP manager so servers don't restart
-                    child.lsp = this.lsp;
-                    const taskMsg = context ? `${task}\n\nContext: ${context}` : task;
-                    const result = await child.chat(taskMsg);
-                    return result.content;
-                  }
-                : undefined,
-            };
-            toolResult = await tool.execute(toolArgs, ctx);
-          } catch (e) {
-            toolResult = `Error executing ${toolName}: ${e instanceof Error ? e.message : String(e)}`;
-          }
+        // Excessive reads nudge — this call still runs, everything after it is
+        // skipped. Resets the count so the model gets a fresh budget.
+        if (consecutiveReadCount >= MAX_CONSECUTIVE_READS) {
+          logger.warn(`[CodeAgent] ${consecutiveReadCount} consecutive read_file calls without edits — nudging model to act`);
+          consecutiveReadCount = 0;
+          cutoff = toolCallIndex + 1;
+          cutoffStub = 'Skipped — see the instruction that follows.';
+          postBatchNote =
+            `You have called read_file ${MAX_CONSECUTIVE_READS}+ times in a row without making any changes.\n\n` +
+            `STOP READING — you have enough context. Make a concrete change NOW:\n` +
+            `  • To ADD or CHANGE content in an existing file → call edit_file with old_string and new_string\n` +
+            `  • To CREATE a new file → call write_file\n` +
+            `  • If the task is fully complete → provide a final summary (no more tool calls needed)\n\n` +
+            `Do NOT call read_file again until you have made at least one edit_file or write_file call.`;
+          break;
         }
+      }
 
-        // Add tool result to messages (using Harmony format helper)
-        const toolMessage = formatToolResult(toolCall.id, toolName, toolResult);
-        messages.push(toolMessage);
+      const batch = await runToolBatch(scheduled, {
+        parallel: this.toolExecution.parallel,
+        maxConcurrency: this.toolExecution.maxConcurrency,
+        signal: turnAbort.signal,
+      });
+      timing.toolMs += batch.stats.wallMs;
+      timing.parallelSavedMs += Math.max(0, batch.stats.serialMs - batch.stats.wallMs);
+      timing.toolBatches++;
+      timing.maxBatchSize = Math.max(timing.maxBatchSize, batch.stats.maxGroupSize);
+      if (batch.stats.maxGroupSize > 1) {
+        logger.debug(
+          `[CodeAgent] Ran ${scheduled.length} tool call(s) in ${batch.stats.groups} group(s): ` +
+            `${batch.stats.wallMs}ms wall vs ${batch.stats.serialMs}ms serial`,
+        );
+      }
+
+      for (const outcome of batch.outcomes) {
+        const toolResult = outcome.skipped
+          ? 'Skipped — the task was stopped before this call ran.'
+          : outcome.result ?? `Error executing ${outcome.call.name}: ${outcome.error instanceof Error ? outcome.error.message : String(outcome.error)}`;
+        messages.push(formatToolResult(outcome.call.id, outcome.call.name, toolResult));
 
         // Reset empty response budget after any productive (mutating) tool call.
         // This gives the model a fresh set of recovery nudges for each new work phase
         // (e.g., after writing the skeleton, it gets 4 more chances to add CSS/JS).
-        if (toolName === 'write_file' || toolName === 'edit_file' || toolName === 'bash') {
+        if (!outcome.skipped && (outcome.call.name === 'write_file' || outcome.call.name === 'edit_file' || outcome.call.name === 'bash')) {
           emptyResponseCount = 0;
         }
-
-        // Excessive reads nudge — model is re-reading without making any changes.
-        // Fires after MAX_CONSECUTIVE_READS consecutive read_file calls; resets the count
-        // so the model gets a fresh budget after each nudge (prevents spamming).
-        if (consecutiveReadCount >= MAX_CONSECUTIVE_READS) {
-          logger.warn(`[CodeAgent] ${consecutiveReadCount} consecutive read_file calls without edits — nudging model to act`);
-          consecutiveReadCount = 0;
-          // This tool call already got its real result above — but any
-          // calls still queued after it in the same batch won't run, and
-          // still need a stub tool response for the same reason as the
-          // doom-loop case above.
-          for (const skipped of response.toolCalls.slice(toolCallIndex + 1)) {
-            messages.push(formatToolResult(skipped.id, skipped.function.name, 'Skipped — see the instruction that follows.'));
-          }
-          messages.push({
-            role: 'user',
-            content:
-              `You have called read_file ${MAX_CONSECUTIVE_READS}+ times in a row without making any changes.\n\n` +
-              `STOP READING — you have enough context. Make a concrete change NOW:\n` +
-              `  • To ADD or CHANGE content in an existing file → call edit_file with old_string and new_string\n` +
-              `  • To CREATE a new file → call write_file\n` +
-              `  • If the task is fully complete → provide a final summary (no more tool calls needed)\n\n` +
-              `Do NOT call read_file again until you have made at least one edit_file or write_file call.`,
-          });
-          break; // exit inner tool loop — model sees the nudge on the next outer iteration
-        }
+      }
+      for (const skipped of turnCalls.slice(cutoff)) {
+        messages.push(formatToolResult(skipped.id, skipped.function.name, cutoffStub));
+      }
+      if (postBatchNote) {
+        messages.push({ role: 'user', content: postBatchNote });
       }
 
       } catch (unexpectedError) {
@@ -1199,7 +1331,7 @@ ${directive ? `\n${directive}` : ''}`;
         this.workspace.getWorkspaceDir(),
         this.orchestrator,
         'code',
-        this.orchestrator.getTokenUsage(),
+        turnTokenUsage(this.orchestrator.peekTurn()),
         {
           mcpServers: this._mcpServerNames,
           maxIterations: this.maxIterations,
@@ -1208,7 +1340,14 @@ ${directive ? `\n${directive}` : ''}`;
       );
     }
 
-    return { content: finalContent, toolsUsed, iterations, tokenUsage: this.orchestrator.getTokenUsage(), truncationEvents, stopReason };
+    timing.totalMs = Date.now() - turnStart;
+    logger.info(
+      `[CodeAgent] Turn timing: total ${timing.totalMs}ms, model ${timing.llmMs}ms, tools ${timing.toolMs}ms` +
+        (timing.parallelSavedMs > 0 ? ` (parallel saved ${timing.parallelSavedMs}ms, max ${timing.maxBatchSize} concurrent)` : ''),
+    );
+    if (this._turnAbort === turnAbort) this._turnAbort = undefined;
+
+    return { content: finalContent, toolsUsed, iterations, tokenUsage: this.orchestrator.getTokenUsage(), truncationEvents, stopReason, timing };
   }
 
   /**
@@ -1303,6 +1442,7 @@ Keep the summary concise but complete. Focus on what would help continue the wor
     let summaryContent: string;
     try {
       const summaryResponse = await this.orchestrator.chat({
+        purpose: 'auxiliary',
         messages: [{ role: 'user', content: compactionPrompt }],
         temperature: 0.1,
         maxTokens: 1500,
@@ -1390,9 +1530,75 @@ Keep the summary concise but complete. Focus on what would help continue the wor
     };
   }
 
-  /** Signal the agent to stop after the current iteration. */
+  /**
+   * Stop the current run: running commands are killed, queued tool calls are
+   * skipped, and the loop exits before the next model call.
+   */
   stop(): void {
     this._stopped = true;
+    this._turnAbort?.abort();
+  }
+
+  /** Classify a call for the scheduler. Unknown tools / failures ⇒ exclusive. */
+  private accessFor(tool: ICodeTool | undefined, args: Record<string, unknown>): ToolAccess {
+    if (!tool?.access) return EXCLUSIVE;
+    try {
+      return tool.access(args, { workspaceDir: this.workspace.getWorkspaceDir() });
+    } catch {
+      return EXCLUSIVE;
+    }
+  }
+
+  /** Build the scheduler entry for one tool call. run() never throws. */
+  private scheduleToolCall(
+    index: number,
+    id: string,
+    toolName: string,
+    toolArgs: Record<string, unknown>,
+    toolset: readonly ICodeTool[] = this.tools,
+  ): ScheduledCall<string> {
+    const tool = toolset.find((t) => t.name === toolName);
+    return {
+      index,
+      id,
+      name: toolName,
+      access: this.accessFor(tool, toolArgs),
+      run: async (signal: AbortSignal): Promise<string> => {
+        if (!tool) {
+          return `Error: Unknown tool "${toolName}". Available tools: ${toolset.map((t) => t.name).join(', ')}`;
+        }
+        try {
+          const ctx: CodeToolContext = {
+            workspaceDir: this.workspace.getWorkspaceDir(),
+            lsp: this.lsp,
+            signal,
+            depth: this.depth,
+            maxDepth: this.maxDepth,
+            spawnChildAgent: this.depth < this.maxDepth
+              ? async (task, context) => {
+                  const child = new CodeAgent({
+                    orchestrator: this.orchestrator,
+                    workspace: this.workspace,
+                    maxIterations: this.maxIterations,
+                    lspEnabled: true,
+                    depth: this.depth + 1,
+                    maxDepth: this.maxDepth,
+                    toolExecution: this.toolExecution,
+                  });
+                  // Share the parent's LSP manager so servers don't restart
+                  child.lsp = this.lsp;
+                  const taskMsg = context ? `${task}\n\nContext: ${context}` : task;
+                  const result = await child.chat(taskMsg);
+                  return result.content;
+                }
+              : undefined,
+          };
+          return await tool.execute(toolArgs, ctx);
+        } catch (e) {
+          return `Error executing ${toolName}: ${e instanceof Error ? e.message : String(e)}`;
+        }
+      },
+    };
   }
 
   resetConversation(): void {

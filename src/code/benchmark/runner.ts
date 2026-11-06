@@ -95,7 +95,7 @@ export class BenchmarkRunner {
         protectedFiles[p] = task.scaffold[p] ?? '';
       }
 
-      const result = await this.runTask(task, workspaceDir, maxIterations, timeoutMs, protectedFiles, !!options.lspEnabled);
+      const result = await this.runTask(task, workspaceDir, maxIterations, timeoutMs, protectedFiles, !!options.lspEnabled, options.parallelTools);
       results.push(result);
       progress.onTaskDone?.(result, i, tasks.length);
 
@@ -121,12 +121,14 @@ export class BenchmarkRunner {
     timeoutMs: number,
     protectedFiles: Record<string, string>,
     lspEnabled: boolean,
+    parallelTools?: boolean,
   ): Promise<TaskResult> {
     const agent = await buildBenchmarkAgent({
       orchestrator: this.orchestrator,
       workspaceDir,
       maxIterations,
       lspEnabled,
+      parallelTools,
     });
 
     const base = {
@@ -143,6 +145,7 @@ export class BenchmarkRunner {
     let timedOut = false;
     let agentError: string | undefined;
     let truncationEvents = 0;
+    let timing: TaskResult['timing'];
 
     try {
       const chatPromise = agent.chat(task.prompt);
@@ -155,6 +158,7 @@ export class BenchmarkRunner {
         iterations = raced.r.iterations;
         toolsUsed = raced.r.toolsUsed;
         truncationEvents = raced.r.truncationEvents ?? 0;
+        timing = raced.r.timing;
       } else {
         timedOut = true;
         agent.stop();
@@ -204,6 +208,7 @@ export class BenchmarkRunner {
       toolsUsed,
       tokenUsage,
       wallTimeMs,
+      timing,
       testsPassed: verify.testsPassed,
       testsFailed: verify.testsFailed,
       failingTests: verify.failingTests,
@@ -226,6 +231,9 @@ export class BenchmarkRunner {
     const totalTokens = results.reduce((s, r) => s + (r.tokenUsage?.totalTokens ?? 0), 0);
     const totalTestsPassed = results.reduce((s, r) => s + r.testsPassed, 0);
     const totalTestsRun = results.reduce((s, r) => s + r.testsPassed + r.testsFailed, 0);
+    const totalLlmMs = results.reduce((s, r) => s + (r.timing?.llmMs ?? 0), 0);
+    const totalToolMs = results.reduce((s, r) => s + (r.timing?.toolMs ?? 0), 0);
+    const totalParallelSavedMs = results.reduce((s, r) => s + (r.timing?.parallelSavedMs ?? 0), 0);
     const scorePct = totalTestsRun > 0 ? Math.round((totalTestsPassed / totalTestsRun) * 100) : 0;
 
     return {
@@ -243,6 +251,10 @@ export class BenchmarkRunner {
       totalTestsRun,
       scorePct,
       totalWallTimeMs,
+      totalLlmMs,
+      totalToolMs,
+      totalParallelSavedMs,
+      parallelTools: options.parallelTools ?? true,
       totalTokens: totalTokens || undefined,
       tasks: results,
     };

@@ -22,6 +22,9 @@ import { StorageProvider } from '../../storage/provider.js';
 import { logger } from '../../utils/logger.js';
 import { OrchestrationLogger } from '../../utils/orchestration-logger.js';
 import { createModelClient } from '../../models/model-client.js';
+import { modelClientConfigFromStored } from '../../models/client-config.js';
+import { parseSlugList, OPENROUTER_ENDPOINT, type OpenRouterConfig } from '../../models/openrouter.js';
+import { resolveToolExecutionSettings } from '../../core/tool-scheduler.js';
 import { Message } from '../../models/base.js';
 import { PersonaManager } from '../../personas/persona-manager.js';
 import { getDefaultFilesystemAllowedPath } from '../../utils/platform.js';
@@ -56,6 +59,15 @@ interface ActiveSession {
   orchestrationLogger: OrchestrationLogger;
   info: SessionInfo;
   idleTimer?: NodeJS.Timeout;
+}
+
+/** Parse a boolean env var ("true"/"false"/"1"/"0"); undefined when unset or unrecognised. */
+function parseBoolEnv(value: string | undefined): boolean | undefined {
+  if (value === undefined) return undefined;
+  const v = value.trim().toLowerCase();
+  if (['true', '1', 'yes'].includes(v)) return true;
+  if (['false', '0', 'no'].includes(v)) return false;
+  return undefined;
 }
 
 export class SessionManager extends EventEmitter {
@@ -189,6 +201,8 @@ export class SessionManager extends EventEmitter {
           useGoogleADC?: boolean;
           reasoningEffortStrategy?: 'api_param' | 'system_prompt' | 'both';
           defaultMaxTokens?: number;
+          headers?: Record<string, string>;
+          openrouter?: OpenRouterConfig;
         };
         multimodal: null;
       }>('models');
@@ -206,11 +220,24 @@ export class SessionManager extends EventEmitter {
           reasoning: {
             provider: process.env.JIVA_MODEL_PROVIDER || 'sarvam',
             apiKey: envApiKey || '',
-            endpoint: envEndpoint || 'https://api.sarvam.ai/v1/chat/completions',
+            endpoint:
+              envEndpoint ||
+              (process.env.JIVA_MODEL_PROVIDER === 'openrouter'
+                ? OPENROUTER_ENDPOINT
+                : 'https://api.sarvam.ai/v1/chat/completions'),
             model: envModel || 'sarvam-105b',
             useHarmonyFormat: false,
             reasoningEffortStrategy: 'api_param' as const,
             defaultMaxTokens: 4096,
+            // OpenRouter routing from env (ignored for other endpoints)
+            ...(process.env.JIVA_MODEL_PROVIDER_ORDER || process.env.JIVA_MODEL_ALLOW_FALLBACKS
+              ? {
+                  openrouter: {
+                    providerOrder: parseSlugList(process.env.JIVA_MODEL_PROVIDER_ORDER),
+                    allowFallbacks: parseBoolEnv(process.env.JIVA_MODEL_ALLOW_FALLBACKS),
+                  },
+                }
+              : {}),
           },
           multimodal: null,
         };
@@ -225,19 +252,30 @@ export class SessionManager extends EventEmitter {
       // for this session only — the endpoint/apiKey/strategy still come from the
       // tenant's stored config (secrets are never part of agentConfig).
       const reasoningModelName = agentConfig?.model ?? rm.model ?? rm.defaultModel;
-      const reasoningModel = createModelClient({
-        endpoint: rm.endpoint,
-        apiKey: rm.apiKey || '',
-        model: reasoningModelName,
-        type: 'reasoning',
-        useHarmonyFormat: rm.useHarmonyFormat ?? false,
-        useGoogleADC: rm.useGoogleADC ?? false,
-        hasVision: rm.hasVision ?? false,
-        reasoningEffortStrategy: rm.reasoningEffortStrategy,
-        defaultReasoningEffort: 'high',
-        defaultMaxTokens: rm.defaultMaxTokens,
-        maxRequestsPerMinute: rm.maxRequestsPerMinute,
-      });
+      // Per-session OpenRouter overrides (agentConfig) layered over stored routing.
+      const reasoningOpenRouter: OpenRouterConfig | undefined =
+        agentConfig?.providerOrder !== undefined || agentConfig?.allowFallbacks !== undefined
+          ? {
+              ...(rm.openrouter ?? {}),
+              ...(agentConfig?.providerOrder !== undefined
+                ? { providerOrder: agentConfig.providerOrder }
+                : {}),
+              ...(agentConfig?.allowFallbacks !== undefined
+                ? { allowFallbacks: agentConfig.allowFallbacks }
+                : {}),
+            }
+          : rm.openrouter;
+      const reasoningModel = createModelClient(
+        modelClientConfigFromStored(rm, 'reasoning', {
+          model: reasoningModelName,
+          apiKey: rm.apiKey || '',
+          useHarmonyFormat: rm.useHarmonyFormat ?? false,
+          useGoogleADC: rm.useGoogleADC ?? false,
+          hasVision: rm.hasVision ?? false,
+          defaultReasoningEffort: 'high',
+          openrouter: reasoningOpenRouter,
+        }),
+      );
 
       // Tool-calling model: when configured, serves as the PRIMARY model for tool-call
       // execution (reliable standard-JSON tool formatting). The reasoning model acts as
@@ -262,6 +300,16 @@ export class SessionManager extends EventEmitter {
             // IS reasoning-capable can still opt in explicitly via its config.
             defaultReasoningEffort: undefined,
             reasoningEffortStrategy: undefined,
+            // OpenRouter routing for the tool-calling model (env; ignored elsewhere)
+            ...(process.env.JIVA_TOOL_CALLING_MODEL_PROVIDER_ORDER ||
+            process.env.JIVA_TOOL_CALLING_MODEL_ALLOW_FALLBACKS
+              ? {
+                  openrouter: {
+                    providerOrder: parseSlugList(process.env.JIVA_TOOL_CALLING_MODEL_PROVIDER_ORDER),
+                    allowFallbacks: parseBoolEnv(process.env.JIVA_TOOL_CALLING_MODEL_ALLOW_FALLBACKS),
+                  },
+                }
+              : {}),
           })
         : undefined;
 
@@ -334,8 +382,12 @@ export class SessionManager extends EventEmitter {
         }
       }
 
-      // Initialize all MCP servers (base + configured)
-      await mcpManager.initialize(baseMcpServers);
+      // Initialize all MCP servers (base + configured). Code-mode sessions
+      // never receive the MCP manager (CodeAgent uses in-process tools), so
+      // skip the per-session `npx` server startups entirely there.
+      if (!codeModeEnabled) {
+        await mcpManager.initialize(baseMcpServers);
+      }
 
       // Initialize workspace
       // When agentConfig.workspaceDir is supplied, build WorkspaceManager in
@@ -349,8 +401,10 @@ export class SessionManager extends EventEmitter {
         : new WorkspaceManager(storageProvider);
       await workspace.initialize();
 
-      // Initialize conversation manager
-      const conversationManager = new ConversationManager(storageProvider);
+      // Initialize conversation manager with sessionId as default conversation ID
+      // This ensures conversations are saved with the session ID, allowing them to be
+      // loaded correctly when the session is restored
+      const conversationManager = new ConversationManager(storageProvider, undefined, sessionId);
 
       // Initialize persona manager with per-tenant storage provider
       // This ensures persona config is isolated per tenant, not shared globally.
@@ -363,18 +417,20 @@ export class SessionManager extends EventEmitter {
       await personaManager.initialize();
 
       // Merge persona MCP servers with session MCP servers
+      // (chat mode only; added concurrently — they're independent processes)
       const personaMCPServers = personaManager.getPersonaMCPServers();
-      if (Object.keys(personaMCPServers).length > 0) {
+      if (!codeModeEnabled && Object.keys(personaMCPServers).length > 0) {
         logger.info(`[SessionManager] Adding ${Object.keys(personaMCPServers).length} MCP servers from active persona`);
-        
-        for (const [name, config] of Object.entries(personaMCPServers)) {
-          try {
-            await mcpManager.addServer(name, config as any);
-            logger.success(`[SessionManager] Added persona MCP server: ${name}`);
-          } catch (error) {
-            logger.warn(`[SessionManager] Failed to add persona MCP server '${name}': ${error instanceof Error ? error.message : String(error)}`);
-          }
-        }
+        await Promise.allSettled(
+          Object.entries(personaMCPServers).map(async ([name, config]) => {
+            try {
+              await mcpManager.addServer(name, config as any);
+              logger.success(`[SessionManager] Added persona MCP server: ${name}`);
+            } catch (error) {
+              logger.warn(`[SessionManager] Failed to add persona MCP server '${name}': ${error instanceof Error ? error.message : String(error)}`);
+            }
+          }),
+        );
       }
 
       // Load or create conversation
@@ -389,6 +445,13 @@ export class SessionManager extends EventEmitter {
 
       // Create agent — CodeAgent for code mode, DualAgent for general mode
       let agent: IAgent;
+      // Per-session parallel tool execution override (env JIVA_PARALLEL_TOOLS /
+      // JIVA_MAX_TOOL_CONCURRENCY are applied inside the agents).
+      const sessionToolExecution =
+        agentConfig?.parallelTools !== undefined
+          ? { ...resolveToolExecutionSettings(), parallel: agentConfig.parallelTools, resolved: true }
+          : undefined;
+
       if (codeModeEnabled) {
         const { CodeAgent } = await import('../../code/agent.js');
         // agentConfig.codeLsp overrides JIVA_CODE_LSP for this session only.
@@ -408,6 +471,7 @@ export class SessionManager extends EventEmitter {
           maxIterations,
           lspEnabled,
           compactionThreshold: envCompactionThreshold ? Number(envCompactionThreshold) : undefined,
+          toolExecution: sessionToolExecution,
         });
         logger.info('[SessionManager] Using CodeAgent (code mode)');
       } else {
@@ -423,6 +487,9 @@ export class SessionManager extends EventEmitter {
           maxIterations,
           autoSave: true,
           orchestrationLogger: orchLogger,
+          // Chat-mode compaction (code mode reads JIVA_CODE_COMPACTION_THRESHOLD)
+          ...(process.env.JIVA_COMPACTION_THRESHOLD ? { compactionThreshold: Number(process.env.JIVA_COMPACTION_THRESHOLD) } : {}),
+          toolExecution: sessionToolExecution,
         });
       }
 
@@ -474,16 +541,25 @@ export class SessionManager extends EventEmitter {
       // Persist conversation state
       const conversationHistory = session.agent.getConversationHistory();
       if (conversationHistory.length > 0) {
+        // The agents' autoSave already accumulates per-turn token/cost totals
+        // (and the title) on the stored conversation — keep that metadata and
+        // only refresh messages. Lifetime counters are used only when nothing
+        // was saved yet (overwriting them with this session's lifetime totals
+        // would drop everything from before a restore).
+        const existing = await storageProvider.loadConversation(sessionId).catch(() => null);
         const tokenUsage = session.agent.getTokenUsage();
         await storageProvider.saveConversation({
           metadata: {
+            ...(existing?.metadata ?? {
+              totalPromptTokens: tokenUsage.promptTokens,
+              totalCompletionTokens: tokenUsage.completionTokens,
+              totalTokens: tokenUsage.totalTokens,
+              ...(tokenUsage.totalCostUsd ? { totalCostUsd: tokenUsage.totalCostUsd } : {}),
+            }),
             id: sessionId,
-            created: session.info.createdAt.toISOString(),
+            created: existing?.metadata?.created ?? session.info.createdAt.toISOString(),
             updated: new Date().toISOString(),
             messageCount: conversationHistory.length,
-            totalPromptTokens: tokenUsage.promptTokens,
-            totalCompletionTokens: tokenUsage.completionTokens,
-            totalTokens: tokenUsage.totalTokens,
           },
           messages: conversationHistory,
         });

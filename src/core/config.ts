@@ -5,6 +5,7 @@ import os from 'os';
 import path from 'path';
 import { ConfigurationError } from '../utils/errors.js';
 import { getDefaultFilesystemAllowedPath } from '../utils/platform.js';
+import { OpenRouterConfigSchema } from '../models/openrouter.js';
 
 /**
  * Jiva's per-user data directory. Conversations and logs already live here
@@ -109,6 +110,12 @@ const ModelConfigSchema = z.object({
    * dedicated `multimodal` model configured for image captioning.
    */
   hasVision: z.boolean().optional(),
+  /**
+   * Request completions as a stream. For providers that send no response
+   * headers until a completion is finished (a long one then outlasts Node's
+   * 5-minute headers timeout and fails with "fetch failed").
+   */
+  stream: z.boolean().optional(),
   /** How to send reasoning effort: 'api_param' | 'system_prompt' | 'both' */
   reasoningEffortStrategy: z.enum(['api_param', 'system_prompt', 'both']).optional(),
   /** Default max tokens — required for reasoning models like Sarvam-105B */
@@ -126,6 +133,33 @@ const ModelConfigSchema = z.object({
    * locally falls back to google-auth-library / `gcloud auth application-default`.
    */
   useGoogleADC: z.boolean().optional(),
+  /** Default reasoning effort sent with every call made through this model. */
+  defaultReasoningEffort: z.enum(['low', 'medium', 'high']).optional(),
+  /** Ask the provider to return reasoning tokens (logged at debug level). */
+  includeReasoning: z.boolean().optional(),
+  /**
+   * Extra HTTP headers sent with every request to this model's endpoint
+   * (e.g. gateway/tenant headers). Never overrides Authorization/Content-Type.
+   */
+  headers: z.record(z.string()).optional(),
+  /**
+   * OpenRouter routing policy for this model role — ranked provider slugs,
+   * fallbacks, privacy and price constraints. Only used (and only sent) when
+   * the endpoint is OpenRouter. See src/models/openrouter.ts.
+   */
+  openrouter: OpenRouterConfigSchema.optional(),
+  /**
+   * Price of this model in USD per million tokens. Used only when the
+   * provider neither reports a call's cost nor lists a price for the model
+   * on its /models endpoint (see src/models/pricing.ts).
+   */
+  pricing: z
+    .object({
+      promptPerM: z.number().min(0),
+      completionPerM: z.number().min(0),
+      cachedPromptPerM: z.number().min(0).optional(),
+    })
+    .optional(),
 });
 
 const CodeModeConfigSchema = z.object({
@@ -145,6 +179,28 @@ const CodeModeConfigSchema = z.object({
   compactionThreshold: z.number().optional(),
 });
 
+/**
+ * How tool calls from one model turn are executed. Independent calls (reads,
+ * searches, edits to different files, read-only MCP tools) run concurrently;
+ * conflicting ones run alone in order. See src/core/tool-scheduler.ts.
+ * Env JIVA_PARALLEL_TOOLS / JIVA_MAX_TOOL_CONCURRENCY override.
+ */
+const ToolExecutionConfigSchema = z.object({
+  parallel: z.boolean().optional(),
+  maxConcurrency: z.number().int().min(1).optional(),
+});
+
+/**
+ * Chat-mode (DualAgent) conversation compaction. Code mode uses
+ * codeMode.compactionThreshold (falls back to compaction.threshold).
+ */
+const CompactionConfigSchema = z.object({
+  /** Estimated carried-context tokens above which the conversation is condensed. */
+  threshold: z.number().int().min(0).optional(),
+  /** Message count above which the conversation is condensed. */
+  maxMessages: z.number().int().min(4).optional(),
+});
+
 const JivaConfigSchema = z.object({
   models: z.object({
     reasoning: ModelConfigSchema.optional(),
@@ -158,12 +214,15 @@ const JivaConfigSchema = z.object({
   activePersona: z.string().optional(),
   debug: z.boolean().default(false),
   codeMode: CodeModeConfigSchema.optional(),
+  toolExecution: ToolExecutionConfigSchema.optional(),
+  compaction: CompactionConfigSchema.optional(),
 });
 
 export type MCPServerConfig = z.infer<typeof MCPServerConfigSchema>;
 export type ModelConfig = z.infer<typeof ModelConfigSchema>;
 export type CodeModeConfig = z.infer<typeof CodeModeConfigSchema>;
 export type JivaConfig = z.infer<typeof JivaConfigSchema>;
+export type ToolExecutionConfig = z.infer<typeof ToolExecutionConfigSchema>;
 
 export class ConfigManager {
   private store: Conf<JivaConfig>;
@@ -280,6 +339,14 @@ export class ConfigManager {
 
   getCodeMode(): CodeModeConfig | undefined {
     return this.store.get('codeMode');
+  }
+
+  getCompaction(): { threshold?: number; maxMessages?: number } | undefined {
+    return this.store.get('compaction');
+  }
+
+  getToolExecution(): ToolExecutionConfig | undefined {
+    return this.store.get('toolExecution');
   }
 
   setCodeModeEnabled(enabled: boolean) {

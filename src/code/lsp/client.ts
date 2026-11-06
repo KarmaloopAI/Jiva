@@ -187,18 +187,19 @@ export async function createLspClient(input: {
         listeners.push(onDiag);
         diagnosticsListeners.set(absPath, listeners);
 
+        // Timeout — resolve silently
+        const timeoutTimer = setTimeout(() => {
+          cleanup?.();
+          resolve();
+        }, WAIT_FOR_DIAGNOSTICS_TIMEOUT);
+
         cleanup = () => {
           const current = diagnosticsListeners.get(absPath) ?? [];
           const idx = current.indexOf(onDiag);
           if (idx !== -1) current.splice(idx, 1);
           if (debounceTimer) clearTimeout(debounceTimer);
+          clearTimeout(timeoutTimer);
         };
-
-        // Timeout — resolve silently
-        setTimeout(() => {
-          cleanup?.();
-          resolve();
-        }, WAIT_FOR_DIAGNOSTICS_TIMEOUT);
       });
     },
 
