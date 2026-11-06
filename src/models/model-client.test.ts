@@ -155,6 +155,65 @@ test('chat(): streamed response captures served-by, reasoning_details and mid-st
   );
 });
 
+// A provider that only sends response headers once a completion is finished (Synthetic) makes a long
+// non-streaming call outlast Node's 5-minute headers timeout ("fetch failed"). `stream: true` in the
+// model config makes every call a stream instead, with no failed attempt needed first.
+test('stream config: every request is a stream, without the call asking for it', async () => {
+  const other = (over: Partial<ModelClientConfig> = {}) =>
+    client({ endpoint: 'https://api.example.test/v1/chat/completions', ...over });
+
+  const off = other().buildRequestBody({ messages: [{ role: 'user', content: 'x' }] }, true);
+  assert.equal(off.useStream, false);
+  assert.equal(off.requestBody.stream, undefined);
+
+  const on = other({ stream: true }).buildRequestBody({ messages: [{ role: 'user', content: 'x' }] }, true);
+  assert.equal(on.useStream, true);
+  assert.equal(on.requestBody.stream, true);
+  assert.deepEqual(on.requestBody.stream_options, { include_usage: true });
+
+  const explicitOff = other({ stream: false }).buildRequestBody({ messages: [{ role: 'user', content: 'x' }] }, true);
+  assert.equal(explicitOff.useStream, false);
+});
+
+test('stream config: a Synthetic-style stream is reassembled (split tool calls, null deltas, top-level reasoning_tokens)', async () => {
+  const sse = (events: object[]) =>
+    new Response(events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join('') + 'data: [DONE]\n\n', { status: 200 });
+  const chunk = (delta: object, extra: object = {}) => ({
+    model: 'zai-org/GLM-5.3-Flash',
+    choices: [{ index: 0, delta: { role: null, content: null, reasoning: null, ...delta }, finish_reason: null }],
+    ...extra,
+  });
+  const calls = stubFetch(() =>
+    sse([
+      chunk({ role: 'assistant', content: '' }),
+      chunk({ tool_calls: [{ id: 'call_1', index: 0, type: 'function', function: { name: 'read_file', arguments: '' } }] }),
+      chunk({ tool_calls: [{ id: null, index: 0, type: 'function', function: { name: null, arguments: '{"path": "a' } }] }),
+      chunk({ tool_calls: [{ id: null, index: 0, type: 'function', function: { name: null, arguments: '.txt"}' } }] }),
+      chunk({ tool_calls: [{ id: 'call_2', index: 1, type: 'function', function: { name: 'read_file', arguments: '{"path": "b.txt"}' } }] }),
+      { choices: [{ index: 0, delta: { reasoning: null }, finish_reason: 'tool_calls' }] },
+      { choices: [], usage: { prompt_tokens: 174, total_tokens: 198, completion_tokens: 24, reasoning_tokens: 1 } },
+    ]),
+  );
+
+  const res = await client({ endpoint: 'https://api.example.test/v1/chat/completions', stream: true }).chat({
+    messages: [{ role: 'user', content: 'read a.txt and b.txt' }],
+    tools: [tool],
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].body.stream, true);
+  assert.equal((calls[0].init.headers as Record<string, string>).Accept, 'text/event-stream');
+  assert.deepEqual(
+    res.toolCalls?.map((t) => [t.id, t.function.name, JSON.parse(t.function.arguments)]),
+    [
+      ['call_1', 'read_file', { path: 'a.txt' }],
+      ['call_2', 'read_file', { path: 'b.txt' }],
+    ],
+  );
+  assert.equal(res.finishReason, 'tool_calls');
+  assert.equal(res.usage?.totalTokens, 198);
+});
+
 test('parseUsage maps OpenRouter detail fields', () => {
   assert.deepEqual(
     parseUsage({
@@ -187,4 +246,6 @@ test('modelClientConfigFromStored carries routing/headers and respects roles', (
   const m = modelClientConfigFromStored(stored, 'multimodal');
   assert.deepEqual(m.openrouter, { providerOrder: ['x'] });
   assert.equal(m.defaultMaxTokens, undefined);
+  assert.equal(r.stream, undefined);
+  assert.equal(modelClientConfigFromStored({ ...stored, stream: true }, 'reasoning').stream, true);
 });

@@ -26,6 +26,7 @@ export function modelClientConfigFromStored(
     type: role,
     useGoogleADC: cfg.useGoogleADC,
     hasVision: cfg.hasVision,
+    stream: cfg.stream,
     maxRequestsPerMinute: cfg.maxRequestsPerMinute,
     headers: cfg.headers,
     openrouter: cfg.openrouter,

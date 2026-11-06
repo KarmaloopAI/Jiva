@@ -110,6 +110,12 @@ const ModelConfigSchema = z.object({
    * dedicated `multimodal` model configured for image captioning.
    */
   hasVision: z.boolean().optional(),
+  /**
+   * Request completions as a stream. For providers that send no response
+   * headers until a completion is finished (a long one then outlasts Node's
+   * 5-minute headers timeout and fails with "fetch failed").
+   */
+  stream: z.boolean().optional(),
   /** How to send reasoning effort: 'api_param' | 'system_prompt' | 'both' */
   reasoningEffortStrategy: z.enum(['api_param', 'system_prompt', 'both']).optional(),
   /** Default max tokens — required for reasoning models like Sarvam-105B */

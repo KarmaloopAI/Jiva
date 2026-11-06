@@ -131,6 +131,20 @@ export interface ModelClientConfig {
    */
   hasVision?: boolean;
 
+  /**
+   * Request every completion as a server-sent-events stream, even without the
+   * tools that need it. Set this for providers that send no HTTP response
+   * headers until the whole completion has been generated: a non-streaming
+   * call to those looks dead for as long as the model takes, and Node's
+   * `fetch` gives up after 5 minutes without headers ("fetch failed"), so a
+   * long generation fails however healthy the provider is. A stream starts
+   * sending immediately and stays alive chunk by chunk. The response is
+   * reassembled into the same shape either way.
+   * Default: unset (non-streaming; flipped on automatically if the provider
+   * answers "streaming_required").
+   */
+  stream?: boolean;
+
   /** Extra HTTP headers for every request (never overrides Authorization/Content-Type). */
   headers?: Record<string, string>;
 
@@ -651,7 +665,7 @@ export class ModelClient implements IModel {
     // error is seen (see chat()); a caller may also force it per-call via
     // `options.stream`. When streaming, the response is consumed as SSE and
     // reassembled below into the same shape as a non-streaming response.
-    const useStream = this._streamingRequired || options.stream === true;
+    const useStream = this.config.stream === true || this._streamingRequired || options.stream === true;
     if (useStream) {
       requestBody.stream = true;
       // Together AI (and OpenAI) emit a final chunk carrying the total usage
